@@ -1,0 +1,702 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pure layout conversion of BeamV0.mlapp's startup screen - the state
+  visible immediately after launch, before any user click: the default-
+  selected "Sonicate" tab, plus every control parented directly to
+  app.UIFigure (the 3 MRI axes, their sliders/step-buttons/mm labels,
+  the CRF fields, the overlay checkboxes, System Status, Brightness
+  up/down - all visible on every tab, not just this one).
+
+  Source: BeamV0/GUIMatlab/BEAM/GUI/BeamV0.mlapp, matlab/document.xml's
+  createComponents method. Every geometry below is a direct, mechanical
+  conversion of that file's own app.<Name>.Position = [x y w h]:
+    - MATLAB's uifigure coordinate origin is bottom-left, Y increasing
+      upward; Qt's is top-left, Y increasing downward. Every position
+      here is qt_y = parent_content_height - matlab_y - height, done by
+      hand against each real parent's own height (789 for app.UIFigure
+      itself; a uitab's own content height is its uitabgroup's height
+      minus that group's tab-strip, ~22px, since App Designer doesn't
+      store the strip height as its own property).
+    - No ValueChangedFcn/ButtonPushedFcn/etc. carried over - this file
+      is layout only, deliberately, so it can be reviewed as a design
+      before any logic is wired to it.
+    - uiaxes (the 3 MRI views, the Register/Sonicate tab's own plot
+      axes) have no Qt Designer equivalent - stood in here as a plain
+      framed QLabel showing just the axes' own title text, matching
+      their real Position exactly. The real charts (QtCharts, this
+      port's own MriSliceView, etc.) replace these placeholders later;
+      this file only fixes where the *box* goes.
+    - uilamp (ConnectedLamp) has no Designer equivalent either - stood
+      in as a small circular QLabel via styleSheet border-radius.
+    - Several controls are genuinely hidden at real startup
+      (Visible='off' in the source, before any click makes them
+      relevant): TriggerSwitch/its label, the Overlay Transparency
+      slider/label, Overlay Brain Volume button, Show Overlay Brain
+      checkbox. Included here (matching their real, mostly off-figure
+      Position) but with visible="false", not omitted - this screen is
+      what's *there*, not just what's drawn.
+    - Object names match the source's own app.<Name> exactly, so wiring
+      this up later can find each one by the same name already used
+      throughout the rest of this port.
+-->
+<ui version="4.0">
+ <class>BeamStartupScreen</class>
+ <widget class="QMainWindow" name="BeamStartupScreen">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>1260</width><height>935</height></rect>
+  </property>
+  <property name="windowTitle">
+   <string>BEAM</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <property name="styleSheet">
+    <string notr="true">background-color: rgb(255, 255, 255);</string>
+   </property>
+
+   <!-- ============ CRF fields: Site ID/Participant ID/Visit Number, one
+        row spanning the very top of the screen, above the 3 MRI axes
+        below (not BeamV0.mlapp's own real Positions, which split these
+        3 across two different places instead - user request: "I want
+        it to put on very top of the app before the images. In one
+        row."). The MRI axes below start lower (y=32, not y=2) to make
+        room for this row. ============ -->
+   <widget class="QLabel" name="SiteIDEditFieldLabel">
+    <property name="geometry"><rect><x>10</x><y>3</y><width>52</width><height>22</height></rect></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>Site ID:</string></property>
+    <property name="styleSheet"><string notr="true">color: rgb(230, 230, 230); background: transparent;</string></property>
+   </widget>
+   <widget class="QLineEdit" name="SiteIDEditField">
+    <property name="geometry"><rect><x>66</x><y>3</y><width>60</width><height>22</height></rect></property>
+    <property name="text"><string>UTAH</string></property>
+    <property name="styleSheet"><string notr="true">color: rgb(230, 230, 230); background-color: rgb(60, 63, 65); border: 1px solid rgb(100, 100, 104);</string></property>
+   </widget>
+
+   <widget class="QLabel" name="ParticipantIDLabel">
+    <property name="geometry"><rect><x>160</x><y>3</y><width>95</width><height>22</height></rect></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>Participant ID:</string></property>
+    <property name="styleSheet"><string notr="true">color: rgb(230, 230, 230); background: transparent;</string></property>
+   </widget>
+   <widget class="QLineEdit" name="ParticipantIDEditField">
+    <property name="geometry"><rect><x>259</x><y>3</y><width>60</width><height>22</height></rect></property>
+    <property name="text"><string>C001</string></property>
+    <property name="styleSheet"><string notr="true">color: rgb(230, 230, 230); background-color: rgb(60, 63, 65); border: 1px solid rgb(100, 100, 104);</string></property>
+   </widget>
+
+   <widget class="QLabel" name="VisitNumberEditFieldLabel">
+    <property name="geometry"><rect><x>353</x><y>3</y><width>88</width><height>22</height></rect></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>Visit Number:</string></property>
+    <property name="styleSheet"><string notr="true">color: rgb(230, 230, 230); background: transparent;</string></property>
+   </widget>
+   <widget class="QLineEdit" name="VisitNumberEditField">
+    <property name="geometry"><rect><x>445</x><y>3</y><width>50</width><height>22</height></rect></property>
+    <property name="text"><string>1</string></property>
+    <property name="styleSheet"><string notr="true">color: rgb(230, 230, 230); background-color: rgb(60, 63, 65); border: 1px solid rgb(100, 100, 104);</string></property>
+   </widget>
+
+   <!-- ============ The 3 MRI axes (app.axSag/axCor/axAxial) ============ -->
+   <widget class="QLabel" name="axSag">
+    <property name="geometry"><rect><x>2</x><y>32</y><width>417</width><height>354</height></rect></property>
+    <property name="frameShape"><enum>QFrame::Box</enum></property>
+    <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignTop</set></property>
+    <property name="text"><string>Sagital</string></property>
+   </widget>
+   <widget class="QLabel" name="axCor">
+    <property name="geometry"><rect><x>421</x><y>32</y><width>417</width><height>354</height></rect></property>
+    <property name="frameShape"><enum>QFrame::Box</enum></property>
+    <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignTop</set></property>
+    <property name="text"><string>Coronal</string></property>
+   </widget>
+   <widget class="QLabel" name="axAxial">
+    <property name="geometry"><rect><x>840</x><y>32</y><width>418</width><height>354</height></rect></property>
+    <property name="frameShape"><enum>QFrame::Box</enum></property>
+    <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignTop</set></property>
+    <property name="text"><string>Axial</string></property>
+   </widget>
+
+   <!-- ============ Per-axis mm labels, sliders, step buttons ============ -->
+   <widget class="QLabel" name="SagitalAxismmLabel">
+    <property name="geometry"><rect><x>159</x><y>365</y><width>99</width><height>22</height></rect></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>Sagital Axis (mm)</string></property>
+   </widget>
+   <widget class="QSlider" name="sagSlider">
+    <property name="geometry"><rect><x>64</x><y>338</y><width>289</width><height>16</height></rect></property>
+    <property name="orientation"><enum>Qt::Horizontal</enum></property>
+   </widget>
+   <widget class="QPushButton" name="sagRight">
+    <property name="geometry"><rect><x>363</x><y>327</y><width>29</width><height>22</height></rect></property>
+    <property name="text"><string>&gt;</string></property>
+   </widget>
+   <widget class="QPushButton" name="sagLeft">
+    <property name="geometry"><rect><x>22</x><y>327</y><width>29</width><height>22</height></rect></property>
+    <property name="text"><string>&lt;</string></property>
+   </widget>
+
+   <widget class="QLabel" name="CoronalAxismmLabel">
+    <property name="geometry"><rect><x>583</x><y>368</y><width>104</width><height>22</height></rect></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>Coronal Axis (mm)</string></property>
+   </widget>
+   <widget class="QSlider" name="corSlider">
+    <property name="geometry"><rect><x>486</x><y>338</y><width>289</width><height>16</height></rect></property>
+    <property name="orientation"><enum>Qt::Horizontal</enum></property>
+   </widget>
+   <widget class="QPushButton" name="corRight">
+    <property name="geometry"><rect><x>785</x><y>332</y><width>29</width><height>22</height></rect></property>
+    <property name="text"><string>&gt;</string></property>
+   </widget>
+   <widget class="QPushButton" name="corLeft">
+    <property name="geometry"><rect><x>444</x><y>327</y><width>29</width><height>22</height></rect></property>
+    <property name="text"><string>&lt;</string></property>
+   </widget>
+
+   <widget class="QLabel" name="AxialAxismmLabel">
+    <property name="geometry"><rect><x>1000</x><y>368</y><width>88</width><height>22</height></rect></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>Axial Axis (mm)</string></property>
+   </widget>
+   <widget class="QSlider" name="axialSlider">
+    <property name="geometry"><rect><x>884</x><y>338</y><width>289</width><height>16</height></rect></property>
+    <property name="orientation"><enum>Qt::Horizontal</enum></property>
+   </widget>
+   <widget class="QPushButton" name="axialRight">
+    <property name="geometry"><rect><x>1186</x><y>332</y><width>29</width><height>22</height></rect></property>
+    <property name="text"><string>&gt;</string></property>
+   </widget>
+   <widget class="QPushButton" name="axialLeft">
+    <property name="geometry"><rect><x>842</x><y>332</y><width>29</width><height>22</height></rect></property>
+    <property name="text"><string>&lt;</string></property>
+   </widget>
+
+   <!-- ============ Overlay checkboxes, brightness, system status ============ -->
+   <widget class="QCheckBox" name="ShowTargetCheckBox">
+    <property name="geometry"><rect><x>908</x><y>3</y><width>93</width><height>22</height></rect></property>
+    <property name="text"><string>Show Target</string></property>
+    <property name="checked"><bool>true</bool></property>
+   </widget>
+   <widget class="QCheckBox" name="ShowFieldCheckBox">
+    <property name="geometry"><rect><x>1002</x><y>3</y><width>91</width><height>22</height></rect></property>
+    <property name="text"><string>Show Field</string></property>
+    <property name="checked"><bool>true</bool></property>
+   </widget>
+   <widget class="QCheckBox" name="ShowTransducersCheckBox">
+    <property name="geometry"><rect><x>1094</x><y>3</y><width>155</width><height>22</height></rect></property>
+    <property name="text"><string>Show Transducers</string></property>
+    <property name="checked"><bool>true</bool></property>
+   </widget>
+   <widget class="QPushButton" name="WindowUp">
+    <property name="geometry"><rect><x>403</x><y>326</y><width>30</width><height>36</height></rect></property>
+    <property name="text"><string>^</string></property>
+   </widget>
+   <widget class="QPushButton" name="WindowDown">
+    <property name="geometry"><rect><x>403</x><y>365</y><width>30</width><height>36</height></rect></property>
+    <property name="text"><string>v</string></property>
+   </widget>
+   <widget class="QLabel" name="BrightnessLabel">
+    <property name="geometry"><rect><x>387</x><y>395</y><width>62</width><height>22</height></rect></property>
+    <property name="text"><string>Brightness</string></property>
+   </widget>
+   <widget class="QLabel" name="SystemStatusLabel">
+    <property name="geometry"><rect><x>520</x><y>3</y><width>90</width><height>22</height></rect></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>System Status :</string></property>
+   </widget>
+   <widget class="QLabel" name="SystemStatusTextArea">
+    <property name="geometry"><rect><x>615</x><y>3</y><width>290</width><height>22</height></rect></property>
+    <property name="styleSheet">
+     <string notr="true">background: transparent; border: none;</string>
+    </property>
+   </widget>
+
+   <!-- ============ MNI/Target position readouts (real Position is
+        already off the bottom of the figure in the source itself -
+        negative MATLAB Y - kept literal, not relocated) ============ -->
+   <widget class="QLabel" name="TargetPosXYZLabel">
+    <property name="geometry"><rect><x>20</x><y>876</y><width>195</width><height>22</height></rect></property>
+    <property name="text"><string>Target Pos: X:  Y:  Z: </string></property>
+   </widget>
+   <widget class="QLabel" name="MNIPosXYZLabel">
+    <property name="geometry"><rect><x>27</x><y>841</y><width>195</width><height>22</height></rect></property>
+    <property name="text"><string>MNI Pos: X:  Y:  Z: </string></property>
+   </widget>
+
+   <!-- ============ Hidden at real startup (Visible='off' in the source
+        until some later click makes them relevant) ============ -->
+   <widget class="QLabel" name="TriggerSwitchLabel">
+    <property name="geometry"><rect><x>1318</x><y>743</y><width>43</width><height>23</height></rect></property>
+    <property name="visible"><bool>false</bool></property>
+    <property name="alignment"><set>Qt::AlignCenter</set></property>
+    <property name="text"><string>Trigger</string></property>
+   </widget>
+   <widget class="QCheckBox" name="TriggerSwitch">
+    <property name="geometry"><rect><x>1327</x><y>725</y><width>68</width><height>15</height></rect></property>
+    <property name="visible"><bool>false</bool></property>
+    <property name="text"><string>External</string></property>
+   </widget>
+   <widget class="QLabel" name="OverlayTransparencySliderLabel">
+    <property name="geometry"><rect><x>1283</x><y>514</y><width>122</width><height>22</height></rect></property>
+    <property name="visible"><bool>false</bool></property>
+    <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+    <property name="text"><string>Overlay Transparency</string></property>
+   </widget>
+   <widget class="QSlider" name="OverlayTransparencySlider">
+    <property name="geometry"><rect><x>1292</x><y>539</y><width>117</width><height>16</height></rect></property>
+    <property name="visible"><bool>false</bool></property>
+    <property name="orientation"><enum>Qt::Horizontal</enum></property>
+   </widget>
+   <widget class="QCheckBox" name="ShowOverlayBrainCheckBox">
+    <property name="geometry"><rect><x>1280</x><y>583</y><width>128</width><height>22</height></rect></property>
+    <property name="visible"><bool>false</bool></property>
+    <property name="text"><string>Show Overlay Brain</string></property>
+   </widget>
+   <widget class="QPushButton" name="OverlayBrainVolumeButton">
+    <property name="geometry"><rect><x>1278</x><y>604</y><width>142</width><height>32</height></rect></property>
+    <property name="visible"><bool>false</bool></property>
+    <property name="text"><string>Overlay Brain Volume</string></property>
+   </widget>
+
+   <!-- ============ TabGroup: Sonicate (fully laid out, the default-
+        selected tab) / Register / Correction (placeholder pages only -
+        out of scope for this one screen) ============ -->
+   <widget class="QTabWidget" name="TabGroup">
+    <property name="geometry"><rect><x>2</x><y>475</y><width>1255</width><height>452</height></rect></property>
+    <property name="currentIndex"><number>0</number></property>
+
+    <widget class="QWidget" name="SonicateTab">
+     <attribute name="title"><string>Sonicate</string></attribute>
+     <property name="styleSheet">
+      <string notr="true">background-color: rgb(255, 255, 255);</string>
+     </property>
+
+     <widget class="QPushButton" name="SonicateButton">
+      <property name="geometry"><rect><x>1130</x><y>220</y><width>112</width><height>41</height></rect></property>
+      <property name="text"><string>Sonicate</string></property>
+     </widget>
+     <widget class="QTableView" name="stimParamTable">
+      <property name="geometry"><rect><x>238</x><y>4</y><width>883</width><height>70</height></rect></property>
+     </widget>
+
+     <widget class="QLabel" name="SonicationStatusLabel">
+      <property name="geometry"><rect><x>238</x><y>390</y><width>772</width><height>20</height></rect></property>
+      <property name="wordWrap"><bool>true</bool></property>
+     </widget>
+     <widget class="QLabel" name="SonicationCountdownLabel">
+      <property name="geometry"><rect><x>1020</x><y>390</y><width>110</width><height>20</height></rect></property>
+      <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+      <property name="text"><string>No sonication running.</string></property>
+     </widget>
+
+     <widget class="QGroupBox" name="SonicationsPanel">
+      <property name="geometry"><rect><x>5</x><y>4</y><width>233</width><height>420</height></rect></property>
+      <property name="title"><string>Sonications</string></property>
+     </widget>
+
+     <widget class="QPushButton" name="ShamButton">
+      <property name="geometry"><rect><x>1130</x><y>171</y><width>112</width><height>41</height></rect></property>
+      <property name="text"><string>Sham</string></property>
+     </widget>
+     <widget class="QPushButton" name="GetParamsButton">
+      <property name="geometry"><rect><x>1130</x><y>122</y><width>112</width><height>41</height></rect></property>
+      <property name="text"><string>Get Params</string></property>
+     </widget>
+     <widget class="QLabel" name="TargetListListBoxLabel">
+      <property name="geometry"><rect><x>11</x><y>24</y><width>210</width><height>22</height></rect></property>
+      <property name="alignment"><set>Qt::AlignLeft|Qt::AlignVCenter</set></property>
+      <property name="text"><string>Target List</string></property>
+     </widget>
+     <widget class="QListWidget" name="TargetListListBox">
+      <property name="geometry"><rect><x>13</x><y>50</y><width>210</width><height>336</height></rect></property>
+      <item><property name="text"><string>Target 1</string></property></item>
+     </widget>
+     <widget class="QPushButton" name="MoveToSelectedTargetButton">
+      <property name="geometry"><rect><x>13</x><y>392</y><width>210</width><height>26</height></rect></property>
+      <property name="text"><string>Move to Selected Target</string></property>
+     </widget>
+
+     <widget class="QLabel" name="SerialPortDropDownLabel">
+      <property name="geometry"><rect><x>1132</x><y>2</y><width>61</width><height>22</height></rect></property>
+      <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+      <property name="text"><string>Serial Port</string></property>
+     </widget>
+     <widget class="QComboBox" name="SerialPortDropDown">
+      <property name="geometry"><rect><x>1131</x><y>25</y><width>118</width><height>22</height></rect></property>
+      <item><property name="text"><string>No connection</string></property></item>
+     </widget>
+     <widget class="QPushButton" name="SerialConnectButton">
+      <property name="geometry"><rect><x>1130</x><y>65</y><width>110</width><height>23</height></rect></property>
+      <property name="text"><string>Serial Connect</string></property>
+     </widget>
+     <widget class="QLabel" name="ConnectedLampLabel">
+      <property name="geometry"><rect><x>1140</x><y>91</y><width>63</width><height>22</height></rect></property>
+      <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+      <property name="text"><string>Connected</string></property>
+     </widget>
+     <widget class="QLabel" name="ConnectedLamp">
+      <property name="geometry"><rect><x>1216</x><y>92</y><width>20</width><height>20</height></rect></property>
+      <property name="styleSheet">
+       <string notr="true">background-color: rgb(255, 0, 0); border-radius: 10px;</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="AbortSonicationButton">
+      <property name="geometry"><rect><x>1130</x><y>283</y><width>112</width><height>28</height></rect></property>
+      <property name="text"><string>Abort Sonication</string></property>
+     </widget>
+
+     <widget class="QTabWidget" name="TabGroup3">
+      <property name="geometry"><rect><x>248</x><y>78</y><width>872</width><height>308</height></rect></property>
+      <property name="currentIndex"><number>0</number></property>
+
+      <widget class="QWidget" name="TreatmentProtocolTab">
+       <attribute name="title"><string>Treatment Protocol</string></attribute>
+       <widget class="QTableView" name="treatmentProtocolTable">
+        <property name="geometry"><rect><x>8</x><y>47</y><width>860</width><height>241</height></rect></property>
+       </widget>
+       <widget class="QLabel" name="TreatmentProtocolDropDownLabel">
+        <property name="geometry"><rect><x>6</x><y>7</y><width>69</width><height>38</height></rect></property>
+        <property name="wordWrap"><bool>true</bool></property>
+        <property name="alignment"><set>Qt::AlignCenter</set></property>
+        <property name="text"><string> Treatment Protocol</string></property>
+       </widget>
+       <widget class="QComboBox" name="TreatmentProtocolDropDown">
+        <property name="geometry"><rect><x>73</x><y>11</y><width>119</width><height>22</height></rect></property>
+        <item><property name="text"><string>PainSCCandAMCC</string></property></item>
+        <item><property name="text"><string>PainAMCCandSCC</string></property></item>
+        <item><property name="text"><string>PainACC</string></property></item>
+       </widget>
+       <widget class="QLabel" name="VisitNumberListBoxLabel">
+        <property name="geometry"><rect><x>194</x><y>6</y><width>73</width><height>22</height></rect></property>
+        <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+        <property name="text"><string>Visit Number</string></property>
+       </widget>
+       <widget class="QListWidget" name="VisitNumberListBox">
+        <property name="geometry"><rect><x>272</x><y>3</y><width>124</width><height>45</height></rect></property>
+        <item><property name="text"><string>Visit 1</string></property></item>
+       </widget>
+       <widget class="QPushButton" name="NewVisitButton">
+        <property name="geometry"><rect><x>401</x><y>4</y><width>79</width><height>30</height></rect></property>
+        <property name="text"><string>New Visit</string></property>
+       </widget>
+       <widget class="QLabel" name="CurrentSonicationNumberEditFieldLabel">
+        <property name="geometry"><rect><x>680</x><y>9</y><width>151</width><height>22</height></rect></property>
+        <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+        <property name="text"><string>Current Sonication Number</string></property>
+       </widget>
+       <widget class="QLineEdit" name="CurrentSonicationNumberEditField">
+        <property name="geometry"><rect><x>838</x><y>8</y><width>29</width><height>22</height></rect></property>
+        <property name="text"><string>1</string></property>
+       </widget>
+       <widget class="QGroupBox" name="HydrogelSizeButtonGroup">
+        <property name="geometry"><rect><x>486</x><y>3</y><width>193</width><height>42</height></rect></property>
+        <property name="title"><string>Hydrogel Size:</string></property>
+        <widget class="QRadioButton" name="SmallButton">
+         <property name="geometry"><rect><x>11</x><y>21</y><width>58</width><height>22</height></rect></property>
+         <property name="text"><string>Small</string></property>
+         <property name="checked"><bool>true</bool></property>
+        </widget>
+        <widget class="QRadioButton" name="MediumButton">
+         <property name="geometry"><rect><x>68</x><y>21</y><width>65</width><height>22</height></rect></property>
+         <property name="text"><string>Medium</string></property>
+        </widget>
+        <widget class="QRadioButton" name="LargeButton">
+         <property name="geometry"><rect><x>138</x><y>21</y><width>65</width><height>22</height></rect></property>
+         <property name="text"><string>Large</string></property>
+        </widget>
+       </widget>
+      </widget>
+
+      <widget class="QWidget" name="PulseDetailsTab">
+       <attribute name="title"><string>Pulse Details</string></attribute>
+       <widget class="QLabel" name="axTotalSonicationPlot">
+        <property name="geometry"><rect><x>5</x><y>4</y><width>863</width><height>99</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+        <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignTop</set></property>
+        <property name="text"><string>Total Sonication</string></property>
+       </widget>
+       <widget class="QLabel" name="axPulseWaveformPlot">
+        <property name="geometry"><rect><x>8</x><y>94</y><width>458</width><height>113</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+        <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignTop</set></property>
+        <property name="text"><string>Pulse Waveform</string></property>
+       </widget>
+       <widget class="QLabel" name="axBurstWaveformPlot">
+        <property name="geometry"><rect><x>471</x><y>94</y><width>397</width><height>113</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+        <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignTop</set></property>
+        <property name="text"><string>Burst Waveform</string></property>
+       </widget>
+      </widget>
+
+      <widget class="QWidget" name="TargetingExamplesTab">
+       <attribute name="title"><string>Targeting Examples</string></attribute>
+       <widget class="QLabel" name="UIAxesExampleSag">
+        <property name="geometry"><rect><x>4</x><y>2</y><width>201</width><height>172</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+       </widget>
+       <widget class="QLabel" name="UIAxesExampleCor">
+        <property name="geometry"><rect><x>209</x><y>2</y><width>201</width><height>172</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+       </widget>
+       <widget class="QLabel" name="UIAxesExampleAxial">
+        <property name="geometry"><rect><x>414</x><y>2</y><width>201</width><height>172</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+       </widget>
+       <widget class="QLabel" name="TargetingInstructionsLabel">
+        <property name="geometry"><rect><x>630</x><y>2</y><width>235</width><height>18</height></rect></property>
+        <property name="alignment"><set>Qt::AlignLeft|Qt::AlignVCenter</set></property>
+        <property name="text"><string>Targeting Instructions:</string></property>
+       </widget>
+       <widget class="QTextEdit" name="TargetingTextArea">
+        <property name="geometry"><rect><x>630</x><y>22</y><width>235</width><height>70</height></rect></property>
+        <property name="plainText"><string>Targeting Help</string></property>
+       </widget>
+       <widget class="QLabel" name="TargetsListBoxLabel">
+        <property name="geometry"><rect><x>630</x><y>96</y><width>60</width><height>20</height></rect></property>
+        <property name="alignment"><set>Qt::AlignLeft|Qt::AlignVCenter</set></property>
+        <property name="text"><string>Targets</string></property>
+       </widget>
+       <widget class="QListWidget" name="TargetsListBox">
+        <property name="geometry"><rect><x>630</x><y>118</y><width>235</width><height>52</height></rect></property>
+        <item><property name="text"><string>ACC</string></property></item>
+        <item><property name="text"><string>SCC1</string></property></item>
+        <item><property name="text"><string>aMCC1</string></property></item>
+       </widget>
+      </widget>
+     </widget>
+    </widget>
+
+    <widget class="QWidget" name="RegisterTab">
+     <attribute name="title"><string>Register</string></attribute>
+
+     <widget class="QLabel" name="TransducerTransparencySliderLabel">
+      <property name="geometry"><rect><x>1092</x><y>8</y><width>142</width><height>22</height></rect></property>
+      <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+      <property name="text"><string>Transducer Transparency</string></property>
+     </widget>
+     <widget class="QSlider" name="TransducerTransparencySlider">
+      <property name="geometry"><rect><x>1108</x><y>37</y><width>117</width><height>3</height></rect></property>
+      <property name="toolTip"><string>Transducer transparacy of image.</string></property>
+      <property name="orientation"><enum>Qt::Horizontal</enum></property>
+     </widget>
+
+     <widget class="QGroupBox" name="ArrayLockPositionSubjectLeftPanel">
+      <property name="geometry"><rect><x>402</x><y>7</y><width>325</width><height>223</height></rect></property>
+      <property name="title"><string>Array Lock Position Subject Left</string></property>
+      <widget class="QLabel" name="LeftHorizontalPositionYSliderLabel">
+       <property name="geometry"><rect><x>27</x><y>26</y><width>148</width><height>22</height></rect></property>
+       <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+       <property name="text"><string>Left Horizontal Position (Y)</string></property>
+      </widget>
+      <widget class="QSlider" name="LeftHorizontalPositionYSlider">
+       <property name="geometry"><rect><x>23</x><y>59</y><width>154</width><height>3</height></rect></property>
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      </widget>
+      <widget class="QLabel" name="LeftVerticalPositionZSliderLabel">
+       <property name="geometry"><rect><x>184</x><y>27</y><width>132</width><height>22</height></rect></property>
+       <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+       <property name="text"><string>Left Vertical Position (Z)</string></property>
+      </widget>
+      <widget class="QSlider" name="LeftVerticalPositionZSlider">
+       <property name="geometry"><rect><x>240</x><y>59</y><width>3</width><height>112</height></rect></property>
+       <property name="orientation"><enum>Qt::Vertical</enum></property>
+      </widget>
+      <widget class="QLabel" name="LeftRegistrationLampLabel">
+       <property name="geometry"><rect><x>184</x><y>193</y><width>95</width><height>22</height></rect></property>
+       <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+       <property name="text"><string>Left Registration</string></property>
+      </widget>
+      <widget class="QLabel" name="LeftRegistrationLamp">
+       <property name="geometry"><rect><x>294</x><y>195</y><width>20</width><height>20</height></rect></property>
+       <property name="styleSheet"><string notr="true">background-color: rgb(255, 0, 0); border-radius: 10px;</string></property>
+      </widget>
+     </widget>
+
+     <widget class="QGroupBox" name="TransducerLockPositionSubjectRightPanel">
+      <property name="geometry"><rect><x>732</x><y>6</y><width>330</width><height>224</height></rect></property>
+      <property name="title"><string>Transducer Lock Position Subject Right</string></property>
+      <widget class="QLabel" name="RightHorizontalPositionYSliderLabel">
+       <property name="geometry"><rect><x>14</x><y>29</y><width>156</width><height>22</height></rect></property>
+       <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+       <property name="text"><string>Right Horizontal Position (Y)</string></property>
+      </widget>
+      <widget class="QSlider" name="RightHorizontalPositionYSlider">
+       <property name="geometry"><rect><x>16</x><y>62</y><width>154</width><height>3</height></rect></property>
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      </widget>
+      <widget class="QLabel" name="RightVerticalPositionZSliderLabel">
+       <property name="geometry"><rect><x>176</x><y>30</y><width>140</width><height>22</height></rect></property>
+       <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+       <property name="text"><string>Right Vertical Position (Z)</string></property>
+      </widget>
+      <widget class="QSlider" name="RightVerticalPositionZSlider">
+       <property name="geometry"><rect><x>225</x><y>63</y><width>3</width><height>112</height></rect></property>
+       <property name="orientation"><enum>Qt::Vertical</enum></property>
+      </widget>
+      <widget class="QLabel" name="RightRegistrationLampLabel">
+       <property name="geometry"><rect><x>172</x><y>194</y><width>113</width><height>22</height></rect></property>
+       <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+       <property name="text"><string>Right Registration</string></property>
+      </widget>
+      <widget class="QLabel" name="RightRegistrationLamp">
+       <property name="geometry"><rect><x>300</x><y>196</y><width>20</width><height>20</height></rect></property>
+       <property name="styleSheet"><string notr="true">background-color: rgb(255, 0, 0); border-radius: 10px;</string></property>
+      </widget>
+     </widget>
+
+     <widget class="QPushButton" name="RegisterArraystoCurrentPositionButton">
+      <property name="geometry"><rect><x>1087</x><y>217</y><width>164</width><height>48</height></rect></property>
+      <property name="text"><string>Register Arrays to Current Position</string></property>
+     </widget>
+
+     <widget class="QGroupBox" name="RegistrationTypeButtonGroup">
+      <property name="geometry"><rect><x>1087</x><y>84</y><width>165</width><height>117</height></rect></property>
+      <property name="title"><string>Registration Type</string></property>
+      <widget class="QRadioButton" name="MRIFiducialsButton">
+       <property name="geometry"><rect><x>4</x><y>27</y><width>95</width><height>22</height></rect></property>
+       <property name="text"><string>MRI Fiducials</string></property>
+       <property name="checked"><bool>true</bool></property>
+      </widget>
+      <widget class="QRadioButton" name="PhotoBasedButton">
+       <property name="geometry"><rect><x>4</x><y>56</y><width>91</width><height>22</height></rect></property>
+       <property name="text"><string>Photo Based</string></property>
+      </widget>
+      <widget class="QRadioButton" name="MRIFreeButton">
+       <property name="geometry"><rect><x>5</x><y>85</y><width>72</width><height>22</height></rect></property>
+       <property name="text"><string>MRI Free</string></property>
+      </widget>
+     </widget>
+
+     <widget class="QTabWidget" name="TabGroup4">
+      <property name="geometry"><rect><x>2</x><y>5</y><width>395</width><height>303</height></rect></property>
+      <property name="currentIndex"><number>0</number></property>
+
+      <widget class="QWidget" name="MRIFiducialBasedTab">
+       <attribute name="title"><string>MRI Fiducial Based</string></attribute>
+       <widget class="QGroupBox" name="MovetoButtonGroup">
+        <property name="geometry"><rect><x>9</x><y>0</y><width>366</width><height>269</height></rect></property>
+        <property name="title"><string>Move to</string></property>
+        <widget class="QRadioButton" name="LeftY1Z3Button">
+         <property name="geometry"><rect><x>6</x><y>23</y><width>71</width><height>22</height></rect></property>
+         <property name="text"><string>LeftY1Z3</string></property>
+         <property name="checked"><bool>true</bool></property>
+        </widget>
+        <widget class="QRadioButton" name="LeftY1Z1Button">
+         <property name="geometry"><rect><x>6</x><y>61</y><width>71</width><height>22</height></rect></property>
+         <property name="text"><string>LeftY1Z1</string></property>
+        </widget>
+        <widget class="QRadioButton" name="LeftY4Z1Button">
+         <property name="geometry"><rect><x>123</x><y>61</y><width>71</width><height>22</height></rect></property>
+         <property name="text"><string>LeftY4Z1</string></property>
+        </widget>
+        <widget class="QRadioButton" name="RightY1Z3Button">
+         <property name="geometry"><rect><x>6</x><y>92</y><width>79</width><height>22</height></rect></property>
+         <property name="text"><string>RightY1Z3</string></property>
+        </widget>
+        <widget class="QRadioButton" name="RightY4Z1Button">
+         <property name="geometry"><rect><x>123</x><y>133</y><width>79</width><height>22</height></rect></property>
+         <property name="text"><string>RightY4Z1</string></property>
+        </widget>
+        <widget class="QRadioButton" name="RightY1Z1Button">
+         <property name="geometry"><rect><x>6</x><y>133</y><width>79</width><height>22</height></rect></property>
+         <property name="text"><string>RightY1Z1</string></property>
+        </widget>
+        <widget class="QLabel" name="Label">
+         <property name="geometry"><rect><x>10</x><y>76</y><width>211</width><height>22</height></rect></property>
+         <property name="text"><string>-------------------------------------------------------------------------------------</string></property>
+        </widget>
+        <widget class="QPushButton" name="MoveFiducialtoCurrentViewButton">
+         <property name="geometry"><rect><x>249</x><y>69</y><width>102</width><height>45</height></rect></property>
+         <property name="text"><string>Move Fiducial to Current View</string></property>
+        </widget>
+        <widget class="QLabel" name="InsideMRIRegistrationLampLabel">
+         <property name="geometry"><rect><x>226</x><y>212</y><width>130</width><height>22</height></rect></property>
+         <property name="alignment"><set>Qt::AlignRight|Qt::AlignVCenter</set></property>
+         <property name="text"><string>Inside MRI Registration</string></property>
+        </widget>
+        <widget class="QLabel" name="InsideMRIRegistrationLamp">
+         <property name="geometry"><rect><x>275</x><y>235</y><width>20</width><height>20</height></rect></property>
+         <property name="styleSheet"><string notr="true">background-color: rgb(255, 0, 0); border-radius: 10px;</string></property>
+        </widget>
+        <widget class="QPushButton" name="RegisterToMRIFiducialsButton">
+         <property name="geometry"><rect><x>9</x><y>226</y><width>210</width><height>35</height></rect></property>
+         <property name="text"><string>Register To MRI Fiducials</string></property>
+        </widget>
+       </widget>
+      </widget>
+
+      <widget class="QWidget" name="MRIFreeTab">
+       <attribute name="title"><string>MRI Free</string></attribute>
+      </widget>
+
+      <widget class="QWidget" name="PhotoBasedTab">
+       <attribute name="title"><string>Photo Based</string></attribute>
+       <widget class="QPushButton" name="LoadWithoutFrameImageButton">
+        <property name="geometry"><rect><x>4</x><y>193</y><width>191</width><height>34</height></rect></property>
+        <property name="text"><string>Load Without Frame Image</string></property>
+       </widget>
+       <widget class="QPushButton" name="LoadWithFrameImageButton">
+        <property name="geometry"><rect><x>206</x><y>193</y><width>182</width><height>33</height></rect></property>
+        <property name="text"><string>Load With Frame Image</string></property>
+       </widget>
+       <widget class="QLabel" name="ImageWithFrame">
+        <property name="geometry"><rect><x>202</x><y>2</y><width>191</width><height>182</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+       </widget>
+       <widget class="QLabel" name="ImageWithoutFrame">
+        <property name="geometry"><rect><x>5</x><y>3</y><width>191</width><height>182</height></rect></property>
+        <property name="frameShape"><enum>QFrame::Box</enum></property>
+       </widget>
+       <widget class="QPushButton" name="PhotoBasedRegistrationButton">
+        <property name="geometry"><rect><x>103</x><y>230</y><width>192</width><height>38</height></rect></property>
+        <property name="text"><string>Photo Based Registration</string></property>
+       </widget>
+      </widget>
+     </widget>
+    </widget>
+    <widget class="QWidget" name="CorrectionTab">
+     <attribute name="title"><string>Correction</string></attribute>
+    </widget>
+   </widget>
+  </widget>
+
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry"><rect><x>0</x><y>0</y><width>1260</width><height>21</height></rect></property>
+   <widget class="QMenu" name="FileMenu">
+    <property name="title"><string>File</string></property>
+    <addaction name="LoadMRIMenu"/>
+    <addaction name="SaveSubjectMenu"/>
+    <addaction name="LoadSubjectMenu"/>
+    <addaction name="EnableAllButtonsMenu"/>
+   </widget>
+   <addaction name="FileMenu"/>
+   <addaction name="ShowSonicateTabAction"/>
+   <addaction name="ShowRegisterTabAction"/>
+   <addaction name="ShowCorrectionTabAction"/>
+  </widget>
+  <action name="LoadMRIMenu">
+   <property name="text"><string>Load MRI</string></property>
+  </action>
+  <action name="SaveSubjectMenu">
+   <property name="text"><string>Save Subject</string></property>
+  </action>
+  <action name="LoadSubjectMenu">
+   <property name="text"><string>Load Subject</string></property>
+  </action>
+  <action name="EnableAllButtonsMenu">
+   <property name="text"><string>Enable All Buttons</string></property>
+  </action>
+  <action name="ShowSonicateTabAction">
+   <property name="text"><string>Sonicate</string></property>
+  </action>
+  <action name="ShowRegisterTabAction">
+   <property name="text"><string>Register</string></property>
+  </action>
+  <action name="ShowCorrectionTabAction">
+   <property name="text"><string>Correction</string></property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

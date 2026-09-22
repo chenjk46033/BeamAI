@@ -1,0 +1,38 @@
+# CMake build trees and generated metadata
+/build/
+/build-*/
+/out/
+/cmake-build-*/
+/compile_commands.json
+/CMakeUserPresets.json
+
+# Visual Studio / editors
+/.vs/
+/.vscode/
+/.idea/
+*.user
+*.suo
+*.VC.db
+*.opendb
+*.swp
+*~
+
+# Generated parity outputs (source CSV/configuration files remain trackable)
+/parity_*.csv
+
+# GoogleTest fixtures written into the process working directory
+/test_fixture*
+
+# Local sessions, exports, logs, and potentially identifiable patient data
+/sessions/
+/exports/
+*.beamsession
+*.dcm
+*.nii
+*.nii.gz
+*.mat
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

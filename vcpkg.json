@@ -1,0 +1,16 @@
+{
+  "name": "beam",
+  "version": "0.1.0",
+  "builtin-baseline": "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
+  "dependencies": [
+    "eigen3",
+    "gtest",
+    "dcmtk",
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": ["widgets"]
+    },
+    "qtcharts"
+  ]
+}

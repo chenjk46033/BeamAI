@@ -1,0 +1,66 @@
+﻿Running main() from C:\vcpkg\buildtrees\gtest\src\v1.18.0-e6987f02b9.clean\googletest\src\gtest_main.cc
+[==========] Running 18 tests from 8 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from VectorRange
+[ RUN      ] VectorRange.KnownValue
+[       OK ] VectorRange.KnownValue (0 ms)
+[----------] 1 test from VectorRange (0 ms total)
+
+[----------] 2 tests from DistancePointToLine
+[ RUN      ] DistancePointToLine.PointOffAxisAlignedLine
+[       OK ] DistancePointToLine.PointOffAxisAlignedLine (0 ms)
+[ RUN      ] DistancePointToLine.PointOnLine
+[       OK ] DistancePointToLine.PointOnLine (0 ms)
+[----------] 2 tests from DistancePointToLine (0 ms total)
+
+[----------] 1 test from AddVectors
+[ RUN      ] AddVectors.ElementwiseSum
+[       OK ] AddVectors.ElementwiseSum (0 ms)
+[----------] 1 test from AddVectors (0 ms total)
+
+[----------] 2 tests from AngleBetweenTwoVectors
+[ RUN      ] AngleBetweenTwoVectors.OrthogonalIsNinetyDegrees
+[       OK ] AngleBetweenTwoVectors.OrthogonalIsNinetyDegrees (0 ms)
+[ RUN      ] AngleBetweenTwoVectors.ParallelIsZeroDespiteRoundoff
+[       OK ] AngleBetweenTwoVectors.ParallelIsZeroDespiteRoundoff (0 ms)
+[----------] 2 tests from AngleBetweenTwoVectors (0 ms total)
+
+[----------] 1 test from ConvertDelaysToCycles
+[ RUN      ] ConvertDelaysToCycles.ScalesBySingleFrequency
+[       OK ] ConvertDelaysToCycles.ScalesBySingleFrequency (0 ms)
+[----------] 1 test from ConvertDelaysToCycles (0 ms total)
+
+[----------] 4 tests from Affine
+[ RUN      ] Affine.TranslateMovesPoint
+[       OK ] Affine.TranslateMovesPoint (0 ms)
+[ RUN      ] Affine.ZRotNinetyDegreesMapsXToY
+[       OK ] Affine.ZRotNinetyDegreesMapsXToY (0 ms)
+[ RUN      ] Affine.RotationBlocksAreOrthonormalWithUnitDeterminant
+[       OK ] Affine.RotationBlocksAreOrthonormalWithUnitDeterminant (0 ms)
+[ RUN      ] Affine.ApplyAffineToRectTranslatesCornersAndCenter
+[       OK ] Affine.ApplyAffineToRectTranslatesCornersAndCenter (0 ms)
+[----------] 4 tests from Affine (0 ms total)
+
+[----------] 3 tests from Geometry
+[ RUN      ] Geometry.NormalVectorFrom3PointsPicksZeroFacingDirection
+[       OK ] Geometry.NormalVectorFrom3PointsPicksZeroFacingDirection (0 ms)
+[ RUN      ] Geometry.CalculateRectNormalVectorIsUnitZForSyntheticElement
+[       OK ] Geometry.CalculateRectNormalVectorIsUnitZForSyntheticElement (0 ms)
+[ RUN      ] Geometry.SpatiallySampleElementCornerMatchesFirstSample
+[       OK ] Geometry.SpatiallySampleElementCornerMatchesFirstSample (0 ms)
+[----------] 3 tests from Geometry (0 ms total)
+
+[----------] 4 tests from ArrayData
+[ RUN      ] ArrayData.GetOpposingElementsReturnsOtherArraysElementNumbers
+[       OK ] ArrayData.GetOpposingElementsReturnsOtherArraysElementNumbers (0 ms)
+[ RUN      ] ArrayData.DefineArrayTxElementsModes
+[       OK ] ArrayData.DefineArrayTxElementsModes (0 ms)
+[ RUN      ] ArrayData.ArrayElementsToVSXElementsSkipsElements127And128
+[       OK ] ArrayData.ArrayElementsToVSXElementsSkipsElements127And128 (0 ms)
+[ RUN      ] ArrayData.DefineArrayDataUsesBeamsRealConstants
+[       OK ] ArrayData.DefineArrayDataUsesBeamsRealConstants (2 ms)
+[----------] 4 tests from ArrayData (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 18 tests from 8 test suites ran. (3 ms total)
+[  PASSED  ] 18 tests.

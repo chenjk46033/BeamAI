@@ -1,0 +1,324 @@
+﻿Running main() from C:\vcpkg\buildtrees\gtest\src\v1.18.0-e6987f02b9.clean\googletest\src\gtest_main.cc
+[==========] Running 80 tests from 44 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from VectorRange
+[ RUN      ] VectorRange.KnownValue
+[       OK ] VectorRange.KnownValue (0 ms)
+[----------] 1 test from VectorRange (0 ms total)
+
+[----------] 2 tests from DistancePointToLine
+[ RUN      ] DistancePointToLine.PointOffAxisAlignedLine
+[       OK ] DistancePointToLine.PointOffAxisAlignedLine (0 ms)
+[ RUN      ] DistancePointToLine.PointOnLine
+[       OK ] DistancePointToLine.PointOnLine (0 ms)
+[----------] 2 tests from DistancePointToLine (0 ms total)
+
+[----------] 1 test from AddVectors
+[ RUN      ] AddVectors.ElementwiseSum
+[       OK ] AddVectors.ElementwiseSum (0 ms)
+[----------] 1 test from AddVectors (0 ms total)
+
+[----------] 2 tests from AngleBetweenTwoVectors
+[ RUN      ] AngleBetweenTwoVectors.OrthogonalIsNinetyDegrees
+[       OK ] AngleBetweenTwoVectors.OrthogonalIsNinetyDegrees (0 ms)
+[ RUN      ] AngleBetweenTwoVectors.ParallelIsZeroDespiteRoundoff
+[       OK ] AngleBetweenTwoVectors.ParallelIsZeroDespiteRoundoff (0 ms)
+[----------] 2 tests from AngleBetweenTwoVectors (0 ms total)
+
+[----------] 1 test from ConvertDelaysToCycles
+[ RUN      ] ConvertDelaysToCycles.ScalesBySingleFrequency
+[       OK ] ConvertDelaysToCycles.ScalesBySingleFrequency (0 ms)
+[----------] 1 test from ConvertDelaysToCycles (0 ms total)
+
+[----------] 4 tests from Affine
+[ RUN      ] Affine.TranslateMovesPoint
+[       OK ] Affine.TranslateMovesPoint (0 ms)
+[ RUN      ] Affine.ZRotNinetyDegreesMapsXToY
+[       OK ] Affine.ZRotNinetyDegreesMapsXToY (0 ms)
+[ RUN      ] Affine.RotationBlocksAreOrthonormalWithUnitDeterminant
+[       OK ] Affine.RotationBlocksAreOrthonormalWithUnitDeterminant (0 ms)
+[ RUN      ] Affine.ApplyAffineToRectTranslatesCornersAndCenter
+[       OK ] Affine.ApplyAffineToRectTranslatesCornersAndCenter (0 ms)
+[----------] 4 tests from Affine (0 ms total)
+
+[----------] 3 tests from Geometry
+[ RUN      ] Geometry.NormalVectorFrom3PointsPicksZeroFacingDirection
+[       OK ] Geometry.NormalVectorFrom3PointsPicksZeroFacingDirection (0 ms)
+[ RUN      ] Geometry.CalculateRectNormalVectorIsUnitZForSyntheticElement
+[       OK ] Geometry.CalculateRectNormalVectorIsUnitZForSyntheticElement (0 ms)
+[ RUN      ] Geometry.SpatiallySampleElementCornerMatchesFirstSample
+[       OK ] Geometry.SpatiallySampleElementCornerMatchesFirstSample (0 ms)
+[----------] 3 tests from Geometry (0 ms total)
+
+[----------] 4 tests from ArrayData
+[ RUN      ] ArrayData.GetOpposingElementsReturnsOtherArraysElementNumbers
+[       OK ] ArrayData.GetOpposingElementsReturnsOtherArraysElementNumbers (0 ms)
+[ RUN      ] ArrayData.DefineArrayTxElementsModes
+[       OK ] ArrayData.DefineArrayTxElementsModes (0 ms)
+[ RUN      ] ArrayData.ArrayElementsToVSXElementsSkipsElements127And128
+[       OK ] ArrayData.ArrayElementsToVSXElementsSkipsElements127And128 (0 ms)
+[ RUN      ] ArrayData.DefineArrayDataUsesBeamsRealConstants
+[       OK ] ArrayData.DefineArrayDataUsesBeamsRealConstants (3 ms)
+[----------] 4 tests from ArrayData (3 ms total)
+
+[----------] 1 test from Xcorr
+[ RUN      ] Xcorr.AutocorrelationOfShortSignal
+[       OK ] Xcorr.AutocorrelationOfShortSignal (0 ms)
+[----------] 1 test from Xcorr (0 ms total)
+
+[----------] 1 test from CorrCoefficient
+[ RUN      ] CorrCoefficient.IdenticalAndOpposite
+[       OK ] CorrCoefficient.IdenticalAndOpposite (0 ms)
+[----------] 1 test from CorrCoefficient (0 ms total)
+
+[----------] 1 test from Nanmean
+[ RUN      ] Nanmean.IgnoresNaN
+[       OK ] Nanmean.IgnoresNaN (0 ms)
+[----------] 1 test from Nanmean (0 ms total)
+
+[----------] 1 test from ShiftAndSumWaveforms
+[ RUN      ] ShiftAndSumWaveforms.ShiftsRowsAndSumsColumns
+[       OK ] ShiftAndSumWaveforms.ShiftsRowsAndSumsColumns (0 ms)
+[----------] 1 test from ShiftAndSumWaveforms (0 ms total)
+
+[----------] 1 test from XcorrS1ToS2
+[ RUN      ] XcorrS1ToS2.RecoversKnownShift
+[       OK ] XcorrS1ToS2.RecoversKnownShift (0 ms)
+[----------] 1 test from XcorrS1ToS2 (0 ms total)
+
+[----------] 1 test from ComputeMaxCorrelationDelays
+[ RUN      ] ComputeMaxCorrelationDelays.AutoPicksStrongestChannelAndSignedDelays
+[       OK ] ComputeMaxCorrelationDelays.AutoPicksStrongestChannelAndSignedDelays (0 ms)
+[----------] 1 test from ComputeMaxCorrelationDelays (0 ms total)
+
+[----------] 1 test from DefineTxRxScanParams
+[ RUN      ] DefineTxRxScanParams.LiteralConstants
+[       OK ] DefineTxRxScanParams.LiteralConstants (0 ms)
+[----------] 1 test from DefineTxRxScanParams (0 ms total)
+
+[----------] 2 tests from SetAdjustedAttValues
+[ RUN      ] SetAdjustedAttValues.ClampsBelowThresholdAndCapsHigh
+[       OK ] SetAdjustedAttValues.ClampsBelowThresholdAndCapsHigh (0 ms)
+[ RUN      ] SetAdjustedAttValues.LeavesInRangeValuesUntouched
+[       OK ] SetAdjustedAttValues.LeavesInRangeValuesUntouched (0 ms)
+[----------] 2 tests from SetAdjustedAttValues (0 ms total)
+
+[----------] 1 test from GetReceiveElementsUnderAngle
+[ RUN      ] GetReceiveElementsUnderAngle.NormModeSelectsElementsWithinThreshold
+[       OK ] GetReceiveElementsUnderAngle.NormModeSelectsElementsWithinThreshold (0 ms)
+[----------] 1 test from GetReceiveElementsUnderAngle (0 ms total)
+
+[----------] 1 test from FindPeaks
+[ RUN      ] FindPeaks.StrictLocalMaxima
+[       OK ] FindPeaks.StrictLocalMaxima (0 ms)
+[----------] 1 test from FindPeaks (0 ms total)
+
+[----------] 2 tests from FindPeakNegativeVoltage
+[ RUN      ] FindPeakNegativeVoltage.LowNCyclesReturnsNegMin
+[       OK ] FindPeakNegativeVoltage.LowNCyclesReturnsNegMin (0 ms)
+[ RUN      ] FindPeakNegativeVoltage.MedianOfLargestPeaks
+[       OK ] FindPeakNegativeVoltage.MedianOfLargestPeaks (0 ms)
+[----------] 2 tests from FindPeakNegativeVoltage (0 ms total)
+
+[----------] 1 test from CalculateAttenuation
+[ RUN      ] CalculateAttenuation.PeakToPeakRatio
+[       OK ] CalculateAttenuation.PeakToPeakRatio (0 ms)
+[----------] 1 test from CalculateAttenuation (0 ms total)
+
+[----------] 3 tests from Localize
+[ RUN      ] Localize.DistanceIsEuclidean
+[       OK ] Localize.DistanceIsEuclidean (0 ms)
+[ RUN      ] Localize.UpdateArrayPositionsShiftsCornersAndCenter
+[       OK ] Localize.UpdateArrayPositionsShiftsCornersAndCenter (0 ms)
+[ RUN      ] Localize.NonlinRelativeDistanceFunResidual
+[       OK ] Localize.NonlinRelativeDistanceFunResidual (0 ms)
+[----------] 3 tests from Localize (0 ms total)
+
+[----------] 1 test from CalculateMultifrequencySuperpositionDelays
+[ RUN      ] CalculateMultifrequencySuperpositionDelays.KnownValue
+[       OK ] CalculateMultifrequencySuperpositionDelays.KnownValue (0 ms)
+[----------] 1 test from CalculateMultifrequencySuperpositionDelays (0 ms total)
+
+[----------] 1 test from FocusArrayAtPoint
+[ RUN      ] FocusArrayAtPoint.SteeringDelaysAndFarthestElement
+[       OK ] FocusArrayAtPoint.SteeringDelaysAndFarthestElement (0 ms)
+[----------] 1 test from FocusArrayAtPoint (0 ms total)
+
+[----------] 1 test from GetApodFromAtt
+[ RUN      ] GetApodFromAtt.ClampsAndNormalises
+[       OK ] GetApodFromAtt.ClampsAndNormalises (0 ms)
+[----------] 1 test from GetApodFromAtt (0 ms total)
+
+[----------] 1 test from Interp1
+[ RUN      ] Interp1.LinearAndOutOfRange
+[       OK ] Interp1.LinearAndOutOfRange (0 ms)
+[----------] 1 test from Interp1 (0 ms total)
+
+[----------] 1 test from PressureToDutyCycleGivenTransmission
+[ RUN      ] PressureToDutyCycleGivenTransmission.CalibrationCurveLookup
+[       OK ] PressureToDutyCycleGivenTransmission.CalibrationCurveLookup (0 ms)
+[----------] 1 test from PressureToDutyCycleGivenTransmission (0 ms total)
+
+[----------] 1 test from DefineStimFreqs
+[ RUN      ] DefineStimFreqs.KnownControlsAndErrors
+[       OK ] DefineStimFreqs.KnownControlsAndErrors (0 ms)
+[----------] 1 test from DefineStimFreqs (0 ms total)
+
+[----------] 1 test from GetPauseIntervals
+[ RUN      ] GetPauseIntervals.SplitsIntoChunks
+[       OK ] GetPauseIntervals.SplitsIntoChunks (0 ms)
+[----------] 1 test from GetPauseIntervals (0 ms total)
+
+[----------] 1 test from DefineStimParams
+[ RUN      ] DefineStimParams.SingleGroupSingleTarget
+[       OK ] DefineStimParams.SingleGroupSingleTarget (0 ms)
+[----------] 1 test from DefineStimParams (0 ms total)
+
+[----------] 5 tests from GetRasXformFromHeader
+[ RUN      ] GetRasXformFromHeader.IdentityQuaternionGivesScaledIdentityRotation
+[       OK ] GetRasXformFromHeader.IdentityQuaternionGivesScaledIdentityRotation (0 ms)
+[ RUN      ] GetRasXformFromHeader.QfacMinusOneNegatesThirdAxisScale
+[       OK ] GetRasXformFromHeader.QfacMinusOneNegatesThirdAxisScale (0 ms)
+[ RUN      ] GetRasXformFromHeader.SformBranchUsesRowsDirectlyWhenNoQform
+[       OK ] GetRasXformFromHeader.SformBranchUsesRowsDirectlyWhenNoQform (0 ms)
+[ RUN      ] GetRasXformFromHeader.NoQformNoSformThrows
+[       OK ] GetRasXformFromHeader.NoQformNoSformThrows (0 ms)
+[ RUN      ] GetRasXformFromHeader.OutOfRangeQuaternionClampsInsteadOfNaN
+[       OK ] GetRasXformFromHeader.OutOfRangeQuaternionClampsInsteadOfNaN (0 ms)
+[----------] 5 tests from GetRasXformFromHeader (0 ms total)
+
+[----------] 2 tests from GetRasAxisVectors
+[ RUN      ] GetRasAxisVectors.LinearRelationshipHandComputed
+[       OK ] GetRasAxisVectors.LinearRelationshipHandComputed (0 ms)
+[ RUN      ] GetRasAxisVectors.SizesMatchHeaderDims
+[       OK ] GetRasAxisVectors.SizesMatchHeaderDims (0 ms)
+[----------] 2 tests from GetRasAxisVectors (0 ms total)
+
+[----------] 2 tests from GetVoxelRasXform
+[ RUN      ] GetVoxelRasXform.AxisAlignedIdentityQuaternionQfacPlusOneGivesIdentity
+[       OK ] GetVoxelRasXform.AxisAlignedIdentityQuaternionQfacPlusOneGivesIdentity (0 ms)
+[ RUN      ] GetVoxelRasXform.QfacMinusOneFlipsThirdAxisSign
+[       OK ] GetVoxelRasXform.QfacMinusOneFlipsThirdAxisSign (0 ms)
+[----------] 2 tests from GetVoxelRasXform (0 ms total)
+
+[----------] 2 tests from ApplyVoxelRasXform3D
+[ RUN      ] ApplyVoxelRasXform3D.PureFlipOfSingleAxis
+[       OK ] ApplyVoxelRasXform3D.PureFlipOfSingleAxis (0 ms)
+[ RUN      ] ApplyVoxelRasXform3D.PurePermuteIsATranspose
+[       OK ] ApplyVoxelRasXform3D.PurePermuteIsATranspose (0 ms)
+[----------] 2 tests from ApplyVoxelRasXform3D (0 ms total)
+
+[----------] 4 tests from NiftiFile
+[ RUN      ] NiftiFile.RoundTripsHeaderAndAppliesScaling
+[       OK ] NiftiFile.RoundTripsHeaderAndAppliesScaling (0 ms)
+[ RUN      ] NiftiFile.ZeroSclSlopeMeansNoScalingNotScaleToZero
+[       OK ] NiftiFile.ZeroSclSlopeMeansNoScalingNotScaleToZero (0 ms)
+[ RUN      ] NiftiFile.RejectsWrongMagic
+[       OK ] NiftiFile.RejectsWrongMagic (0 ms)
+[ RUN      ] NiftiFile.RejectsCorruptSizeofHdr
+[       OK ] NiftiFile.RejectsCorruptSizeofHdr (0 ms)
+[----------] 4 tests from NiftiFile (1 ms total)
+
+[----------] 1 test from LoadNiftiMriRas
+[ RUN      ] LoadNiftiMriRas.IdentityQformPassesVoxelsAndAxesThroughUnchanged
+[       OK ] LoadNiftiMriRas.IdentityQformPassesVoxelsAndAxesThroughUnchanged (0 ms)
+[----------] 1 test from LoadNiftiMriRas (0 ms total)
+
+[----------] 2 tests from GetDicomPixelSpatialReferenceMath
+[ RUN      ] GetDicomPixelSpatialReferenceMath.HandComputedLinearSequences
+[       OK ] GetDicomPixelSpatialReferenceMath.HandComputedLinearSequences (0 ms)
+[ RUN      ] GetDicomPixelSpatialReferenceMath.MissingSliceThicknessThrows
+[       OK ] GetDicomPixelSpatialReferenceMath.MissingSliceThicknessThrows (0 ms)
+[----------] 2 tests from GetDicomPixelSpatialReferenceMath (0 ms total)
+
+[----------] 3 tests from ResolveDicomOrientationDefaults
+[ RUN      ] ResolveDicomOrientationDefaults.MissingOrientationUsesIdentityAxes
+[       OK ] ResolveDicomOrientationDefaults.MissingOrientationUsesIdentityAxes (0 ms)
+[ RUN      ] ResolveDicomOrientationDefaults.AllFieldsPresentUsesGivenValuesAndDerivesSliceDir
+[       OK ] ResolveDicomOrientationDefaults.AllFieldsPresentUsesGivenValuesAndDerivesSliceDir (0 ms)
+[ RUN      ] ResolveDicomOrientationDefaults.FallsBackToSliceThicknessWhenSpacingBetweenSlicesAbsent
+[       OK ] ResolveDicomOrientationDefaults.FallsBackToSliceThicknessWhenSpacingBetweenSlicesAbsent (0 ms)
+[----------] 3 tests from ResolveDicomOrientationDefaults (0 ms total)
+
+[----------] 1 test from GetDicomVolumeCoords
+[ RUN      ] GetDicomVolumeCoords.HandComputedLinearSequencesWithIdentityAxes
+[       OK ] GetDicomVolumeCoords.HandComputedLinearSequencesWithIdentityAxes (0 ms)
+[----------] 1 test from GetDicomVolumeCoords (0 ms total)
+
+[----------] 1 test from BuildNiftiHeaderFromDicomSeries
+[ RUN      ] BuildNiftiHeaderFromDicomSeries.HandComputedAxialCase
+[       OK ] BuildNiftiHeaderFromDicomSeries.HandComputedAxialCase (0 ms)
+[----------] 1 test from BuildNiftiHeaderFromDicomSeries (0 ms total)
+
+[----------] 3 tests from GetSliceImage
+[ RUN      ] GetSliceImage.AxialIsRot90OfKSlice
+[       OK ] GetSliceImage.AxialIsRot90OfKSlice (0 ms)
+[ RUN      ] GetSliceImage.SagitalPlaneExtractionAndRotation
+[       OK ] GetSliceImage.SagitalPlaneExtractionAndRotation (0 ms)
+[ RUN      ] GetSliceImage.UnknownPlaneThrows
+[       OK ] GetSliceImage.UnknownPlaneThrows (0 ms)
+[----------] 3 tests from GetSliceImage (0 ms total)
+
+[----------] 2 tests from DicomTags
+[ RUN      ] DicomTags.RoundTripsAgainstAnIndependentlyWrittenFile
+[       OK ] DicomTags.RoundTripsAgainstAnIndependentlyWrittenFile (7 ms)
+[ RUN      ] DicomTags.ThrowsOnGarbageFile
+unit_tests.exe : W: DcmItem: Length of element (6f6e,2074) is odd
+At line:1 char:428
++ ... ests_$ts.log"; & .\build-msvc\tests\Debug\unit_tests.exe *>&1 | Tee-O ...
++                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (W: DcmItem: Len...6e,2074) is odd:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+E: DcmElement: Unknown Tag & Data (6f6e,2074) larger (1768169569) than remaining bytes in file
+[       OK ] DicomTags.ThrowsOnGarbageFile (0 ms)
+[----------] 2 tests from DicomTags (8 ms total)
+
+[----------] 1 test from DicomSlice
+[ RUN      ] DicomSlice.RoundTripsPixelDataWithRescaleApplied
+[       OK ] DicomSlice.RoundTripsPixelDataWithRescaleApplied (1 ms)
+[----------] 1 test from DicomSlice (1 ms total)
+
+[----------] 3 tests from AssembleDicomSeriesRas
+[ RUN      ] AssembleDicomSeriesRas.ThreeAxialSlicesProduceHandComputedVolume
+[       OK ] AssembleDicomSeriesRas.ThreeAxialSlicesProduceHandComputedVolume (2 ms)
+[ RUN      ] AssembleDicomSeriesRas.ThrowsOnNonUniformSliceSpacing
+[       OK ] AssembleDicomSeriesRas.ThrowsOnNonUniformSliceSpacing (2 ms)
+[ RUN      ] AssembleDicomSeriesRas.EmptyInputThrows
+[       OK ] AssembleDicomSeriesRas.EmptyInputThrows (0 ms)
+[----------] 3 tests from AssembleDicomSeriesRas (5 ms total)
+
+[----------] 5 tests from LoadMriRas
+[ RUN      ] LoadMriRas.DirectoryOfDicomFilesUsesAssembler
+[       OK ] LoadMriRas.DirectoryOfDicomFilesUsesAssembler (2 ms)
+[ RUN      ] LoadMriRas.DirectoryWithOnlyNiftiFallsBackAndLoadsIt
+W: DcmItem: Dataset not in ascending tag order, at element (0000,0000)
+W: DcmItem: Element (0000,0000) found twice in one data set or item, ignoring second entry
+W: DcmItem: Element (0000,0000) found twice in one data set or item, ignoring second entry
+W: DcmItem: Element (0000,0000) found twice in one data set or item, ignoring second entry
+W: DcmItem: Length of element (0003,0002) is odd
+E: DcmElement: Unknown Tag & Data (0003,0002) larger (65537) than remaining bytes in file
+W: DcmItem: Dataset not in ascending tag order, at element (0003,0002)
+W: DcmItem: Invalid Element (0003,0002) found in data set
+[       OK ] LoadMriRas.DirectoryWithOnlyNiftiFallsBackAndLoadsIt (1 ms)
+[ RUN      ] LoadMriRas.PlainNiftiFilePathLoadsDirectly
+W: DcmItem: Dataset not in ascending tag order, at element (0000,0000)
+W: DcmItem: Element (0000,0000) found twice in one data set or item, ignoring second entry
+W: DcmItem: Element (0000,0000) found twice in one data set or item, ignoring second entry
+W: DcmItem: Element (0000,0000) found twice in one data set or item, ignoring second entry
+W: DcmItem: Length of element (0003,0002) is odd
+E: DcmElement: Unknown Tag & Data (0003,0002) larger (65537) than remaining bytes in file
+W: DcmItem: Dataset not in ascending tag order, at element (0003,0002)
+W: DcmItem: Invalid Element (0003,0002) found in data set
+[       OK ] LoadMriRas.PlainNiftiFilePathLoadsDirectly (0 ms)
+[ RUN      ] LoadMriRas.EmptyDirectoryThrows
+[       OK ] LoadMriRas.EmptyDirectoryThrows (0 ms)
+[ RUN      ] LoadMriRas.DirectoryWithNeitherDicomNorNiftiThrows
+W: DcmItem: Length of element (6f6e,2074) is odd
+E: DcmElement: Unknown Tag & Data (6f6e,2074) larger (1763733089) than remaining bytes in file
+[       OK ] LoadMriRas.DirectoryWithNeitherDicomNorNiftiThrows (0 ms)
+[----------] 5 tests from LoadMriRas (6 ms total)
+
+[----------] Global test environment tear-down
+[==========] 80 tests from 44 test suites ran. (31 ms total)
+[  PASSED  ] 80 tests.

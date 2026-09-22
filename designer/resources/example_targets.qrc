@@ -1,0 +1,13 @@
+<RCC>
+  <qresource prefix="/">
+    <file>example_targets/ACCSag.bmp</file>
+    <file>example_targets/ACCWhiteMatter.bmp</file>
+    <file>example_targets/ACCAxial.bmp</file>
+    <file>example_targets/SCC1Sag.bmp</file>
+    <file>example_targets/SCC1Axial.bmp</file>
+    <file>example_targets/SCC1Cor.bmp</file>
+    <file>example_targets/aMCC1Sag.bmp</file>
+    <file>example_targets/aMCC1Axial.bmp</file>
+    <file>example_targets/aMCC1Cor.bmp</file>
+  </qresource>
+</RCC>
