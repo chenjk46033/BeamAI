@@ -83,9 +83,30 @@ void WorkflowMriView::setSlice(const Eigen::MatrixXd& slice, bool flipHorizontal
 void WorkflowMriView::resetView() {
     zoom_ = 1.0;
     brightness_ = 1.0;
+    contrast_ = 1.0;
     pan_ = {};
     rebuildImage();
     update();
+}
+
+void WorkflowMriView::focusOn(QPointF normalizedPosition, double zoom) {
+    zoom_ = std::clamp(zoom, 1.0, 10.0);
+    pan_ = {};
+    const QRectF shown = imageRect();
+    const QPointF point(shown.left() + normalizedPosition.x() * shown.width(),
+                        shown.top() + normalizedPosition.y() * shown.height());
+    pan_ = QPointF(width() / 2.0, height() / 2.0) - point;
+    clampPan();
+    update();
+}
+
+void WorkflowMriView::setPointPlacementEnabled(bool enabled) {
+    pointPlacementEnabled_ = enabled;
+    setCursor(enabled ? Qt::CrossCursor : Qt::OpenHandCursor);
+}
+
+void WorkflowMriView::setPointPickedHandler(std::function<void(const Eigen::Vector3d&)> handler) {
+    pointPickedHandler_ = std::move(handler);
 }
 
 void WorkflowMriView::rebuildImage() {
@@ -93,13 +114,18 @@ void WorkflowMriView::rebuildImage() {
         image_ = {};
         return;
     }
-    const double windowHigh = dataMin_ + (dataMax_ - dataMin_) * brightness_;
-    const double scale = windowHigh > dataMin_ ? 255.0 / (windowHigh - dataMin_) : 0.0;
+    const double range = dataMax_ - dataMin_;
+    const double baseHigh = dataMin_ + range * brightness_;
+    const double center = (dataMin_ + baseHigh) * 0.5;
+    const double width = std::max(range * 0.01, (baseHigh - dataMin_) / contrast_);
+    const double windowLow = center - width * 0.5;
+    const double windowHigh = center + width * 0.5;
+    const double scale = 255.0 / (windowHigh - windowLow);
     QImage result(static_cast<int>(slice_.cols()), static_cast<int>(slice_.rows()), QImage::Format_Grayscale8);
     for (int y = 0; y < result.height(); ++y) {
         auto* row = result.scanLine(y);
         for (int x = 0; x < result.width(); ++x) {
-            row[x] = static_cast<unsigned char>(std::clamp((slice_(y, x) - dataMin_) * scale, 0.0, 255.0));
+            row[x] = static_cast<unsigned char>(std::clamp((slice_(y, x) - windowLow) * scale, 0.0, 255.0));
         }
     }
     image_ = flipHorizontal_ ? result.mirrored(true, false) : result;
@@ -189,6 +215,12 @@ void WorkflowMriView::wheelEvent(QWheelEvent* event) {
 }
 
 void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && pointPlacementEnabled_) {
+        if (const auto ras = rasAtWidgetPosition(event->position()); ras && pointPickedHandler_)
+            pointPickedHandler_(*ras);
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton && !image_.isNull()) {
         panning_ = true;
         lastMousePosition_ = event->pos();
@@ -232,6 +264,12 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
     slider->setValue(static_cast<int>(std::lround(brightness_ * 100.0)));
     slider->setMinimumWidth(220);
     layout->addWidget(slider);
+    layout->addWidget(new QLabel(QStringLiteral("Contrast"), container));
+    auto* contrastSlider = new QSlider(Qt::Horizontal, container);
+    contrastSlider->setRange(50, 300);
+    contrastSlider->setValue(static_cast<int>(std::lround(contrast_ * 100.0)));
+    contrastSlider->setMinimumWidth(220);
+    layout->addWidget(contrastSlider);
     auto* sliderAction = new QWidgetAction(&menu);
     sliderAction->setDefaultWidget(container);
     menu.addAction(sliderAction);
@@ -240,12 +278,18 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
         rebuildImage();
         update();
     });
+    connect(contrastSlider, &QSlider::valueChanged, this, [this](int value) {
+        contrast_ = static_cast<double>(value) / 100.0;
+        rebuildImage();
+        update();
+    });
     menu.addSeparator();
-    QAction* resetBrightness = menu.addAction(QStringLiteral("Reset brightness"));
-    QAction* resetAll = menu.addAction(QStringLiteral("Reset zoom, pan, and brightness"));
+    QAction* resetBrightness = menu.addAction(QStringLiteral("Reset brightness and contrast"));
+    QAction* resetAll = menu.addAction(QStringLiteral("Reset zoom, pan, brightness, and contrast"));
     QAction* selected = menu.exec(event->globalPos());
     if (selected == resetBrightness) {
         brightness_ = 1.0;
+        contrast_ = 1.0;
         rebuildImage();
         update();
     } else if (selected == resetAll) {
@@ -266,10 +310,14 @@ void WorkflowMriView::clampPan() {
 }
 
 void WorkflowMriView::updateMouseCoordinate(const QPointF& widgetPosition) {
+    mouseRasMm_ = rasAtWidgetPosition(widgetPosition);
+    mouseWidgetPosition_ = widgetPosition;
+}
+
+std::optional<Eigen::Vector3d> WorkflowMriView::rasAtWidgetPosition(const QPointF& widgetPosition) const {
     const QRectF displayed = imageRect();
     if (image_.isNull() || plane_.isEmpty() || !displayed.contains(widgetPosition)) {
-        mouseRasMm_.reset();
-        return;
+        return std::nullopt;
     }
     double horizontal = (widgetPosition.x() - displayed.left()) / displayed.width();
     double vertical = (widgetPosition.y() - displayed.top()) / displayed.height();
@@ -279,12 +327,10 @@ void WorkflowMriView::updateMouseCoordinate(const QPointF& widgetPosition) {
     const double verticalMm = verticalMinMm_ + vertical * (verticalMaxMm_ - verticalMinMm_);
 
     if (plane_ == QStringLiteral("sagittal"))
-        mouseRasMm_ = Eigen::Vector3d(fixedCoordinateMm_, horizontalMm, verticalMm);
+        return Eigen::Vector3d(fixedCoordinateMm_, horizontalMm, verticalMm);
     else if (plane_ == QStringLiteral("coronal"))
-        mouseRasMm_ = Eigen::Vector3d(horizontalMm, fixedCoordinateMm_, verticalMm);
+        return Eigen::Vector3d(horizontalMm, fixedCoordinateMm_, verticalMm);
     else if (plane_ == QStringLiteral("axial"))
-        mouseRasMm_ = Eigen::Vector3d(horizontalMm, verticalMm, fixedCoordinateMm_);
-    else
-        mouseRasMm_.reset();
-    mouseWidgetPosition_ = widgetPosition;
+        return Eigen::Vector3d(horizontalMm, verticalMm, fixedCoordinateMm_);
+    return std::nullopt;
 }

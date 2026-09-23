@@ -131,6 +131,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             showMessage(QString::fromStdString(reason), true);
         }
         refresh();
+        updateRegistrationAvailability();
     });
     connect(ui_->simulateFailButton, &QPushButton::clicked, this, [this] {
         workflow_.block(beam::gui::WorkflowStage::SystemCheck, "Device did not respond (simulated).");
@@ -152,13 +153,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->coronalSlider, &QSlider::valueChanged, ui_->registrationCoronalSlider, &QSlider::setValue);
     connect(ui_->axialSlider, &QSlider::valueChanged, ui_->registrationAxialSlider, &QSlider::setValue);
     connect(ui_->resetSagittalButton, &QToolButton::clicked, this, [this] {
-        ui_->sagittalSlider->setValue(static_cast<int>(mriVolume_.nx / 2));
+        ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));
     });
     connect(ui_->resetCoronalButton, &QToolButton::clicked, this, [this] {
-        ui_->coronalSlider->setValue(static_cast<int>(mriVolume_.ny / 2));
+        ui_->coronalSlider->setValue(static_cast<int>((mriVolume_.ny - 1) / 2));
     });
     connect(ui_->resetAxialButton, &QToolButton::clicked, this, [this] {
-        ui_->axialSlider->setValue(static_cast<int>(mriVolume_.nz / 2));
+        ui_->axialSlider->setValue(static_cast<int>((mriVolume_.nz - 1) / 2));
     });
     connect(ui_->goToFiducialButton, &QPushButton::clicked, this, [this] {
         const int markerIndex = ui_->fiducialCombo->currentIndex();
@@ -183,24 +184,55 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             showMessage(QString::fromStdString(reason), true);
         }
         refresh();
+        updateRegistrationAvailability();
     });
     connect(ui_->resetRegistrationButton, &QPushButton::clicked, this, [this] {
+        fiducialConfirmed_ = sourceFiducialConfirmed_;
+        fiducials_ = registrationSourceFiducials_;
         populateRegistrationTable();
+        showMriPreviews();
         registrationComplete_ = false;
         workflow_.change(beam::gui::WorkflowStage::Registration,
                          "Registration measurements changed; later approvals require review.");
-        ui_->registrationResult->setText(QStringLiteral("Coordinates reset. Review the six measurements, then register."));
+        ui_->registrationResult->setText(QStringLiteral("Original fiducial measurements restored. Review them, then fit the transducers."));
         refresh();
+        updateRegistrationAvailability();
     });
+    connect(ui_->placeFiducialButton, &QPushButton::clicked, this, [this] { beginFiducialPlacement(); });
     connect(ui_->registerFiducialsButton, &QPushButton::clicked, this, [this] { performFiducialRegistration(); });
+    connect(ui_->registrationTable, &QTableWidget::currentCellChanged, this,
+            [this](int currentRow, int, int, int) { navigateToRegistrationFiducial(currentRow); });
     connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int, int column) {
-        if (!registrationGeometryLoaded_ || column == 0) return;
+        if (!registrationGeometryLoaded_ || column == 0 || column == 4) return;
+        const int row = ui_->registrationTable->currentRow();
+        if (row >= 0 && row < 6) fiducialConfirmed_[static_cast<std::size_t>(row)] = true;
+        if (row >= 0 && row < 6) {
+            Eigen::Vector3d point;
+            bool valid = true;
+            for (int axis = 0; axis < 3; ++axis) {
+                bool coordinateValid = false;
+                point(axis) = ui_->registrationTable->item(row, axis + 1)->text().toDouble(&coordinateValid);
+                valid = valid && coordinateValid;
+            }
+            if (valid) {
+                fiducials_[static_cast<std::size_t>(row)].position = point / 1000.0;
+                showMriPreviews();
+            }
+        }
         workflow_.change(beam::gui::WorkflowStage::Registration,
                          "Registration measurements changed; later approvals require review.");
         registrationComplete_ = false;
         ui_->registrationResult->setText(QStringLiteral("Measurements changed. Run registration again to accept them."));
         refresh();
+        ui_->registrationTable->blockSignals(true);
+        ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Measured"));
+        ui_->registrationTable->blockSignals(false);
+        updateRegistrationAvailability();
     });
+    const auto picked = [this](const Eigen::Vector3d& point) { placeSelectedFiducial(point); };
+    ui_->registrationSagittalPreview->setPointPickedHandler(picked);
+    ui_->registrationCoronalPreview->setPointPickedHandler(picked);
+    ui_->registrationAxialPreview->setPointPickedHandler(picked);
     ui_->registrationTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     connect(ui_->participantEdit, &QLineEdit::textChanged, this, [this](const QString& value) {
         ui_->participantHeader->setText(QStringLiteral("Participant: %1").arg(value.isEmpty() ? QStringLiteral("—") : value));
@@ -260,7 +292,27 @@ void WorkflowWindow::chooseBeamSession() {
             if (state->error) std::rethrow_exception(state->error);
             auto imported = std::move(state->value.value());
             installMri(std::move(imported.volume), std::move(imported.axes), path);
-            showMessage(QStringLiteral("Beam MRI session imported read-only. Review and accept the embedded MRI."), false);
+            if (imported.fiducials.size() == 6) {
+                fiducials_.clear();
+                ui_->fiducialCombo->clear();
+                for (const auto& source : imported.fiducials) {
+                    beam::registration::FiducialMarker marker;
+                    marker.name = source.name;
+                    marker.position = source.positionMm / 1000.0;
+                    fiducials_.push_back(marker);
+                    ui_->fiducialCombo->addItem(QString::fromStdString(marker.name));
+                }
+                registrationSourceFiducials_ = fiducials_;
+                fiducialConfirmed_.fill(true);
+                sourceFiducialConfirmed_.fill(true);
+                populateRegistrationTable();
+                showMriPreviews();
+                ui_->registrationResult->setText(
+                    QStringLiteral("Six saved MRI fiducials imported from the Beam session · requires review"));
+                showMessage(QStringLiteral("Beam MRI and six saved fiducials imported read-only. Review the MRI, then run registration."), false);
+            } else {
+                showMessage(QStringLiteral("Beam MRI imported; no complete six-fiducial set was found, so model estimates are shown."), true);
+            }
         } catch (const std::exception& error) {
             QMessageBox::critical(this, QStringLiteral("Beam session import failed"), QString::fromUtf8(error.what()));
             showMessage(QStringLiteral("The session was not imported; the previous MRI was preserved."), true);
@@ -300,13 +352,14 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     ui_->registrationSagittalSlider->setRange(0, static_cast<int>(mriVolume_.nx - 1));
     ui_->registrationCoronalSlider->setRange(0, static_cast<int>(mriVolume_.ny - 1));
     ui_->registrationAxialSlider->setRange(0, static_cast<int>(mriVolume_.nz - 1));
-    ui_->sagittalSlider->setValue(static_cast<int>(mriVolume_.nx / 2));
-    ui_->coronalSlider->setValue(static_cast<int>(mriVolume_.ny / 2));
-    ui_->axialSlider->setValue(static_cast<int>(mriVolume_.nz / 2));
+    ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));
+    ui_->coronalSlider->setValue(static_cast<int>((mriVolume_.ny - 1) / 2));
+    ui_->axialSlider->setValue(static_cast<int>((mriVolume_.nz - 1) / 2));
     for (QSlider* slider : {ui_->sagittalSlider, ui_->coronalSlider, ui_->axialSlider,
                             ui_->registrationSagittalSlider, ui_->registrationCoronalSlider, ui_->registrationAxialSlider}) slider->setEnabled(true);
     ui_->resetSagittalButton->setEnabled(true); ui_->resetCoronalButton->setEnabled(true); ui_->resetAxialButton->setEnabled(true);
     ui_->acceptImagingButton->setEnabled(true);
+    resetMriViews();
     initializeRegistrationGeometry();
     showMriPreviews();
     showMessage(replacing ? QStringLiteral("Replacement MRI loaded; review and accept it.")
@@ -355,9 +408,9 @@ void WorkflowWindow::loadMri(const QString& path) {
         ui_->registrationSagittalSlider->setRange(0, static_cast<int>(mriVolume_.nx - 1));
         ui_->registrationCoronalSlider->setRange(0, static_cast<int>(mriVolume_.ny - 1));
         ui_->registrationAxialSlider->setRange(0, static_cast<int>(mriVolume_.nz - 1));
-        ui_->sagittalSlider->setValue(static_cast<int>(mriVolume_.nx / 2));
-        ui_->coronalSlider->setValue(static_cast<int>(mriVolume_.ny / 2));
-        ui_->axialSlider->setValue(static_cast<int>(mriVolume_.nz / 2));
+        ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));
+        ui_->coronalSlider->setValue(static_cast<int>((mriVolume_.ny - 1) / 2));
+        ui_->axialSlider->setValue(static_cast<int>((mriVolume_.nz - 1) / 2));
         ui_->sagittalSlider->setEnabled(true);
         ui_->coronalSlider->setEnabled(true);
         ui_->axialSlider->setEnabled(true);
@@ -368,6 +421,7 @@ void WorkflowWindow::loadMri(const QString& path) {
         ui_->resetCoronalButton->setEnabled(true);
         ui_->resetAxialButton->setEnabled(true);
         ui_->acceptImagingButton->setEnabled(true);
+        resetMriViews();
         initializeRegistrationGeometry();
         showMriPreviews();
         showMessage(replacing ? QStringLiteral("Replacement MRI loaded. Downstream approvals were invalidated; review and accept it.")
@@ -378,6 +432,14 @@ void WorkflowWindow::loadMri(const QString& path) {
         QMessageBox::critical(this, QStringLiteral("MRI load failed"), QString::fromUtf8(error.what()));
         showMessage(QStringLiteral("MRI could not be loaded. The previous imaging state was not changed."), true);
     }
+}
+
+void WorkflowWindow::resetMriViews() {
+    setPlacementMode(false);
+    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
+                                  ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
+                                  ui_->registrationAxialPreview})
+        view->resetView();
 }
 
 void WorkflowWindow::initializeRegistrationGeometry() {
@@ -404,6 +466,9 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     beam::registration::AffineArrayResult placed = beam::registration::applyAffineToArrayData(translation, nominal);
     arrayData_ = std::move(placed.arrayData);
     fiducials_ = std::move(placed.fiducialMarkers);
+    registrationSourceFiducials_ = fiducials_;
+    fiducialConfirmed_.fill(false);
+    sourceFiducialConfirmed_.fill(false);
     registrationOriginArrayData_ = arrayData_;
     registrationComplete_ = false;
     ui_->fiducialCombo->clear();
@@ -415,7 +480,7 @@ void WorkflowWindow::initializeRegistrationGeometry() {
                                                        mriVolume_.ny, mriVolume_.nz);
     registrationGeometryLoaded_ = true;
     populateRegistrationTable();
-    ui_->registerFiducialsButton->setEnabled(true);
+    ui_->placeFiducialButton->setEnabled(true);
     ui_->resetRegistrationButton->setEnabled(true);
     ui_->registrationResult->setText(QStringLiteral("Ready: review all six MRI fiducial coordinates."));
 }
@@ -423,8 +488,8 @@ void WorkflowWindow::initializeRegistrationGeometry() {
 void WorkflowWindow::populateRegistrationTable() {
     if (!registrationGeometryLoaded_ && fiducials_.empty()) return;
     ui_->registrationTable->blockSignals(true);
-    for (int row = 0; row < static_cast<int>(fiducials_.size()) && row < 6; ++row) {
-        const auto& marker = fiducials_[static_cast<std::size_t>(row)];
+    for (int row = 0; row < static_cast<int>(registrationSourceFiducials_.size()) && row < 6; ++row) {
+        const auto& marker = registrationSourceFiducials_[static_cast<std::size_t>(row)];
         auto* name = new QTableWidgetItem(QString::fromStdString(marker.name));
         name->setFlags(name->flags() & ~Qt::ItemIsEditable);
         ui_->registrationTable->setItem(row, 0, name);
@@ -433,8 +498,88 @@ void WorkflowWindow::populateRegistrationTable() {
             coordinate->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
             ui_->registrationTable->setItem(row, axis + 1, coordinate);
         }
+        const std::size_t statusIndex = static_cast<std::size_t>(row);
+        auto* source = new QTableWidgetItem(!fiducialConfirmed_[statusIndex] ? QStringLiteral("Estimate")
+                                                : sourceFiducialConfirmed_[statusIndex] ? QStringLiteral("Imported")
+                                                                                       : QStringLiteral("Measured"));
+        source->setFlags(source->flags() & ~Qt::ItemIsEditable);
+        ui_->registrationTable->setItem(row, 4, source);
     }
     ui_->registrationTable->blockSignals(false);
+    if (ui_->registrationTable->currentRow() < 0 && !registrationSourceFiducials_.empty())
+        ui_->registrationTable->selectRow(0);
+    updateRegistrationAvailability();
+}
+
+void WorkflowWindow::navigateToRegistrationFiducial(int row) {
+    // Table population selects its first row. That must not move the shared
+    // MRI sliders while the operator is still reviewing a newly loaded image.
+    // BeamV0 only navigates after a registration fiducial control is chosen.
+    if (selectedStage_ != beam::gui::WorkflowStage::Registration || !mriLoaded_ ||
+        row < 0 || row >= static_cast<int>(fiducials_.size())) return;
+    const Eigen::Vector3d markerMm = fiducials_[static_cast<std::size_t>(row)].position * 1000.0;
+    const auto voxel = beam::gui::imagePositionToVoxelIndex(markerMm, mriAxes_);
+    ui_->sagittalSlider->setValue(static_cast<int>(voxel.i));
+    ui_->coronalSlider->setValue(static_cast<int>(voxel.j));
+    ui_->axialSlider->setValue(static_cast<int>(voxel.k));
+    showMriPreviews();
+    ui_->registrationSagittalPreview->focusOn(
+        QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y()),
+                1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
+    ui_->registrationCoronalPreview->focusOn(
+        QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
+                1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
+    ui_->registrationAxialPreview->focusOn(
+        QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
+                1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y())));
+    showMessage(QStringLiteral("Showing %1: center its red marker on the corresponding MRI donut.")
+                    .arg(QString::fromStdString(fiducials_[static_cast<std::size_t>(row)].name)), false);
+}
+
+void WorkflowWindow::setPlacementMode(bool enabled) {
+    placingFiducial_ = enabled;
+    ui_->registrationSagittalPreview->setPointPlacementEnabled(enabled);
+    ui_->registrationCoronalPreview->setPointPlacementEnabled(enabled);
+    ui_->registrationAxialPreview->setPointPlacementEnabled(enabled);
+    ui_->placeFiducialButton->setText(enabled ? QStringLiteral("Cancel placement")
+                                               : QStringLiteral("Place selected fiducial…"));
+}
+
+void WorkflowWindow::beginFiducialPlacement() {
+    if (placingFiducial_) { setPlacementMode(false); return; }
+    const int row = ui_->registrationTable->currentRow();
+    if (row < 0 || row >= 6) {
+        showMessage(QStringLiteral("Select one fiducial row before entering placement mode."), true);
+        return;
+    }
+    setPlacementMode(true);
+    showMessage(QStringLiteral("Click the center of %1 in any MRI plane. The current slice supplies the third coordinate.")
+                    .arg(ui_->registrationTable->item(row, 0)->text()), false);
+}
+
+void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm) {
+    const int row = ui_->registrationTable->currentRow();
+    if (!placingFiducial_ || row < 0 || row >= 6) return;
+    ui_->registrationTable->blockSignals(true);
+    for (int axis = 0; axis < 3; ++axis)
+        ui_->registrationTable->item(row, axis + 1)->setText(QString::number(positionMm(axis), 'f', 2));
+    ui_->registrationTable->blockSignals(false);
+    fiducialConfirmed_[static_cast<std::size_t>(row)] = true;
+    fiducials_[static_cast<std::size_t>(row)].position = positionMm / 1000.0;
+    setPlacementMode(false);
+    ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Measured"));
+    showMriPreviews();
+    workflow_.change(beam::gui::WorkflowStage::Registration,
+                     "Fiducial measurements changed; later approvals require review.");
+    showMessage(QStringLiteral("Fiducial measured. Continue until all six rows show Measured."), false);
+    refresh();
+    updateRegistrationAvailability();
+}
+
+void WorkflowWindow::updateRegistrationAvailability() {
+    const bool allMeasured = std::all_of(fiducialConfirmed_.begin(), fiducialConfirmed_.end(), [](bool v) { return v; });
+    const bool imagingAccepted = workflow_.state(beam::gui::WorkflowStage::Imaging).status == beam::gui::WorkflowStatus::Complete;
+    ui_->registerFiducialsButton->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted);
 }
 
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
@@ -511,13 +656,17 @@ void WorkflowWindow::showMriPreviews() {
     ui_->registrationCoronalPreview->setNavigationCrosshair(QPointF(iNorm, 1.0 - kNorm));
     ui_->registrationAxialPreview->setNavigationCrosshair(QPointF(iNorm, 1.0 - jNorm));
 
+    // Imaging is the unregistered source image review. Registration geometry is
+    // deliberately confined to the Registration page so model estimates cannot
+    // be mistaken for fiducials already identified in the patient's MRI.
+    ui_->sagittalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+    ui_->coronalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+    ui_->axialPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+    ui_->sagittalPreview->setMarkers({});
+    ui_->coronalPreview->setMarkers({});
+    ui_->axialPreview->setMarkers({});
+
     if (registrationGeometryLoaded_) {
-        ui_->sagittalPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, sagittal, "sagital"),
-                                             QColor(255, 220, 40), 0.55, true);
-        ui_->coronalPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, coronal, "coronal"),
-                                            QColor(255, 220, 40), 0.55);
-        ui_->axialPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, axial, "axial"),
-                                          QColor(255, 220, 40), 0.55);
         ui_->registrationSagittalPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, sagittal, "sagital"), QColor(255, 220, 40), 0.55, true);
         ui_->registrationCoronalPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, coronal, "coronal"), QColor(255, 220, 40), 0.55);
         ui_->registrationAxialPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, axial, "axial"), QColor(255, 220, 40), 0.55);
@@ -552,12 +701,16 @@ void WorkflowWindow::showMriPreviews() {
             axialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
                                              1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y())),
                                     QString(), QColor(65, 235, 100), true});
-        ui_->sagittalPreview->setMarkers(sagMarkers);
-        ui_->coronalPreview->setMarkers(corMarkers);
-        ui_->axialPreview->setMarkers(axialMarkers);
         ui_->registrationSagittalPreview->setMarkers(std::move(sagMarkers));
         ui_->registrationCoronalPreview->setMarkers(std::move(corMarkers));
         ui_->registrationAxialPreview->setMarkers(std::move(axialMarkers));
+    } else {
+        ui_->registrationSagittalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->registrationCoronalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->registrationAxialPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->registrationSagittalPreview->setMarkers({});
+        ui_->registrationCoronalPreview->setMarkers({});
+        ui_->registrationAxialPreview->setMarkers({});
     }
 
     const auto coordinate = [](const Eigen::VectorXd& axis, int oneBasedIndex) {
@@ -579,9 +732,9 @@ void WorkflowWindow::showMriPreviews() {
     ui_->registrationSagittalPreview->setRasMapping(QStringLiteral("sagittal"), lr, mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1), mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), true, true);
     ui_->registrationCoronalPreview->setRasMapping(QStringLiteral("coronal"), ap, mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1), mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), false, true);
     ui_->registrationAxialPreview->setRasMapping(QStringLiteral("axial"), is, mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1), mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1), false, true);
-    const double lrCenter = coordinate(mriAxes_.dimLR, static_cast<int>(mriVolume_.nx / 2) + 1);
-    const double apCenter = coordinate(mriAxes_.dimAP, static_cast<int>(mriVolume_.ny / 2) + 1);
-    const double isCenter = coordinate(mriAxes_.dimIS, static_cast<int>(mriVolume_.nz / 2) + 1);
+    const double lrCenter = coordinate(mriAxes_.dimLR, static_cast<int>((mriVolume_.nx - 1) / 2) + 1);
+    const double apCenter = coordinate(mriAxes_.dimAP, static_cast<int>((mriVolume_.ny - 1) / 2) + 1);
+    const double isCenter = coordinate(mriAxes_.dimIS, static_cast<int>((mriVolume_.nz - 1) / 2) + 1);
     ui_->sagittalSliceLabel->setText(QStringLiteral("LR %1 mm").arg(lr, 0, 'f', 1));
     ui_->coronalSliceLabel->setText(QStringLiteral("AP %1 mm").arg(ap, 0, 'f', 1));
     ui_->axialSliceLabel->setText(QStringLiteral("IS %1 mm").arg(is, 0, 'f', 1));
@@ -604,6 +757,11 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     ui_->completeStageButton->setVisible(stage != beam::gui::WorkflowStage::SystemCheck &&
                                          stage != beam::gui::WorkflowStage::Imaging &&
                                          stage != beam::gui::WorkflowStage::Registration);
+    if (stage == beam::gui::WorkflowStage::Registration && mriLoaded_) {
+        showMriPreviews();
+        const int row = ui_->registrationTable->currentRow();
+        if (row >= 0) navigateToRegistrationFiducial(row);
+    }
     refresh();
 }
 

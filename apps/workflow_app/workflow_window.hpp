@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <array>
 
 #include "gui/treatment_workflow.hpp"
 #include "array/array_types.hpp"
@@ -28,10 +29,16 @@ private:
     void loadMri(const QString& path);
     void installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes, const QString& path);
     void showMriPreviews();
+    void resetMriViews();
     void initializeRegistrationGeometry();
     void populateRegistrationTable();
+    void navigateToRegistrationFiducial(int row);
     void performFiducialRegistration();
     void applyRegistrationResult(beam::registration::AffineArrayResult result);
+    void beginFiducialPlacement();
+    void placeSelectedFiducial(const Eigen::Vector3d& positionMm);
+    void setPlacementMode(bool enabled);
+    void updateRegistrationAvailability();
     void refresh();
     void showMessage(const QString& text, bool error);
 
@@ -44,6 +51,10 @@ private:
     beam::array::ArrayData registrationOriginArrayData_;
     beam::mri::Volume3D arrayMask_;
     std::vector<beam::registration::FiducialMarker> fiducials_;
+    std::vector<beam::registration::FiducialMarker> registrationSourceFiducials_;
+    std::array<bool, 6> fiducialConfirmed_{};
+    std::array<bool, 6> sourceFiducialConfirmed_{};
+    bool placingFiducial_ = false;
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();
     bool registrationGeometryLoaded_ = false;
     bool registrationComplete_ = false;

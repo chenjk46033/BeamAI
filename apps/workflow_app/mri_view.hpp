@@ -7,6 +7,7 @@
 #include <QString>
 #include <QWidget>
 #include <optional>
+#include <functional>
 #include <vector>
 
 struct WorkflowMriMarker {
@@ -32,6 +33,9 @@ public:
                        bool reverseHorizontal, bool reverseVertical);
     void setNavigationCrosshair(QPointF normalizedPosition);
     void resetView();
+    void focusOn(QPointF normalizedPosition, double zoom = 3.0);
+    void setPointPlacementEnabled(bool enabled);
+    void setPointPickedHandler(std::function<void(const Eigen::Vector3d&)> handler);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -48,6 +52,7 @@ private:
     QRectF imageRect() const;
     void clampPan();
     void updateMouseCoordinate(const QPointF& widgetPosition);
+    std::optional<Eigen::Vector3d> rasAtWidgetPosition(const QPointF& widgetPosition) const;
 
     Eigen::MatrixXd slice_;
     QImage image_;
@@ -58,6 +63,7 @@ private:
     double dataMax_ = 1.0;
     double zoom_ = 1.0;
     double brightness_ = 1.0;
+    double contrast_ = 1.0;
     QPointF pan_;
     QPoint lastMousePosition_;
     bool panning_ = false;
@@ -72,4 +78,6 @@ private:
     bool reverseVertical_ = false;
     std::optional<Eigen::Vector3d> mouseRasMm_;
     QPointF mouseWidgetPosition_;
+    bool pointPlacementEnabled_ = false;
+    std::function<void(const Eigen::Vector3d&)> pointPickedHandler_;
 };

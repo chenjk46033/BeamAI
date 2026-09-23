@@ -15,6 +15,10 @@ int main(int argc, char** argv) {
                     static_cast<long long>(mri.volume.nz), mri.axes.dimLR(0), mri.axes.dimLR(mri.axes.dimLR.size()-1),
                     mri.axes.dimAP(0), mri.axes.dimAP(mri.axes.dimAP.size()-1),
                     mri.axes.dimIS(0), mri.axes.dimIS(mri.axes.dimIS.size()-1));
+        std::printf("fiducials=%zu\n", mri.fiducials.size());
+        for (const auto& marker : mri.fiducials)
+            std::printf("  %s %.3f %.3f %.3f\n", marker.name.c_str(), marker.positionMm.x(),
+                        marker.positionMm.y(), marker.positionMm.z());
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "import failed: %s\n", error.what());

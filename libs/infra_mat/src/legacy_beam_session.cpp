@@ -34,6 +34,29 @@ matvar_t& field(matvar_t& structure, const char* name) {
     return *result;
 }
 
+matvar_t* optionalField(matvar_t& structure, const char* name, std::size_t index = 0) {
+    return Mat_VarGetStructFieldByName(&structure, name, index);
+}
+
+std::string charValue(mat_t* file, matvar_t& value) {
+    if (!value.data && Mat_VarReadDataAll(file, &value) != 0) return {};
+    const std::size_t count = value.data_size ? value.nbytes / value.data_size : 0;
+    std::string out;
+    out.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        unsigned int ch = 0;
+        switch (value.data_type) {
+            case MAT_T_UINT16: ch = static_cast<const std::uint16_t*>(value.data)[i]; break;
+            case MAT_T_UINT8: ch = static_cast<const std::uint8_t*>(value.data)[i]; break;
+            case MAT_T_UTF8: ch = static_cast<const std::uint8_t*>(value.data)[i]; break;
+            case MAT_T_UTF16: ch = static_cast<const std::uint16_t*>(value.data)[i]; break;
+            default: return {};
+        }
+        if (ch && ch < 128) out.push_back(static_cast<char>(ch));
+    }
+    return out;
+}
+
 Eigen::VectorXd vectorField(mat_t* file, matvar_t& sys, const char* name, std::size_t expected) {
     matvar_t& source = field(sys, name);
     if (!source.data && Mat_VarReadDataAll(file, &source) != 0)
@@ -74,6 +97,29 @@ LegacyBeamMri loadLegacyBeamMri(const std::string& path) {
     result.axes.dimLR = vectorField(file.get(), *sys, "ax", nx);
     result.axes.dimAP = vectorField(file.get(), *sys, "ay", ny);
     result.axes.dimIS = vectorField(file.get(), *sys, "az", nz);
+
+    if (matvar_t* frame = optionalField(*sys, "frame")) {
+        if (matvar_t* rois = optionalField(*frame, "FiducialROIs")) {
+            const std::size_t count = rois->rank > 0 && rois->dims ? rois->dims[0] * rois->dims[1] : 0;
+            for (std::size_t i = 0; i < count; ++i) {
+                matvar_t* name = optionalField(*rois, "name", i);
+                matvar_t* position = optionalField(*rois, "position", i);
+                if (!name || !position) continue;
+                if (!position->data && Mat_VarReadDataAll(file.get(), position) != 0) continue;
+                if (position->nbytes / position->data_size != 3) continue;
+                LegacyBeamMri::Fiducial marker;
+                marker.name = charValue(file.get(), *name);
+                marker.positionMm = Eigen::Vector3d(numberAt(*position, 0), numberAt(*position, 1), numberAt(*position, 2));
+                result.fiducials.push_back(std::move(marker));
+            }
+        }
+    }
+    if (result.fiducials.size() == 6) {
+        constexpr const char* canonicalNames[] = {
+            "LeftY1Z3", "LeftY1Z1", "LeftY4Z1", "RightY1Z3", "RightY1Z1", "RightY4Z1"};
+        for (std::size_t i = 0; i < result.fiducials.size(); ++i)
+            if (result.fiducials[i].name.empty()) result.fiducials[i].name = canonicalNames[i];
+    }
     return result;
 }
 
