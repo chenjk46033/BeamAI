@@ -739,7 +739,8 @@ void WorkflowWindow::performFiducialRegistration() {
         registrationComplete_ = true;
         ui_->registrationResult->setText(QStringLiteral("Registration complete · RMS residual %1 mm · overlays updated")
                                              .arg(rmsMm, 0, 'f', 2));
-        showMessage(QStringLiteral("Registration accepted. Review the updated red fiducials and yellow array overlay."), false);
+        showMessage(QStringLiteral("Registration complete — RMS residual %1 mm. Review the updated red fiducials and yellow transducer overlay.")
+                        .arg(rmsMm, 0, 'f', 2), false);
         refresh();
     } catch (const std::exception& error) {
         ui_->registrationResult->setText(QStringLiteral("Registration failed: %1").arg(QString::fromUtf8(error.what())));
