@@ -18,6 +18,10 @@ target_link_libraries(parity_registration PRIVATE registration array util)
 add_executable(parity_safety parity_safety/main.cpp)
 target_link_libraries(parity_safety PRIVATE safety)
 
+# Privacy-safe schema/dimension probe for legacy Beam MATLAB sessions.
+add_executable(beam_mat_info beam_mat_info/main.cpp)
+target_link_libraries(beam_mat_info PRIVATE infra_mat)
+
 # --- Qt demo apps (skipped cleanly when Qt6 isn't provisioned) ---
 find_package(Qt6 QUIET COMPONENTS Widgets Charts)
 if(Qt6_FOUND AND TARGET gui_qt)
@@ -55,7 +59,7 @@ if(Qt6_FOUND AND TARGET gui_qt)
         ../designer/workflow_shell.ui
     )
     target_include_directories(workflow_app PRIVATE workflow_app)
-    target_link_libraries(workflow_app PRIVATE gui mri infra_dicom Qt6::Widgets)
+    target_link_libraries(workflow_app PRIVATE gui mri infra_dicom infra_mat Qt6::Widgets)
     set_target_properties(workflow_app PROPERTIES AUTOMOC ON AUTOUIC ON
         AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../designer")
     beam_deploy_qt_platform(workflow_app)

@@ -6,7 +6,7 @@
 #include "array/array_types.hpp"
 #include "mri/slice.hpp"
 #include "mri/ras_transform.hpp"
-#include "registration/fiducial_markers.hpp"
+#include "registration/array_transform.hpp"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class WorkflowShell; }
@@ -24,9 +24,14 @@ private:
     void completeCurrentStage();
     void chooseNifti();
     void chooseDicomDirectory();
+    void chooseBeamSession();
     void loadMri(const QString& path);
+    void installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes, const QString& path);
     void showMriPreviews();
     void initializeRegistrationGeometry();
+    void populateRegistrationTable();
+    void performFiducialRegistration();
+    void applyRegistrationResult(beam::registration::AffineArrayResult result);
     void refresh();
     void showMessage(const QString& text, bool error);
 
@@ -36,10 +41,12 @@ private:
     beam::mri::Volume3D mriVolume_;
     beam::mri::RasAxisVectors mriAxes_;
     beam::array::ArrayData arrayData_;
+    beam::array::ArrayData registrationOriginArrayData_;
     beam::mri::Volume3D arrayMask_;
     std::vector<beam::registration::FiducialMarker> fiducials_;
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();
     bool registrationGeometryLoaded_ = false;
+    bool registrationComplete_ = false;
     bool mriLoaded_ = false;
     QString mriPath_;
 };

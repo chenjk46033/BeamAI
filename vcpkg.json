@@ -6,6 +6,7 @@
     "eigen3",
     "gtest",
     "dcmtk",
+    "matio",
     {
       "name": "qtbase",
       "default-features": false,

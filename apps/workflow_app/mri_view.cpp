@@ -21,7 +21,6 @@ WorkflowMriView::WorkflowMriView(QWidget* parent) : QWidget(parent) {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMouseTracking(true);
     setCursor(Qt::OpenHandCursor);
-    setToolTip(QStringLiteral("Mouse wheel: zoom · drag: pan · right-click: brightness · double-click: reset"));
 }
 
 void WorkflowMriView::setNavigationCrosshair(QPointF normalizedPosition) {
@@ -190,7 +189,7 @@ void WorkflowMriView::wheelEvent(QWheelEvent* event) {
 }
 
 void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton && zoom_ > 1.0) {
+    if (event->button() == Qt::LeftButton && !image_.isNull()) {
         panning_ = true;
         lastMousePosition_ = event->pos();
         setCursor(Qt::ClosedHandCursor);
@@ -255,13 +254,13 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
 }
 
 void WorkflowMriView::clampPan() {
-    if (zoom_ <= 1.0) {
-        pan_ = {};
-        return;
-    }
     const QRectF shown = imageRect();
-    const double maxX = std::max(0.0, (shown.width() - width()) / 2.0);
-    const double maxY = std::max(0.0, (shown.height() - height()) / 2.0);
+    // At fit zoom the full image is visible, but the operator may still
+    // reposition it for comparison with another plane. Retain a bounded
+    // quarter-viewport travel area; once zoomed, expand the bound to cover
+    // the portion of the image extending beyond the viewport.
+    const double maxX = std::max(width() * 0.25, std::abs(shown.width() - width()) / 2.0);
+    const double maxY = std::max(height() * 0.25, std::abs(shown.height() - height()) / 2.0);
     pan_.setX(std::clamp(pan_.x(), -maxX, maxX));
     pan_.setY(std::clamp(pan_.y(), -maxY, maxY));
 }

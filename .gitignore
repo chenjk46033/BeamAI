@@ -5,6 +5,7 @@
 /cmake-build-*/
 /compile_commands.json
 /CMakeUserPresets.json
+/vcpkg_installed/
 
 # Visual Studio / editors
 /.vs/
