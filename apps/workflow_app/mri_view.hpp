@@ -15,6 +15,7 @@ struct WorkflowMriMarker {
     QString label;
     QColor color;
     bool crosshair = false;
+    bool draggable = false;
 };
 
 // Native image interaction used by the new workflow UI. Kept independent
@@ -26,6 +27,7 @@ public:
 
     void setSlice(const Eigen::MatrixXd& slice, bool flipHorizontal = false);
     void setMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity, bool flipHorizontal = false);
+    void setSecondaryMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity, bool flipHorizontal = false);
     void setMarkers(std::vector<WorkflowMriMarker> markers);
     void setRasMapping(QString plane, double fixedCoordinateMm,
                        double horizontalMinMm, double horizontalMaxMm,
@@ -57,6 +59,7 @@ private:
     Eigen::MatrixXd slice_;
     QImage image_;
     QImage maskImage_;
+    QImage secondaryMaskImage_;
     std::vector<WorkflowMriMarker> markers_;
     bool flipHorizontal_ = false;
     double dataMin_ = 0.0;
@@ -67,6 +70,7 @@ private:
     QPointF pan_;
     QPoint lastMousePosition_;
     bool panning_ = false;
+    bool draggingMarker_ = false;
     QPointF crosshair_ = QPointF(0.5, 0.5);
     QString plane_;
     double fixedCoordinateMm_ = 0.0;

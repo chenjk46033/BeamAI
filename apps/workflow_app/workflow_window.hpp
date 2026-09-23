@@ -30,6 +30,7 @@ private:
     void installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes, const QString& path);
     void showMriPreviews();
     void resetMriViews();
+    void rebuildFocusImage();
     void initializeRegistrationGeometry();
     void populateRegistrationTable();
     void navigateToRegistrationFiducial(int row);
@@ -50,6 +51,7 @@ private:
     beam::array::ArrayData arrayData_;
     beam::array::ArrayData registrationOriginArrayData_;
     beam::mri::Volume3D arrayMask_;
+    beam::mri::Volume3D focusImage_;
     std::vector<beam::registration::FiducialMarker> fiducials_;
     std::vector<beam::registration::FiducialMarker> registrationSourceFiducials_;
     std::array<bool, 6> fiducialConfirmed_{};
@@ -59,6 +61,7 @@ private:
     bool registrationGeometryLoaded_ = false;
     bool registrationComplete_ = false;
     bool mriLoaded_ = false;
+    bool focusImageLoaded_ = false;
     QString mriPath_;
 };
 

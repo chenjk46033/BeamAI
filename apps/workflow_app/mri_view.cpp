@@ -8,6 +8,7 @@
 #include <QEvent>
 #include <QFontMetrics>
 #include <QLabel>
+#include <QLineF>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -36,16 +37,42 @@ void WorkflowMriView::setMaskOverlay(const Eigen::MatrixXd& mask, QColor color, 
         update();
         return;
     }
-    color.setAlphaF(std::clamp(opacity, 0.0, 1.0));
     QImage result(static_cast<int>(mask.cols()), static_cast<int>(mask.rows()), QImage::Format_ARGB32);
     result.fill(Qt::transparent);
     for (int y = 0; y < result.height(); ++y) {
         auto* row = reinterpret_cast<QRgb*>(result.scanLine(y));
         for (int x = 0; x < result.width(); ++x) {
-            if (mask(y, x) > 0.0) row[x] = color.rgba();
+            if (mask(y, x) > 0.0) {
+                QColor pixel = color;
+                pixel.setAlphaF(std::clamp(mask(y, x), 0.0, 1.0) * std::clamp(opacity, 0.0, 1.0));
+                row[x] = pixel.rgba();
+            }
         }
     }
     maskImage_ = flipHorizontal ? result.mirrored(true, false) : result;
+    update();
+}
+
+void WorkflowMriView::setSecondaryMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity,
+                                              bool flipHorizontal) {
+    if (mask.size() == 0) {
+        secondaryMaskImage_ = {};
+        update();
+        return;
+    }
+    QImage result(static_cast<int>(mask.cols()), static_cast<int>(mask.rows()), QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+    for (int y = 0; y < result.height(); ++y) {
+        auto* row = reinterpret_cast<QRgb*>(result.scanLine(y));
+        for (int x = 0; x < result.width(); ++x) {
+            if (mask(y, x) > 0.0) {
+                QColor pixel = color;
+                pixel.setAlphaF(std::clamp(mask(y, x), 0.0, 1.0) * std::clamp(opacity, 0.0, 1.0));
+                row[x] = pixel.rgba();
+            }
+        }
+    }
+    secondaryMaskImage_ = flipHorizontal ? result.mirrored(true, false) : result;
     update();
 }
 
@@ -151,6 +178,7 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
     const QRectF displayed = imageRect();
     painter.drawImage(displayed, image_);
     if (!maskImage_.isNull()) painter.drawImage(displayed, maskImage_);
+    if (!secondaryMaskImage_.isNull()) painter.drawImage(displayed, secondaryMaskImage_);
     const double x = displayed.left() + crosshair_.x() * displayed.width();
     const double y = displayed.top() + crosshair_.y() * displayed.height();
     painter.setPen(QPen(QColor(40, 225, 245, 235), 2.0));
@@ -168,8 +196,15 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
             painter.drawLine(point + QPointF(-13, 0), point + QPointF(13, 0));
             painter.drawLine(point + QPointF(0, -13), point + QPointF(0, 13));
         } else {
-            painter.setBrush(marker.color);
-            painter.drawEllipse(point, 4.0, 4.0);
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(marker.color, marker.draggable ? 2.5 : 1.5));
+            painter.drawEllipse(point, marker.draggable ? 8.0 : 5.0, marker.draggable ? 8.0 : 5.0);
+            if (marker.draggable) {
+                painter.drawLine(point + QPointF(-11, 0), point + QPointF(-4, 0));
+                painter.drawLine(point + QPointF(4, 0), point + QPointF(11, 0));
+                painter.drawLine(point + QPointF(0, -11), point + QPointF(0, -4));
+                painter.drawLine(point + QPointF(0, 4), point + QPointF(0, 11));
+            }
             if (!marker.label.isEmpty()) {
                 const QRectF labelRect(point + QPointF(7, -17), QSizeF(105, 18));
                 painter.fillRect(labelRect, QColor(150, 25, 35, 205));
@@ -222,6 +257,22 @@ void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (event->button() == Qt::LeftButton && !image_.isNull()) {
+        const QRectF displayed = imageRect();
+        for (const WorkflowMriMarker& marker : markers_) {
+            if (!marker.draggable) continue;
+            const QPointF point(displayed.left() + marker.normalizedPosition.x() * displayed.width(),
+                                displayed.top() + marker.normalizedPosition.y() * displayed.height());
+            if (QLineF(point, event->position()).length() <= 14.0) {
+                draggingMarker_ = true;
+                setCursor(Qt::CrossCursor);
+                if (const auto ras = rasAtWidgetPosition(event->position()); ras && pointPickedHandler_)
+                    pointPickedHandler_(*ras);
+                event->accept();
+                return;
+            }
+        }
+    }
+    if (event->button() == Qt::LeftButton && !image_.isNull()) {
         panning_ = true;
         lastMousePosition_ = event->pos();
         setCursor(Qt::ClosedHandCursor);
@@ -230,7 +281,10 @@ void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
 }
 
 void WorkflowMriView::mouseMoveEvent(QMouseEvent* event) {
-    if (panning_) {
+    if (draggingMarker_) {
+        if (const auto ras = rasAtWidgetPosition(event->position()); ras && pointPickedHandler_)
+            pointPickedHandler_(*ras);
+    } else if (panning_) {
         pan_ += event->pos() - lastMousePosition_;
         lastMousePosition_ = event->pos();
         clampPan();
@@ -241,6 +295,7 @@ void WorkflowMriView::mouseMoveEvent(QMouseEvent* event) {
 
 void WorkflowMriView::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
+        draggingMarker_ = false;
         panning_ = false;
         setCursor(Qt::OpenHandCursor);
     }

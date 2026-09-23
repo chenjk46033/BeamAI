@@ -68,6 +68,28 @@ Eigen::VectorXd vectorField(mat_t* file, matvar_t& sys, const char* name, std::s
     return out;
 }
 
+beam::mri::Volume3D volumeValue(mat_t* file, matvar_t& source, const char* fieldName) {
+    if (source.rank != 3 || !source.dims)
+        throw std::runtime_error(std::string("sys.") + fieldName + " is not a 3-D volume");
+    if (!source.data && Mat_VarReadDataAll(file, &source) != 0)
+        throw std::runtime_error(std::string("Could not read sys.") + fieldName);
+    const std::size_t nx = source.dims[0], ny = source.dims[1], nz = source.dims[2];
+    beam::mri::Volume3D volume;
+    volume.nx = static_cast<Eigen::Index>(nx);
+    volume.ny = static_cast<Eigen::Index>(ny);
+    volume.nz = static_cast<Eigen::Index>(nz);
+    volume.kSlices.resize(nz);
+    for (std::size_t k = 0; k < nz; ++k) {
+        Eigen::MatrixXd slice(static_cast<Eigen::Index>(nx), static_cast<Eigen::Index>(ny));
+        for (std::size_t j = 0; j < ny; ++j)
+            for (std::size_t i = 0; i < nx; ++i)
+                slice(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)) =
+                    numberAt(source, i + nx * (j + ny * k));
+        volume.kSlices[k] = std::move(slice);
+    }
+    return volume;
+}
+
 }  // namespace
 
 LegacyBeamMri loadLegacyBeamMri(const std::string& path) {
@@ -77,23 +99,11 @@ LegacyBeamMri loadLegacyBeamMri(const std::string& path) {
     if (!sys || sys->class_type != MAT_C_STRUCT) throw std::runtime_error("MAT file does not contain a Beam sys structure");
     matvar_t& image = field(*sys, "aImg");
     if (image.rank != 3 || !image.dims) throw std::runtime_error("sys.aImg is not a 3-D MRI volume");
-    if (!image.data && Mat_VarReadDataAll(file.get(), &image) != 0)
-        throw std::runtime_error("Could not read sys.aImg");
     const std::size_t nx = image.dims[0], ny = image.dims[1], nz = image.dims[2];
     if (!nx || !ny || !nz) throw std::runtime_error("sys.aImg is empty");
 
     LegacyBeamMri result;
-    result.volume.nx = static_cast<Eigen::Index>(nx);
-    result.volume.ny = static_cast<Eigen::Index>(ny);
-    result.volume.nz = static_cast<Eigen::Index>(nz);
-    result.volume.kSlices.resize(nz);
-    for (std::size_t k = 0; k < nz; ++k) {
-        Eigen::MatrixXd slice(static_cast<Eigen::Index>(nx), static_cast<Eigen::Index>(ny));
-        for (std::size_t j = 0; j < ny; ++j)
-            for (std::size_t i = 0; i < nx; ++i)
-                slice(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)) = numberAt(image, i + nx * (j + ny * k));
-        result.volume.kSlices[k] = std::move(slice);
-    }
+    result.volume = volumeValue(file.get(), image, "aImg");
     result.axes.dimLR = vectorField(file.get(), *sys, "ax", nx);
     result.axes.dimAP = vectorField(file.get(), *sys, "ay", ny);
     result.axes.dimIS = vectorField(file.get(), *sys, "az", nz);

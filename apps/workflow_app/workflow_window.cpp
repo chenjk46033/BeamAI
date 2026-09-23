@@ -143,6 +143,18 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->loadNiftiButton, &QPushButton::clicked, this, [this] { chooseNifti(); });
     connect(ui_->loadDicomButton, &QPushButton::clicked, this, [this] { chooseDicomDirectory(); });
     connect(ui_->loadBeamSessionButton, &QPushButton::clicked, this, [this] { chooseBeamSession(); });
+    connect(ui_->showFieldCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
+    connect(ui_->showTargetCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
+    connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
+    connect(ui_->transducerTransparencySlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
+    connect(ui_->showFieldCheckBox, &QCheckBox::toggled, ui_->registrationShowFieldCheckBox, &QCheckBox::setChecked);
+    connect(ui_->showTargetCheckBox, &QCheckBox::toggled, ui_->registrationShowTargetCheckBox, &QCheckBox::setChecked);
+    connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, ui_->registrationShowTransducersCheckBox, &QCheckBox::setChecked);
+    connect(ui_->transducerTransparencySlider, &QSlider::valueChanged, ui_->registrationTransparencySlider, &QSlider::setValue);
+    connect(ui_->registrationShowFieldCheckBox, &QCheckBox::toggled, ui_->showFieldCheckBox, &QCheckBox::setChecked);
+    connect(ui_->registrationShowTargetCheckBox, &QCheckBox::toggled, ui_->showTargetCheckBox, &QCheckBox::setChecked);
+    connect(ui_->registrationShowTransducersCheckBox, &QCheckBox::toggled, ui_->showTransducersCheckBox, &QCheckBox::setChecked);
+    connect(ui_->registrationTransparencySlider, &QSlider::valueChanged, ui_->transducerTransparencySlider, &QSlider::setValue);
     connect(ui_->sagittalSlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->coronalSlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->axialSlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
@@ -292,6 +304,8 @@ void WorkflowWindow::chooseBeamSession() {
             if (state->error) std::rethrow_exception(state->error);
             auto imported = std::move(state->value.value());
             installMri(std::move(imported.volume), std::move(imported.axes), path);
+            rebuildFocusImage();
+            showMriPreviews();
             if (imported.fiducials.size() == 6) {
                 fiducials_.clear();
                 ui_->fiducialCombo->clear();
@@ -329,6 +343,7 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
         throw std::runtime_error("MRI physical axes do not match the voxel dimensions");
     const bool replacing = mriLoaded_;
     mriVolume_ = std::move(volume);
+    focusImageLoaded_ = false;
     mriAxes_ = std::move(axes);
     if (mriAxes_.dimLR.size() > 1 && mriAxes_.dimLR(0) > mriAxes_.dimLR(mriAxes_.dimLR.size() - 1)) mriAxes_.dimLR.reverseInPlace();
     if (mriAxes_.dimAP.size() > 1 && mriAxes_.dimAP(0) > mriAxes_.dimAP(mriAxes_.dimAP.size() - 1)) mriAxes_.dimAP.reverseInPlace();
@@ -379,6 +394,7 @@ void WorkflowWindow::loadMri(const QString& path) {
 
         const bool replacing = mriLoaded_;
         mriVolume_ = std::move(volume);
+        focusImageLoaded_ = false;
         mriAxes_ = ras.axes;
         // applyVoxelRasXform3D makes voxel indices increase in R/A/S. Keep
         // the displayed physical axes in that same order after a source flip.
@@ -440,6 +456,31 @@ void WorkflowWindow::resetMriViews() {
                                   ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
                                   ui_->registrationAxialPreview})
         view->resetView();
+}
+
+void WorkflowWindow::rebuildFocusImage() {
+    // BeamV0/drawFocusOnMRI.m calls setFiducialTemplate at the current
+    // array centre on every draw. Its identity-rotation focus template is
+    // the ellipsoid (LR/30)^2 + (AP/5)^2 + (IS/5)^2 < 1, in millimetres.
+    focusImage_.nx = mriVolume_.nx;
+    focusImage_.ny = mriVolume_.ny;
+    focusImage_.nz = mriVolume_.nz;
+    focusImage_.kSlices.assign(static_cast<std::size_t>(mriVolume_.nz),
+                               Eigen::MatrixXd::Zero(mriVolume_.nx, mriVolume_.ny));
+    for (Eigen::Index k = 0; k < mriVolume_.nz; ++k) {
+        const double dz = (mriAxes_.dimIS(k) - targetMm_.z()) / 5.0;
+        if (std::abs(dz) >= 1.0) continue;
+        for (Eigen::Index j = 0; j < mriVolume_.ny; ++j) {
+            const double dy = (mriAxes_.dimAP(j) - targetMm_.y()) / 5.0;
+            if (dy * dy + dz * dz >= 1.0) continue;
+            for (Eigen::Index i = 0; i < mriVolume_.nx; ++i) {
+                const double dx = (mriAxes_.dimLR(i) - targetMm_.x()) / 30.0;
+                if (dx * dx + dy * dy + dz * dz < 1.0)
+                    focusImage_.kSlices[static_cast<std::size_t>(k)](i, j) = 1.0;
+            }
+        }
+    }
+    focusImageLoaded_ = true;
 }
 
 void WorkflowWindow::initializeRegistrationGeometry() {
@@ -559,14 +600,14 @@ void WorkflowWindow::beginFiducialPlacement() {
 
 void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm) {
     const int row = ui_->registrationTable->currentRow();
-    if (!placingFiducial_ || row < 0 || row >= 6) return;
+    if (selectedStage_ != beam::gui::WorkflowStage::Registration || row < 0 || row >= 6) return;
     ui_->registrationTable->blockSignals(true);
     for (int axis = 0; axis < 3; ++axis)
         ui_->registrationTable->item(row, axis + 1)->setText(QString::number(positionMm(axis), 'f', 2));
     ui_->registrationTable->blockSignals(false);
     fiducialConfirmed_[static_cast<std::size_t>(row)] = true;
     fiducials_[static_cast<std::size_t>(row)].position = positionMm / 1000.0;
-    setPlacementMode(false);
+    if (placingFiducial_) setPlacementMode(false);
     ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Measured"));
     showMriPreviews();
     workflow_.change(beam::gui::WorkflowStage::Registration,
@@ -588,6 +629,7 @@ void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResu
     targetMm_ = arrayData_.arrayTotal.rect.block(16, 0, 3, arrayData_.arrayTotal.rect.cols()).rowwise().mean() * 1000.0;
     arrayMask_ = beam::gui::rasterizeArrayOntoMriGrid(arrayData_.arrayTotal, mriAxes_, mriVolume_.nx,
                                                        mriVolume_.ny, mriVolume_.nz);
+    if (focusImageLoaded_) rebuildFocusImage();
     showMriPreviews();
 }
 
@@ -659,48 +701,94 @@ void WorkflowWindow::showMriPreviews() {
     // Imaging is the unregistered source image review. Registration geometry is
     // deliberately confined to the Registration page so model estimates cannot
     // be mistaken for fiducials already identified in the patient's MRI.
-    ui_->sagittalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
-    ui_->coronalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
-    ui_->axialPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+    if (focusImageLoaded_ && ui_->showFieldCheckBox->isChecked()) {
+        ui_->sagittalPreview->setMaskOverlay(beam::mri::getSliceImage(focusImage_, sagittal, "sagital"), QColor(255, 128, 128), 0.75, true);
+        ui_->coronalPreview->setMaskOverlay(beam::mri::getSliceImage(focusImage_, coronal, "coronal"), QColor(255, 128, 128), 0.75);
+        ui_->axialPreview->setMaskOverlay(beam::mri::getSliceImage(focusImage_, axial, "axial"), QColor(255, 128, 128), 0.75);
+    } else {
+        ui_->sagittalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->coronalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->axialPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+    }
     ui_->sagittalPreview->setMarkers({});
     ui_->coronalPreview->setMarkers({});
     ui_->axialPreview->setMarkers({});
 
+    const double transducerOpacity = static_cast<double>(ui_->transducerTransparencySlider->value()) / 100.0;
+    if (registrationGeometryLoaded_ && ui_->showTransducersCheckBox->isChecked()) {
+        ui_->sagittalPreview->setSecondaryMaskOverlay(beam::mri::getSliceImage(arrayMask_, sagittal, "sagital"), QColor(255, 220, 40), transducerOpacity, true);
+        ui_->coronalPreview->setSecondaryMaskOverlay(beam::mri::getSliceImage(arrayMask_, coronal, "coronal"), QColor(255, 220, 40), transducerOpacity);
+        ui_->axialPreview->setSecondaryMaskOverlay(beam::mri::getSliceImage(arrayMask_, axial, "axial"), QColor(255, 220, 40), transducerOpacity);
+    } else {
+        ui_->sagittalPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->coronalPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->axialPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+    }
+
     if (registrationGeometryLoaded_) {
-        ui_->registrationSagittalPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, sagittal, "sagital"), QColor(255, 220, 40), 0.55, true);
-        ui_->registrationCoronalPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, coronal, "coronal"), QColor(255, 220, 40), 0.55);
-        ui_->registrationAxialPreview->setMaskOverlay(beam::mri::getSliceImage(arrayMask_, axial, "axial"), QColor(255, 220, 40), 0.55);
+        if (focusImageLoaded_ && ui_->showFieldCheckBox->isChecked()) {
+            ui_->registrationSagittalPreview->setMaskOverlay(beam::mri::getSliceImage(focusImage_, sagittal, "sagital"), QColor(255, 128, 128), 0.75, true);
+            ui_->registrationCoronalPreview->setMaskOverlay(beam::mri::getSliceImage(focusImage_, coronal, "coronal"), QColor(255, 128, 128), 0.75);
+            ui_->registrationAxialPreview->setMaskOverlay(beam::mri::getSliceImage(focusImage_, axial, "axial"), QColor(255, 128, 128), 0.75);
+        } else {
+            ui_->registrationSagittalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+            ui_->registrationCoronalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+            ui_->registrationAxialPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        }
+        if (ui_->showTransducersCheckBox->isChecked()) {
+            ui_->registrationSagittalPreview->setSecondaryMaskOverlay(beam::mri::getSliceImage(arrayMask_, sagittal, "sagital"), QColor(255, 220, 40), transducerOpacity, true);
+            ui_->registrationCoronalPreview->setSecondaryMaskOverlay(beam::mri::getSliceImage(arrayMask_, coronal, "coronal"), QColor(255, 220, 40), transducerOpacity);
+            ui_->registrationAxialPreview->setSecondaryMaskOverlay(beam::mri::getSliceImage(arrayMask_, axial, "axial"), QColor(255, 220, 40), transducerOpacity);
+        } else {
+            ui_->registrationSagittalPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+            ui_->registrationCoronalPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+            ui_->registrationAxialPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        }
 
         std::vector<WorkflowMriMarker> sagMarkers, corMarkers, axialMarkers;
-        for (const auto& marker : fiducials_) {
+        const int selectedFiducial = selectedStage_ == beam::gui::WorkflowStage::Registration
+                                         ? ui_->registrationTable->currentRow() : -1;
+        for (std::size_t markerIndex = 0; markerIndex < fiducials_.size(); ++markerIndex) {
+            const auto& marker = fiducials_[markerIndex];
+            const bool draggable = static_cast<int>(markerIndex) == selectedFiducial;
             const Eigen::Vector3d mm = marker.position * 1000.0;
             const auto voxel = beam::gui::imagePositionToVoxelIndex(mm, mriAxes_);
             if (voxel.i == sagittal - 1)
                 sagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
                                                1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                      QString::fromStdString(marker.name), QColor(230, 45, 55), false});
+                                      QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable});
             if (voxel.j == coronal - 1)
                 corMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                      QString::fromStdString(marker.name), QColor(230, 45, 55), false});
+                                      QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable});
             if (voxel.k == axial - 1)
                 axialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                  1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
-                                        QString::fromStdString(marker.name), QColor(230, 45, 55), false});
+                                        QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable});
         }
+        std::vector<WorkflowMriMarker> imagingSagMarkers, imagingCorMarkers, imagingAxialMarkers;
         const auto targetVoxel = beam::gui::imagePositionToVoxelIndex(targetMm_, mriAxes_);
-        if (targetVoxel.i == sagittal - 1)
+        if (ui_->showTargetCheckBox->isChecked() && targetVoxel.i == sagittal - 1) {
             sagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
                                   QString(), QColor(65, 235, 100), true});
-        if (targetVoxel.j == coronal - 1)
+            imagingSagMarkers.push_back(sagMarkers.back());
+        }
+        if (ui_->showTargetCheckBox->isChecked() && targetVoxel.j == coronal - 1) {
             corMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
                                   QString(), QColor(65, 235, 100), true});
-        if (targetVoxel.k == axial - 1)
+            imagingCorMarkers.push_back(corMarkers.back());
+        }
+        if (ui_->showTargetCheckBox->isChecked() && targetVoxel.k == axial - 1) {
             axialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
                                              1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y())),
                                     QString(), QColor(65, 235, 100), true});
+            imagingAxialMarkers.push_back(axialMarkers.back());
+        }
+        ui_->sagittalPreview->setMarkers(std::move(imagingSagMarkers));
+        ui_->coronalPreview->setMarkers(std::move(imagingCorMarkers));
+        ui_->axialPreview->setMarkers(std::move(imagingAxialMarkers));
         ui_->registrationSagittalPreview->setMarkers(std::move(sagMarkers));
         ui_->registrationCoronalPreview->setMarkers(std::move(corMarkers));
         ui_->registrationAxialPreview->setMarkers(std::move(axialMarkers));
@@ -708,6 +796,9 @@ void WorkflowWindow::showMriPreviews() {
         ui_->registrationSagittalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
         ui_->registrationCoronalPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
         ui_->registrationAxialPreview->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->registrationSagittalPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->registrationCoronalPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        ui_->registrationAxialPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
         ui_->registrationSagittalPreview->setMarkers({});
         ui_->registrationCoronalPreview->setMarkers({});
         ui_->registrationAxialPreview->setMarkers({});
