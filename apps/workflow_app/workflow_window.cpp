@@ -22,6 +22,7 @@
 #include <QTableWidgetItem>
 #include <QProgressDialog>
 #include <QThread>
+#include <QStyle>
 
 #include "infra_dicom/load_mri_ras.hpp"
 #include "infra_mat/legacy_beam_session.hpp"
@@ -109,6 +110,34 @@ QString statusSymbol(beam::gui::WorkflowStatus status) {
 
 WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new Ui::WorkflowShell) {
     ui_->setupUi(this);
+    for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->coronalPreviousButton,
+                                ui_->axialPreviousButton}) {
+        button->setIcon(QIcon());
+        button->setText(QString(QChar(0x25C0)));
+    }
+    for (QToolButton* button : {ui_->sagittalNextButton, ui_->coronalNextButton,
+                                ui_->axialNextButton}) {
+        button->setIcon(QIcon());
+        button->setText(QString(QChar(0x25B6)));
+    }
+    for (QToolButton* button : {ui_->resetSagittalButton, ui_->resetCoronalButton,
+                                ui_->resetAxialButton}) {
+        button->setIcon(QIcon());
+        button->setText(QString(QChar(0x21BA)));
+    }
+    const QString sliceButtonStyle = QStringLiteral(
+        "QToolButton { background: #f7fafb; color: #17313f; border: 1px solid #9eacb4; "
+        "border-radius: 4px; min-width: 28px; min-height: 24px; padding: 2px; "
+        "font-family: 'Segoe UI Symbol'; font-size: 15px; font-weight: 700; } "
+        "QToolButton:hover { background: #e3f2f6; border-color: #2888a2; } "
+        "QToolButton:pressed { background: #cce7ee; } "
+        "QToolButton:disabled { background: #e8ecee; border-color: #c9d0d4; }");
+    for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->sagittalNextButton,
+                                ui_->coronalPreviousButton, ui_->coronalNextButton,
+                                ui_->axialPreviousButton, ui_->axialNextButton,
+                                ui_->resetSagittalButton, ui_->resetCoronalButton,
+                                ui_->resetAxialButton})
+        button->setStyleSheet(sliceButtonStyle);
     for (QLabel* label : findChildren<QLabel*>()) {
         label->setTextInteractionFlags(label->textInteractionFlags() |
                                        Qt::TextSelectableByMouse |
@@ -158,6 +187,17 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->sagittalSlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->coronalSlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->axialSlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
+    const auto connectSliceStep = [this](QToolButton* button, QSlider* slider, int direction) {
+        connect(button, &QToolButton::clicked, this, [slider, direction] {
+            slider->setValue(slider->value() + direction);
+        });
+    };
+    connectSliceStep(ui_->sagittalPreviousButton, ui_->sagittalSlider, -1);
+    connectSliceStep(ui_->sagittalNextButton, ui_->sagittalSlider, 1);
+    connectSliceStep(ui_->coronalPreviousButton, ui_->coronalSlider, -1);
+    connectSliceStep(ui_->coronalNextButton, ui_->coronalSlider, 1);
+    connectSliceStep(ui_->axialPreviousButton, ui_->axialSlider, -1);
+    connectSliceStep(ui_->axialNextButton, ui_->axialSlider, 1);
     connect(ui_->registrationSagittalSlider, &QSlider::valueChanged, ui_->sagittalSlider, &QSlider::setValue);
     connect(ui_->registrationCoronalSlider, &QSlider::valueChanged, ui_->coronalSlider, &QSlider::setValue);
     connect(ui_->registrationAxialSlider, &QSlider::valueChanged, ui_->axialSlider, &QSlider::setValue);
@@ -321,12 +361,15 @@ void WorkflowWindow::chooseBeamSession() {
             if (imported.fiducials.size() == 6) {
                 fiducials_.clear();
                 ui_->fiducialCombo->clear();
-                for (const auto& source : imported.fiducials) {
+                for (std::size_t fiducialIndex = 0; fiducialIndex < imported.fiducials.size(); ++fiducialIndex) {
+                    const auto& source = imported.fiducials[fiducialIndex];
                     beam::registration::FiducialMarker marker;
                     marker.name = source.name;
                     marker.position = source.positionMm / 1000.0;
                     fiducials_.push_back(marker);
-                    ui_->fiducialCombo->addItem(QString::fromStdString(marker.name));
+                    ui_->fiducialCombo->addItem(QStringLiteral("%1. %2")
+                                                    .arg(fiducialIndex + 1)
+                                                    .arg(QString::fromStdString(marker.name)));
                 }
                 ui_->fiducialCombo->setPlaceholderText(QStringLiteral("Select a fiducial…"));
                 ui_->fiducialCombo->setCurrentIndex(-1);
@@ -387,6 +430,9 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     for (QSlider* slider : {ui_->sagittalSlider, ui_->coronalSlider, ui_->axialSlider,
                             ui_->registrationSagittalSlider, ui_->registrationCoronalSlider, ui_->registrationAxialSlider}) slider->setEnabled(true);
     ui_->resetSagittalButton->setEnabled(true); ui_->resetCoronalButton->setEnabled(true); ui_->resetAxialButton->setEnabled(true);
+    for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->sagittalNextButton,
+                                ui_->coronalPreviousButton, ui_->coronalNextButton,
+                                ui_->axialPreviousButton, ui_->axialNextButton}) button->setEnabled(true);
     ui_->acceptImagingButton->setEnabled(true);
     ui_->resetInitialSlicesButton->setEnabled(true);
     resetMriViews();
@@ -451,6 +497,9 @@ void WorkflowWindow::loadMri(const QString& path) {
         ui_->resetSagittalButton->setEnabled(true);
         ui_->resetCoronalButton->setEnabled(true);
         ui_->resetAxialButton->setEnabled(true);
+        for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->sagittalNextButton,
+                                    ui_->coronalPreviousButton, ui_->coronalNextButton,
+                                    ui_->axialPreviousButton, ui_->axialNextButton}) button->setEnabled(true);
         ui_->acceptImagingButton->setEnabled(true);
         ui_->resetInitialSlicesButton->setEnabled(true);
         resetMriViews();
@@ -529,7 +578,10 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     registrationOriginArrayData_ = arrayData_;
     registrationComplete_ = false;
     ui_->fiducialCombo->clear();
-    for (const auto& marker : fiducials_) ui_->fiducialCombo->addItem(QString::fromStdString(marker.name));
+    for (std::size_t fiducialIndex = 0; fiducialIndex < fiducials_.size(); ++fiducialIndex)
+        ui_->fiducialCombo->addItem(QStringLiteral("%1. %2")
+                                        .arg(fiducialIndex + 1)
+                                        .arg(QString::fromStdString(fiducials_[fiducialIndex].name)));
     ui_->fiducialCombo->setPlaceholderText(QStringLiteral("Select a fiducial…"));
     ui_->fiducialCombo->setCurrentIndex(-1);
     ui_->fiducialCombo->setEnabled(!fiducials_.empty());
