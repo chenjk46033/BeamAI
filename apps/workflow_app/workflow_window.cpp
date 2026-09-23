@@ -184,6 +184,18 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         showMessage(QStringLiteral("Showing fiducial %1 on all three planes.")
                         .arg(QString::fromStdString(fiducials_[static_cast<std::size_t>(markerIndex)].name)), false);
     });
+    connect(ui_->fiducialCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
+        ui_->goToFiducialButton->setEnabled(mriLoaded_ && index >= 0 &&
+                                             index < static_cast<int>(fiducials_.size()));
+    });
+    connect(ui_->resetInitialSlicesButton, &QPushButton::clicked, this, [this] {
+        if (!mriLoaded_) return;
+        ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));
+        ui_->coronalSlider->setValue(static_cast<int>((mriVolume_.ny - 1) / 2));
+        ui_->axialSlider->setValue(static_cast<int>((mriVolume_.nz - 1) / 2));
+        ui_->fiducialCombo->setCurrentIndex(-1);
+        showMessage(QStringLiteral("MRI returned to the initially loaded LR, AP, and IS slices."), false);
+    });
     connect(ui_->acceptImagingButton, &QPushButton::clicked, this, [this] {
         if (!mriLoaded_) {
             showMessage(QStringLiteral("Load a patient MRI before accepting imaging."), true);
@@ -316,6 +328,8 @@ void WorkflowWindow::chooseBeamSession() {
                     fiducials_.push_back(marker);
                     ui_->fiducialCombo->addItem(QString::fromStdString(marker.name));
                 }
+                ui_->fiducialCombo->setPlaceholderText(QStringLiteral("Select a fiducial…"));
+                ui_->fiducialCombo->setCurrentIndex(-1);
                 registrationSourceFiducials_ = fiducials_;
                 fiducialConfirmed_.fill(true);
                 sourceFiducialConfirmed_.fill(true);
@@ -374,6 +388,7 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
                             ui_->registrationSagittalSlider, ui_->registrationCoronalSlider, ui_->registrationAxialSlider}) slider->setEnabled(true);
     ui_->resetSagittalButton->setEnabled(true); ui_->resetCoronalButton->setEnabled(true); ui_->resetAxialButton->setEnabled(true);
     ui_->acceptImagingButton->setEnabled(true);
+    ui_->resetInitialSlicesButton->setEnabled(true);
     resetMriViews();
     initializeRegistrationGeometry();
     showMriPreviews();
@@ -437,6 +452,7 @@ void WorkflowWindow::loadMri(const QString& path) {
         ui_->resetCoronalButton->setEnabled(true);
         ui_->resetAxialButton->setEnabled(true);
         ui_->acceptImagingButton->setEnabled(true);
+        ui_->resetInitialSlicesButton->setEnabled(true);
         resetMriViews();
         initializeRegistrationGeometry();
         showMriPreviews();
@@ -514,8 +530,10 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     registrationComplete_ = false;
     ui_->fiducialCombo->clear();
     for (const auto& marker : fiducials_) ui_->fiducialCombo->addItem(QString::fromStdString(marker.name));
+    ui_->fiducialCombo->setPlaceholderText(QStringLiteral("Select a fiducial…"));
+    ui_->fiducialCombo->setCurrentIndex(-1);
     ui_->fiducialCombo->setEnabled(!fiducials_.empty());
-    ui_->goToFiducialButton->setEnabled(!fiducials_.empty());
+    ui_->goToFiducialButton->setEnabled(false);
     targetMm_ = arrayData_.arrayTotal.rect.block(16, 0, 3, arrayData_.arrayTotal.rect.cols()).rowwise().mean() * 1000.0;
     arrayMask_ = beam::gui::rasterizeArrayOntoMriGrid(arrayData_.arrayTotal, mriAxes_, mriVolume_.nx,
                                                        mriVolume_.ny, mriVolume_.nz);
