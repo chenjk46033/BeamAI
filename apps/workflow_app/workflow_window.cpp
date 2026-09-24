@@ -112,6 +112,18 @@ QString statusSymbol(beam::gui::WorkflowStatus status) {
 WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new Ui::WorkflowShell) {
     ui_->setupUi(this);
 
+    // Keep the two workflow-gating actions visible while the operator reviews
+    // the large MRI workspace. They remain the same widgets and connections,
+    // but are promoted above the image/table area as full-width actions.
+    ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
+    ui_->registrationLayout->insertWidget(2, ui_->registerFiducialsButton);
+    ui_->registrationLayout->removeWidget(ui_->acceptRegistrationButton);
+    ui_->registrationLayout->insertWidget(3, ui_->acceptRegistrationButton);
+    for (QPushButton* button : {ui_->registerFiducialsButton, ui_->acceptRegistrationButton}) {
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setMinimumHeight(40);
+    }
+
     // The imaging page starts as an uncluttered source-data review; users can
     // explicitly reveal fiducials there. Registration keeps them visible.
     ui_->showFiducialsCheckBox->setChecked(false);

@@ -290,7 +290,7 @@
                                       <string>Accept case and continue →</string>
                                     </property>
                                     <property name="styleSheet">
-                                      <string>padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600;</string>
+                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; outline: none; } QPushButton:focus { outline: none; border: 0; }</string>
                                     </property>
                                   </widget>
                                 </item>
@@ -389,7 +389,7 @@
                                       </size>
                                     </property>
                                     <property name="styleSheet">
-                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
+                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; outline: none; } QPushButton:focus { outline: none; border: 0; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
                                     </property>
                                   </widget>
                                 </item>
@@ -1028,7 +1028,7 @@
                                       </size>
                                     </property>
                                     <property name="styleSheet">
-                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
+                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; outline: none; } QPushButton:focus { outline: none; border: 0; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
                                     </property>
                                   </widget>
                                 </item>
@@ -1623,7 +1623,7 @@
                                 </size>
                               </property>
                               <property name="styleSheet">
-                                <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
+                                <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; outline: none; } QPushButton:focus { outline: none; border: 0; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
                               </property>
                             </widget>
                           </item>
