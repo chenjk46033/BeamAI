@@ -54,6 +54,8 @@ if(Qt6_FOUND AND TARGET gui_qt)
         workflow_app/main.cpp
         workflow_app/mri_view.cpp
         workflow_app/mri_view.hpp
+        workflow_app/registration_fiducial_layout.cpp
+        workflow_app/registration_fiducial_layout.hpp
         workflow_app/workflow_window.cpp
         workflow_app/workflow_window.hpp
         workflow_app/resources/workflow_resources.qrc

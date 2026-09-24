@@ -42,6 +42,12 @@ void WorkflowMriView::adjustBrightness(double amount) {
     update();
 }
 
+void WorkflowMriView::resetBrightness() {
+    brightness_ = 1.0;
+    rebuildImage();
+    update();
+}
+
 void WorkflowMriView::setMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity,
                                      bool flipHorizontal) {
     if (mask.size() == 0) {

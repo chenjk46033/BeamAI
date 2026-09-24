@@ -68,6 +68,7 @@ private:
     bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
     bool focusImageLoaded_ = false;
+    int registrationStartFiducialRow_ = -1;
     QString mriPath_;
 };
 

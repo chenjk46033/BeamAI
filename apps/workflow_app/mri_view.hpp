@@ -36,6 +36,7 @@ public:
     void setNavigationCrosshair(QPointF normalizedPosition);
     void setNavigationCrosshairVisible(bool visible);
     void adjustBrightness(double amount);
+    void resetBrightness();
     void resetView();
     void focusOn(QPointF normalizedPosition, double zoom = 3.0);
     void setPointPlacementEnabled(bool enabled);

@@ -111,6 +111,7 @@ QString statusSymbol(beam::gui::WorkflowStatus status) {
 
 WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new Ui::WorkflowShell) {
     ui_->setupUi(this);
+
     // The imaging page starts as an uncluttered source-data review; users can
     // explicitly reveal fiducials there. Registration keeps them visible.
     ui_->showFiducialsCheckBox->setChecked(false);
@@ -193,6 +194,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         if (row >= 0 && row < static_cast<int>(stageCount)) selectStage(static_cast<beam::gui::WorkflowStage>(row));
     });
     connect(ui_->completeStageButton, &QPushButton::clicked, this, [this] { completeCurrentStage(); });
+    connect(ui_->acceptCaseButton, &QPushButton::clicked, this, [this] { completeCurrentStage(); });
     connect(ui_->simulatePassButton, &QPushButton::clicked, this, [this] {
         deviceCheckPassed_ = true;
         workflow_.change(beam::gui::WorkflowStage::SystemCheck,
@@ -256,14 +258,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         connect(button, &QToolButton::clicked, this, [adjustAllViewBrightness] { adjustAllViewBrightness(-0.1); });
     for (QToolButton* button : {ui_->brightnessUpButton, ui_->registrationBrightnessUpButton})
         connect(button, &QToolButton::clicked, this, [adjustAllViewBrightness] { adjustAllViewBrightness(0.1); });
-    const auto resetAllMriViews = [this] {
+    const auto resetAllViewBrightness = [this] {
         for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
                                      ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
                                      ui_->registrationAxialPreview})
-            view->resetView();
+            view->resetBrightness();
     };
-    connect(ui_->resetAllMriViewsButton, &QToolButton::clicked, this, resetAllMriViews);
-    connect(ui_->registrationResetAllMriViewsButton, &QToolButton::clicked, this, resetAllMriViews);
+    connect(ui_->resetAllMriViewsButton, &QToolButton::clicked, this, resetAllViewBrightness);
+    connect(ui_->registrationResetAllMriViewsButton, &QToolButton::clicked, this, resetAllViewBrightness);
     connect(ui_->showFieldCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showTargetCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
@@ -314,9 +316,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->registrationResetSagittalButton, &QToolButton::clicked, ui_->resetSagittalButton, &QToolButton::click);
     connect(ui_->registrationResetCoronalButton, &QToolButton::clicked, ui_->resetCoronalButton, &QToolButton::click);
     connect(ui_->registrationResetAxialButton, &QToolButton::clicked, ui_->resetAxialButton, &QToolButton::click);
-    connect(ui_->goToFiducialButton, &QPushButton::clicked, this, [this] {
-        const int markerIndex = ui_->fiducialCombo->currentIndex();
-        if (markerIndex < 0 || markerIndex >= static_cast<int>(fiducials_.size())) return;
+    ui_->imagingFiducialLayout->setSelectionHandler([this](int markerIndex) {
+        if (!mriLoaded_ || markerIndex < 0 || markerIndex >= static_cast<int>(fiducials_.size())) return;
+        ui_->imagingFiducialLayout->setSelectedIndex(markerIndex);
         const Eigen::Vector3d markerMm = fiducials_[static_cast<std::size_t>(markerIndex)].position * 1000.0;
         const auto voxel = beam::gui::imagePositionToVoxelIndex(markerMm, mriAxes_);
         ui_->sagittalSlider->setValue(static_cast<int>(voxel.i));
@@ -325,17 +327,21 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         showMessage(QStringLiteral("Showing fiducial %1 on all three planes.")
                         .arg(QString::fromStdString(fiducials_[static_cast<std::size_t>(markerIndex)].name)), false);
     });
-    connect(ui_->fiducialCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
-        ui_->goToFiducialButton->setEnabled(mriLoaded_ && index >= 0 &&
-                                             index < static_cast<int>(fiducials_.size()));
-    });
     connect(ui_->resetInitialSlicesButton, &QPushButton::clicked, this, [this] {
         if (!mriLoaded_) return;
         ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));
         ui_->coronalSlider->setValue(static_cast<int>((mriVolume_.ny - 1) / 2));
         ui_->axialSlider->setValue(static_cast<int>((mriVolume_.nz - 1) / 2));
-        ui_->fiducialCombo->setCurrentIndex(-1);
+        ui_->imagingFiducialLayout->setSelectedIndex(-1);
         showMessage(QStringLiteral("MRI returned to the initially loaded LR, AP, and IS slices."), false);
+    });
+    connect(ui_->registrationResetInitialSlicesButton, &QPushButton::clicked,
+            ui_->resetInitialSlicesButton, &QPushButton::click);
+    connect(ui_->registrationReturnStartButton, &QPushButton::clicked, this, [this] {
+        if (!mriLoaded_ || registrationStartFiducialRow_ < 0) return;
+        ui_->registrationTable->setCurrentCell(registrationStartFiducialRow_, 0);
+        navigateToRegistrationFiducial(registrationStartFiducialRow_);
+        showMessage(QStringLiteral("Returned to the view shown when Registration was first opened."), false);
     });
     connect(ui_->acceptImagingButton, &QPushButton::clicked, this, [this] {
         if (!mriLoaded_) {
@@ -375,11 +381,15 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->acceptRegistrationButton, &QPushButton::clicked, this, [this] { acceptFiducialRegistration(); });
     connect(ui_->registrationTable, &QTableWidget::currentCellChanged, this,
             [this](int currentRow, int, int, int) {
+                ui_->registrationFiducialLayout->setSelectedIndex(currentRow);
                 navigateToRegistrationFiducial(currentRow);
                 ui_->confirmFiducialButton->setEnabled(currentRow >= 0 && currentRow < 6 &&
                     fiducialLocated_[static_cast<std::size_t>(currentRow)] &&
                     !fiducialConfirmed_[static_cast<std::size_t>(currentRow)]);
             });
+    ui_->registrationFiducialLayout->setSelectionHandler([this](int markerIndex) {
+        ui_->registrationTable->setCurrentCell(markerIndex, 0);
+    });
     connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int, int column) {
         if (!registrationGeometryLoaded_ || column == 0 || column >= 4) return;
         const int row = ui_->registrationTable->currentRow();
@@ -485,19 +495,13 @@ void WorkflowWindow::chooseBeamSession() {
             showMriPreviews();
             if (imported.fiducials.size() == 6) {
                 fiducials_.clear();
-                ui_->fiducialCombo->clear();
                 for (std::size_t fiducialIndex = 0; fiducialIndex < imported.fiducials.size(); ++fiducialIndex) {
                     const auto& source = imported.fiducials[fiducialIndex];
                     beam::registration::FiducialMarker marker;
                     marker.name = source.name;
                     marker.position = source.positionMm / 1000.0;
                     fiducials_.push_back(marker);
-                    ui_->fiducialCombo->addItem(QStringLiteral("%1. %2")
-                                                    .arg(fiducialIndex + 1)
-                                                    .arg(QString::fromStdString(marker.name)));
                 }
-                ui_->fiducialCombo->setPlaceholderText(QStringLiteral("Select a fiducial…"));
-                ui_->fiducialCombo->setCurrentIndex(-1);
                 registrationSourceFiducials_ = fiducials_;
                 fiducialConfirmed_.fill(true);
                 sourceFiducialConfirmed_.fill(true);
@@ -526,6 +530,8 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     if (axes.dimLR.size() != volume.nx || axes.dimAP.size() != volume.ny || axes.dimIS.size() != volume.nz)
         throw std::runtime_error("MRI physical axes do not match the voxel dimensions");
     const bool replacing = mriLoaded_;
+    registrationStartFiducialRow_ = -1;
+    ui_->registrationReturnStartButton->setEnabled(false);
     mriVolume_ = std::move(volume);
     focusImageLoaded_ = false;
     mriAxes_ = std::move(axes);
@@ -567,6 +573,7 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
                                 ui_->registrationResetAxialButton}) button->setEnabled(true);
     ui_->acceptImagingButton->setEnabled(true);
     ui_->resetInitialSlicesButton->setEnabled(true);
+    ui_->registrationResetInitialSlicesButton->setEnabled(true);
     resetMriViews();
     initializeRegistrationGeometry();
     showMriPreviews();
@@ -586,6 +593,8 @@ void WorkflowWindow::loadMri(const QString& path) {
         }
 
         const bool replacing = mriLoaded_;
+        registrationStartFiducialRow_ = -1;
+        ui_->registrationReturnStartButton->setEnabled(false);
         mriVolume_ = std::move(volume);
         focusImageLoaded_ = false;
         mriAxes_ = ras.axes;
@@ -639,6 +648,7 @@ void WorkflowWindow::loadMri(const QString& path) {
                                     ui_->registrationResetAxialButton}) button->setEnabled(true);
         ui_->acceptImagingButton->setEnabled(true);
         ui_->resetInitialSlicesButton->setEnabled(true);
+        ui_->registrationResetInitialSlicesButton->setEnabled(true);
         resetMriViews();
         initializeRegistrationGeometry();
         showMriPreviews();
@@ -716,15 +726,8 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     sourceFiducialLocated_.fill(false);
     registrationOriginArrayData_ = arrayData_;
     registrationComplete_ = false;
-    ui_->fiducialCombo->clear();
-    for (std::size_t fiducialIndex = 0; fiducialIndex < fiducials_.size(); ++fiducialIndex)
-        ui_->fiducialCombo->addItem(QStringLiteral("%1. %2")
-                                        .arg(fiducialIndex + 1)
-                                        .arg(QString::fromStdString(fiducials_[fiducialIndex].name)));
-    ui_->fiducialCombo->setPlaceholderText(QStringLiteral("Select a fiducial…"));
-    ui_->fiducialCombo->setCurrentIndex(-1);
-    ui_->fiducialCombo->setEnabled(!fiducials_.empty());
-    ui_->goToFiducialButton->setEnabled(false);
+    ui_->imagingFiducialLayout->setEnabled(!fiducials_.empty());
+    ui_->imagingFiducialLayout->setSelectedIndex(-1);
     targetMm_ = arrayData_.arrayTotal.rect.block(16, 0, 3, arrayData_.arrayTotal.rect.cols()).rowwise().mean() * 1000.0;
     // MATLAB drawMrImages always calls drawFocusOnMRI after its initial
     // transducer placement. Do the same for every MRI source, including raw
@@ -1159,13 +1162,20 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     ui_->pageTitle->setText(QString::fromUtf8(beam::gui::workflowStageName(stage).data()));
     const int stageIndex = static_cast<int>(stage);
     ui_->pageStack->setCurrentIndex(stageIndex <= 3 ? stageIndex : 4);
-    ui_->completeStageButton->setVisible(stage != beam::gui::WorkflowStage::SystemCheck &&
+    ui_->completeStageButton->setVisible(stage != beam::gui::WorkflowStage::CaseSetup &&
+                                         stage != beam::gui::WorkflowStage::SystemCheck &&
                                          stage != beam::gui::WorkflowStage::Imaging &&
                                          stage != beam::gui::WorkflowStage::Registration);
     if (stage == beam::gui::WorkflowStage::Registration && mriLoaded_) {
         showMriPreviews();
         const int row = ui_->registrationTable->currentRow();
-        if (row >= 0) navigateToRegistrationFiducial(row);
+        if (row >= 0) {
+            navigateToRegistrationFiducial(row);
+            if (registrationStartFiducialRow_ < 0) {
+                registrationStartFiducialRow_ = row;
+                ui_->registrationReturnStartButton->setEnabled(true);
+            }
+        }
     }
     refresh();
 }

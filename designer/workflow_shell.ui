@@ -175,13 +175,13 @@
                     <number>28</number>
                   </property>
                   <property name="topMargin">
-                    <number>24</number>
+                    <number>10</number>
                   </property>
                   <property name="rightMargin">
                     <number>28</number>
                   </property>
                   <property name="bottomMargin">
-                    <number>22</number>
+                    <number>12</number>
                   </property>
                   <item>
                     <widget class="QLabel" name="pageTitle">
@@ -199,7 +199,7 @@
                         <string>Create or resume a treatment case.</string>
                       </property>
                       <property name="styleSheet">
-                        <string>color: #63717b; margin-bottom: 10px;</string>
+                        <string>color: #63717b; margin-bottom: 2px;</string>
                       </property>
                     </widget>
                   </item>
@@ -284,6 +284,16 @@
                                     </item>
                                   </widget>
                                 </item>
+                                <item row="4" column="1">
+                                  <widget class="QPushButton" name="acceptCaseButton">
+                                    <property name="text">
+                                      <string>Accept case and continue →</string>
+                                    </property>
+                                    <property name="styleSheet">
+                                      <string>padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600;</string>
+                                    </property>
+                                  </widget>
+                                </item>
                               </layout>
                             </widget>
                           </item>
@@ -349,25 +359,37 @@
                                         </property>
                                       </spacer>
                                     </item>
-                                    <item>
-                                      <widget class="QPushButton" name="acceptDeviceReadinessButton">
-                                        <property name="text">
-                                          <string>Accept readiness and continue →</string>
-                                        </property>
-                                        <property name="enabled">
-                                          <bool>false</bool>
-                                        </property>
-                                      </widget>
-                                    </item>
                                   </layout>
                                 </item>
                                 <item>
                                   <widget class="QLabel" name="deviceResult">
+                                    <property name="visible">
+                                      <bool>false</bool>
+                                    </property>
                                     <property name="text">
                                       <string>Not checked</string>
                                     </property>
                                     <property name="styleSheet">
                                       <string>padding: 12px; background: #eef2f4; border-radius: 5px;</string>
+                                    </property>
+                                  </widget>
+                                </item>
+                                <item>
+                                  <widget class="QPushButton" name="acceptDeviceReadinessButton">
+                                    <property name="text">
+                                      <string>Accept readiness and continue →</string>
+                                    </property>
+                                    <property name="enabled">
+                                      <bool>false</bool>
+                                    </property>
+                                    <property name="minimumSize">
+                                      <size>
+                                        <width>0</width>
+                                        <height>40</height>
+                                      </size>
+                                    </property>
+                                    <property name="styleSheet">
+                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
                                     </property>
                                   </widget>
                                 </item>
@@ -391,6 +413,12 @@
                       </widget>
                       <widget class="QWidget" name="imagingPage">
                         <layout class="QVBoxLayout" name="imagingLayout">
+                          <property name="topMargin">
+                            <number>0</number>
+                          </property>
+                          <property name="bottomMargin">
+                            <number>0</number>
+                          </property>
                           <item>
                             <widget class="QGroupBox" name="imagingGroup">
                               <property name="title">
@@ -517,6 +545,13 @@
                                       </spacer>
                                     </item>
                                     <item>
+                                      <widget class="QLabel" name="brightnessControlsLabel">
+                                        <property name="text">
+                                          <string>Brightness</string>
+                                        </property>
+                                      </widget>
+                                    </item>
+                                    <item>
                                       <widget class="QToolButton" name="brightnessUpButton">
                                         <property name="toolTip">
                                           <string>Increase brightness in all MRI views</string>
@@ -539,7 +574,7 @@
                                     <item>
                                       <widget class="QToolButton" name="resetAllMriViewsButton">
                                         <property name="toolTip">
-                                          <string>Reset zoom, pan, brightness, and contrast in all MRI views</string>
+                                          <string>Reset brightness in all MRI views</string>
                                         </property>
                                         <property name="text">
                                           <string>↺</string>
@@ -555,6 +590,38 @@
                                           <size>
                                             <width>20</width>
                                             <height>20</height>
+                                          </size>
+                                        </property>
+                                      </spacer>
+                                    </item>
+                                    <item>
+                                      <widget class="QPushButton" name="resetInitialSlicesButton">
+                                        <property name="text">
+                                          <string>Reset to initial slices</string>
+                                        </property>
+                                        <property name="toolTip">
+                                          <string>Return all three MRI planes to their initially loaded slice positions</string>
+                                        </property>
+                                        <property name="enabled">
+                                          <bool>false</bool>
+                                        </property>
+                                        <property name="styleSheet">
+                                          <string>QPushButton { padding: 5px 10px; background: #e4f4f8; color: #12556d; border: 2px solid #2382a1; border-radius: 4px; font-weight: 600; } QPushButton:disabled { background: #edf1f2; color: #9aa6ac; border-color: #bdc7cb; }</string>
+                                        </property>
+                                      </widget>
+                                    </item>
+                                    <item>
+                                      <spacer name="resetTransparencyGap">
+                                        <property name="orientation">
+                                          <enum>Qt::Horizontal</enum>
+                                        </property>
+                                        <property name="sizeType">
+                                          <enum>QSizePolicy::Expanding</enum>
+                                        </property>
+                                        <property name="sizeHint">
+                                          <size>
+                                            <width>18</width>
+                                            <height>1</height>
                                           </size>
                                         </property>
                                       </spacer>
@@ -582,13 +649,13 @@
                                         </property>
                                         <property name="minimumSize">
                                           <size>
-                                            <width>90</width>
+                                            <width>60</width>
                                             <height>0</height>
                                           </size>
                                         </property>
                                         <property name="maximumSize">
                                           <size>
-                                            <width>110</width>
+                                            <width>75</width>
                                             <height>16777215</height>
                                           </size>
                                         </property>
@@ -907,84 +974,63 @@
                                   </widget>
                                 </item>
                                 <item>
-                                  <widget class="QLabel" name="mriMetadataLabel">
-                                    <property name="text">
-                                      <string>Dimensions and spatial axes will appear after loading.</string>
-                                    </property>
-                                    <property name="styleSheet">
-                                      <string>padding: 8px; background: #eef2f4; color: #344651; border-radius: 4px;</string>
-                                    </property>
-                                  </widget>
-                                </item>
-                                <item>
-                                  <layout class="QHBoxLayout" name="imagingActions">
+                                  <layout class="QHBoxLayout" name="imagingFiducialArea">
                                     <item>
-                                      <widget class="QLabel" name="fiducialJumpLabel">
-                                        <property name="text">
-                                          <string>Inspect fiducial:</string>
-                                        </property>
-                                      </widget>
+                                      <layout class="QVBoxLayout" name="imagingFiducialControls">
+                                        <item>
+                                          <widget class="QLabel" name="mriMetadataLabel">
+                                            <property name="text">
+                                              <string>Dimensions and spatial axes will appear after loading.</string>
+                                            </property>
+                                            <property name="wordWrap">
+                                              <bool>true</bool>
+                                            </property>
+                                            <property name="styleSheet">
+                                              <string>padding: 8px; background: #eef2f4; color: #344651; border-radius: 4px;</string>
+                                            </property>
+                                          </widget>
+                                        </item>
+                                      </layout>
                                     </item>
                                     <item>
-                                      <widget class="QComboBox" name="fiducialCombo">
+                                      <widget class="RegistrationFiducialLayout" name="imagingFiducialLayout">
+                                        <property name="enabled">
+                                          <bool>false</bool>
+                                        </property>
                                         <property name="minimumSize">
                                           <size>
-                                            <width>190</width>
-                                            <height>0</height>
+                                            <width>470</width>
+                                            <height>120</height>
                                           </size>
                                         </property>
-                                        <property name="enabled">
-                                          <bool>false</bool>
-                                        </property>
-                                      </widget>
-                                    </item>
-                                    <item>
-                                      <widget class="QPushButton" name="goToFiducialButton">
-                                        <property name="text">
-                                          <string>Go to fiducial</string>
-                                        </property>
-                                        <property name="enabled">
-                                          <bool>false</bool>
-                                        </property>
-                                      </widget>
-                                    </item>
-                                    <item>
-                                      <widget class="QPushButton" name="resetInitialSlicesButton">
-                                        <property name="text">
-                                          <string>Reset to initial slices</string>
-                                        </property>
-                                        <property name="toolTip">
-                                          <string>Return all three MRI planes to their initially loaded slice positions</string>
-                                        </property>
-                                        <property name="enabled">
-                                          <bool>false</bool>
-                                        </property>
-                                      </widget>
-                                    </item>
-                                    <item>
-                                      <spacer name="imagingActionSpacer">
-                                        <property name="orientation">
-                                          <enum>Qt::Horizontal</enum>
-                                        </property>
-                                        <property name="sizeHint">
+                                        <property name="maximumSize">
                                           <size>
-                                            <width>40</width>
-                                            <height>20</height>
+                                            <width>16777215</width>
+                                          <height>120</height>
                                           </size>
-                                        </property>
-                                      </spacer>
-                                    </item>
-                                    <item>
-                                      <widget class="QPushButton" name="acceptImagingButton">
-                                        <property name="text">
-                                          <string>Accept MRI and continue →</string>
-                                        </property>
-                                        <property name="enabled">
-                                          <bool>false</bool>
                                         </property>
                                       </widget>
                                     </item>
                                   </layout>
+                                </item>
+                                <item>
+                                  <widget class="QPushButton" name="acceptImagingButton">
+                                    <property name="text">
+                                      <string>Accept MRI and continue →</string>
+                                    </property>
+                                    <property name="enabled">
+                                      <bool>false</bool>
+                                    </property>
+                                    <property name="minimumSize">
+                                      <size>
+                                        <width>0</width>
+                                        <height>40</height>
+                                      </size>
+                                    </property>
+                                    <property name="styleSheet">
+                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
+                                    </property>
+                                  </widget>
                                 </item>
                               </layout>
                             </widget>
@@ -1075,6 +1121,13 @@
                                 </spacer>
                               </item>
                               <item>
+                                <widget class="QLabel" name="registrationBrightnessControlsLabel">
+                                  <property name="text">
+                                    <string>Brightness</string>
+                                  </property>
+                                </widget>
+                              </item>
+                              <item>
                                 <widget class="QToolButton" name="registrationBrightnessUpButton">
                                   <property name="toolTip">
                                     <string>Increase brightness in all MRI views</string>
@@ -1097,7 +1150,7 @@
                               <item>
                                 <widget class="QToolButton" name="registrationResetAllMriViewsButton">
                                   <property name="toolTip">
-                                    <string>Reset zoom, pan, brightness, and contrast in all MRI views</string>
+                                    <string>Reset brightness in all MRI views</string>
                                   </property>
                                   <property name="text">
                                     <string>↺</string>
@@ -1113,6 +1166,51 @@
                                     <size>
                                       <width>20</width>
                                       <height>20</height>
+                                    </size>
+                                  </property>
+                                </spacer>
+                              </item>
+                              <item>
+                                <widget class="QPushButton" name="registrationReturnStartButton">
+                                  <property name="text">
+                                    <string>Return to registration start</string>
+                                  </property>
+                                  <property name="toolTip">
+                                    <string>Return to the fiducial view shown when Registration was first opened</string>
+                                  </property>
+                                  <property name="enabled">
+                                    <bool>false</bool>
+                                  </property>
+                                </widget>
+                              </item>
+                              <item>
+                                <widget class="QPushButton" name="registrationResetInitialSlicesButton">
+                                  <property name="text">
+                                    <string>Reset to initial slices</string>
+                                  </property>
+                                  <property name="toolTip">
+                                    <string>Return all three MRI planes to their initially loaded slice positions</string>
+                                  </property>
+                                  <property name="enabled">
+                                    <bool>false</bool>
+                                  </property>
+                                  <property name="styleSheet">
+                                    <string>QPushButton { padding: 5px 10px; background: #e4f4f8; color: #12556d; border: 2px solid #2382a1; border-radius: 4px; font-weight: 600; } QPushButton:disabled { background: #edf1f2; color: #9aa6ac; border-color: #bdc7cb; }</string>
+                                  </property>
+                                </widget>
+                              </item>
+                              <item>
+                                <spacer name="registrationResetTransparencyGap">
+                                  <property name="orientation">
+                                    <enum>Qt::Horizontal</enum>
+                                  </property>
+                                  <property name="sizeType">
+                                    <enum>QSizePolicy::Expanding</enum>
+                                  </property>
+                                  <property name="sizeHint">
+                                    <size>
+                                      <width>18</width>
+                                      <height>1</height>
                                     </size>
                                   </property>
                                 </spacer>
@@ -1140,13 +1238,13 @@
                                   </property>
                                   <property name="minimumSize">
                                     <size>
-                                      <width>90</width>
+                                      <width>60</width>
                                       <height>0</height>
                                     </size>
                                   </property>
                                   <property name="maximumSize">
                                     <size>
-                                      <width>110</width>
+                                      <width>75</width>
                                       <height>16777215</height>
                                     </size>
                                   </property>
@@ -1351,7 +1449,9 @@
                             </layout>
                           </item>
                           <item>
-                            <widget class="QTableWidget" name="registrationTable">
+                            <layout class="QHBoxLayout" name="registrationDetailsLayout">
+                              <item>
+                                <widget class="QTableWidget" name="registrationTable">
                               <property name="maximumSize">
                                 <size>
                                   <width>16777215</width>
@@ -1403,7 +1503,25 @@
                                   <string>Residual (mm)</string>
                                 </property>
                               </column>
-                            </widget>
+                                </widget>
+                              </item>
+                              <item>
+                                <widget class="RegistrationFiducialLayout" name="registrationFiducialLayout">
+                                  <property name="minimumSize">
+                                    <size>
+                                      <width>470</width>
+                                      <height>190</height>
+                                    </size>
+                                  </property>
+                                  <property name="maximumSize">
+                                    <size>
+                                      <width>16777215</width>
+                                      <height>190</height>
+                                    </size>
+                                  </property>
+                                </widget>
+                              </item>
+                            </layout>
                           </item>
                           <item>
                             <layout class="QHBoxLayout" name="registrationActions">
@@ -1472,19 +1590,6 @@
                                   </property>
                                 </widget>
                               </item>
-                              <item>
-                                <widget class="QPushButton" name="acceptRegistrationButton">
-                                  <property name="text">
-                                    <string>Accept registration and continue →</string>
-                                  </property>
-                                  <property name="toolTip">
-                                    <string>Accept the reviewed fit and continue to the next workflow stage</string>
-                                  </property>
-                                  <property name="enabled">
-                                    <bool>false</bool>
-                                  </property>
-                                </widget>
-                              </item>
                             </layout>
                           </item>
                           <item>
@@ -1497,6 +1602,28 @@
                               </property>
                               <property name="styleSheet">
                                 <string>padding: 12px; background: #eef2f4; border-radius: 5px;</string>
+                              </property>
+                            </widget>
+                          </item>
+                          <item>
+                            <widget class="QPushButton" name="acceptRegistrationButton">
+                              <property name="text">
+                                <string>Accept registration and continue →</string>
+                              </property>
+                              <property name="toolTip">
+                                <string>Accept the reviewed fit and continue to the next workflow stage</string>
+                              </property>
+                              <property name="enabled">
+                                <bool>false</bool>
+                              </property>
+                              <property name="minimumSize">
+                                <size>
+                                  <width>0</width>
+                                  <height>40</height>
+                                </size>
+                              </property>
+                              <property name="styleSheet">
+                                <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
                               </property>
                             </widget>
                           </item>
@@ -1577,6 +1704,12 @@
       <class>WorkflowMriView</class>
       <extends>QWidget</extends>
       <header>mri_view.hpp</header>
+      <container>1</container>
+    </customwidget>
+    <customwidget>
+      <class>RegistrationFiducialLayout</class>
+      <extends>QWidget</extends>
+      <header>registration_fiducial_layout.hpp</header>
       <container>1</container>
     </customwidget>
   </customwidgets>
