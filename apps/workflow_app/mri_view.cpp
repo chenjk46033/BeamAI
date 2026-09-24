@@ -7,12 +7,13 @@
 #include <QContextMenuEvent>
 #include <QEvent>
 #include <QFontMetrics>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineF>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QSlider>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QWidgetAction>
@@ -27,6 +28,17 @@ WorkflowMriView::WorkflowMriView(QWidget* parent) : QWidget(parent) {
 void WorkflowMriView::setNavigationCrosshair(QPointF normalizedPosition) {
     crosshair_.setX(std::clamp(normalizedPosition.x(), 0.0, 1.0));
     crosshair_.setY(std::clamp(normalizedPosition.y(), 0.0, 1.0));
+    update();
+}
+
+void WorkflowMriView::setNavigationCrosshairVisible(bool visible) {
+    navigationCrosshairVisible_ = visible;
+    update();
+}
+
+void WorkflowMriView::adjustBrightness(double amount) {
+    brightness_ = std::clamp(brightness_ + amount, 0.25, 2.5);
+    rebuildImage();
     update();
 }
 
@@ -141,18 +153,18 @@ void WorkflowMriView::rebuildImage() {
         image_ = {};
         return;
     }
-    const double range = dataMax_ - dataMin_;
-    const double baseHigh = dataMin_ + range * brightness_;
-    const double center = (dataMin_ + baseHigh) * 0.5;
-    const double width = std::max(range * 0.01, (baseHigh - dataMin_) / contrast_);
-    const double windowLow = center - width * 0.5;
-    const double windowHigh = center + width * 0.5;
-    const double scale = 255.0 / (windowHigh - windowLow);
+    const double range = std::max(dataMax_ - dataMin_, 1e-12);
+    // Brightness is an output-level offset centered at 1.0. Therefore moving
+    // the slider right always raises displayed gray levels. Contrast remains
+    // centered around mid-gray and grows as its slider moves right.
+    const double brightnessOffset = (brightness_ - 1.0) * 0.5;
     QImage result(static_cast<int>(slice_.cols()), static_cast<int>(slice_.rows()), QImage::Format_Grayscale8);
     for (int y = 0; y < result.height(); ++y) {
         auto* row = result.scanLine(y);
         for (int x = 0; x < result.width(); ++x) {
-            row[x] = static_cast<unsigned char>(std::clamp((slice_(y, x) - windowLow) * scale, 0.0, 255.0));
+            const double normalized = (slice_(y, x) - dataMin_) / range;
+            const double displayed = (normalized - 0.5) * contrast_ + 0.5 + brightnessOffset;
+            row[x] = static_cast<unsigned char>(std::clamp(displayed * 255.0, 0.0, 255.0));
         }
     }
     image_ = flipHorizontal_ ? result.mirrored(true, false) : result;
@@ -179,13 +191,15 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
     painter.drawImage(displayed, image_);
     if (!maskImage_.isNull()) painter.drawImage(displayed, maskImage_);
     if (!secondaryMaskImage_.isNull()) painter.drawImage(displayed, secondaryMaskImage_);
-    const double x = displayed.left() + crosshair_.x() * displayed.width();
-    const double y = displayed.top() + crosshair_.y() * displayed.height();
-    painter.setPen(QPen(QColor(40, 225, 245, 235), 2.0));
-    painter.drawLine(QPointF(x, displayed.top()), QPointF(x, displayed.bottom()));
-    painter.drawLine(QPointF(displayed.left(), y), QPointF(displayed.right(), y));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawEllipse(QPointF(x, y), 5.0, 5.0);
+    if (navigationCrosshairVisible_) {
+        const double x = displayed.left() + crosshair_.x() * displayed.width();
+        const double y = displayed.top() + crosshair_.y() * displayed.height();
+        painter.setPen(QPen(QColor(40, 225, 245, 235), 2.0));
+        painter.drawLine(QPointF(x, displayed.top()), QPointF(x, displayed.bottom()));
+        painter.drawLine(QPointF(displayed.left(), y), QPointF(displayed.right(), y));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(x, y), 5.0, 5.0);
+    }
 
     painter.setRenderHint(QPainter::Antialiasing, true);
     for (const WorkflowMriMarker& marker : markers_) {
@@ -193,8 +207,10 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
                             displayed.top() + marker.normalizedPosition.y() * displayed.height());
         painter.setPen(QPen(marker.color, marker.crosshair ? 2.0 : 1.5));
         if (marker.crosshair) {
-            painter.drawLine(point + QPointF(-13, 0), point + QPointF(13, 0));
-            painter.drawLine(point + QPointF(0, -13), point + QPointF(0, 13));
+            painter.drawLine(QPointF(displayed.left(), point.y()),
+                             QPointF(displayed.right(), point.y()));
+            painter.drawLine(QPointF(point.x(), displayed.top()),
+                             QPointF(point.x(), displayed.bottom()));
         } else {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(marker.color, marker.draggable ? 2.5 : 1.5));
@@ -313,43 +329,67 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
     auto* container = new QWidget(&menu);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(10, 8, 10, 8);
-    layout->addWidget(new QLabel(QStringLiteral("Brightness"), container));
-    auto* slider = new QSlider(Qt::Horizontal, container);
-    slider->setRange(25, 250);
-    slider->setValue(static_cast<int>(std::lround(brightness_ * 100.0)));
-    slider->setMinimumWidth(220);
-    layout->addWidget(slider);
-    layout->addWidget(new QLabel(QStringLiteral("Contrast"), container));
-    auto* contrastSlider = new QSlider(Qt::Horizontal, container);
-    contrastSlider->setRange(50, 300);
-    contrastSlider->setValue(static_cast<int>(std::lround(contrast_ * 100.0)));
-    contrastSlider->setMinimumWidth(220);
-    layout->addWidget(contrastSlider);
-    auto* sliderAction = new QWidgetAction(&menu);
-    sliderAction->setDefaultWidget(container);
-    menu.addAction(sliderAction);
-    connect(slider, &QSlider::valueChanged, this, [this](int value) {
-        brightness_ = static_cast<double>(value) / 100.0;
-        rebuildImage();
-        update();
+    const QString buttonStyle = QStringLiteral(
+        "QToolButton { background: #f7fafb; color: #17313f; border: 1px solid #9eacb4; "
+        "border-radius: 3px; min-width: 24px; max-width: 24px; min-height: 22px; max-height: 22px; "
+        "font-family: 'Segoe UI Symbol'; font-weight: 700; } "
+        "QToolButton:hover { background: #e3f2f6; border-color: #2888a2; }");
+    const auto makeButton = [container, &buttonStyle](QChar symbol, const QString& toolTip) {
+        auto* button = new QToolButton(container);
+        button->setText(QString(symbol));
+        button->setToolTip(toolTip);
+        button->setStyleSheet(buttonStyle);
+        return button;
+    };
+
+    auto* brightnessRow = new QHBoxLayout;
+    auto* brightnessLabel = new QLabel(QStringLiteral("Brightness"), container);
+    brightnessLabel->setMinimumWidth(72);
+    brightnessRow->addWidget(brightnessLabel);
+    brightnessRow->addSpacing(6);
+    auto* brightnessDown = makeButton(QChar(0x2193), QStringLiteral("Decrease brightness"));
+    auto* brightnessUp = makeButton(QChar(0x2191), QStringLiteral("Increase brightness"));
+    auto* brightnessReset = makeButton(QChar(0x21BA), QStringLiteral("Reset brightness"));
+    brightnessRow->addWidget(brightnessUp);
+    brightnessRow->addWidget(brightnessDown);
+    brightnessRow->addWidget(brightnessReset);
+    layout->addLayout(brightnessRow);
+
+    auto* contrastRow = new QHBoxLayout;
+    auto* contrastLabel = new QLabel(QStringLiteral("Contrast"), container);
+    contrastLabel->setMinimumWidth(72);
+    contrastRow->addWidget(contrastLabel);
+    contrastRow->addSpacing(6);
+    auto* contrastDown = makeButton(QChar(0x2193), QStringLiteral("Decrease contrast"));
+    auto* contrastUp = makeButton(QChar(0x2191), QStringLiteral("Increase contrast"));
+    auto* contrastReset = makeButton(QChar(0x21BA), QStringLiteral("Reset contrast"));
+    contrastRow->addWidget(contrastUp);
+    contrastRow->addWidget(contrastDown);
+    contrastRow->addWidget(contrastReset);
+    layout->addLayout(contrastRow);
+
+    auto* controlsAction = new QWidgetAction(&menu);
+    controlsAction->setDefaultWidget(container);
+    menu.addAction(controlsAction);
+    const auto redraw = [this] { rebuildImage(); update(); };
+    connect(brightnessDown, &QToolButton::clicked, this, [this, redraw] {
+        brightness_ = std::clamp(brightness_ - 0.1, 0.25, 2.5); redraw();
     });
-    connect(contrastSlider, &QSlider::valueChanged, this, [this](int value) {
-        contrast_ = static_cast<double>(value) / 100.0;
-        rebuildImage();
-        update();
+    connect(brightnessUp, &QToolButton::clicked, this, [this, redraw] {
+        brightness_ = std::clamp(brightness_ + 0.1, 0.25, 2.5); redraw();
     });
+    connect(brightnessReset, &QToolButton::clicked, this, [this, redraw] { brightness_ = 1.0; redraw(); });
+    connect(contrastDown, &QToolButton::clicked, this, [this, redraw] {
+        contrast_ = std::clamp(contrast_ - 0.1, 0.5, 3.0); redraw();
+    });
+    connect(contrastUp, &QToolButton::clicked, this, [this, redraw] {
+        contrast_ = std::clamp(contrast_ + 0.1, 0.5, 3.0); redraw();
+    });
+    connect(contrastReset, &QToolButton::clicked, this, [this, redraw] { contrast_ = 1.0; redraw(); });
     menu.addSeparator();
-    QAction* resetBrightness = menu.addAction(QStringLiteral("Reset brightness and contrast"));
     QAction* resetAll = menu.addAction(QStringLiteral("Reset zoom, pan, brightness, and contrast"));
     QAction* selected = menu.exec(event->globalPos());
-    if (selected == resetBrightness) {
-        brightness_ = 1.0;
-        contrast_ = 1.0;
-        rebuildImage();
-        update();
-    } else if (selected == resetAll) {
-        resetView();
-    }
+    if (selected == resetAll) resetView();
 }
 
 void WorkflowMriView::clampPan() {

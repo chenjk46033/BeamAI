@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/checkbox">
+    <file>checkbox_unchecked.xpm</file>
+    <file>checkbox_checked.xpm</file>
+  </qresource>
+</RCC>

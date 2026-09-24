@@ -19,6 +19,7 @@
 #include <QStringList>
 #include <QMessageBox>
 #include <QHeaderView>
+#include <QIntValidator>
 #include <QTableWidgetItem>
 #include <QProgressDialog>
 #include <QThread>
@@ -110,25 +111,40 @@ QString statusSymbol(beam::gui::WorkflowStatus status) {
 
 WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new Ui::WorkflowShell) {
     ui_->setupUi(this);
+    // The imaging page starts as an uncluttered source-data review; users can
+    // explicitly reveal fiducials there. Registration keeps them visible.
+    ui_->showFiducialsCheckBox->setChecked(false);
     for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->coronalPreviousButton,
-                                ui_->axialPreviousButton}) {
+                                ui_->axialPreviousButton, ui_->registrationSagittalPreviousButton,
+                                ui_->registrationCoronalPreviousButton, ui_->registrationAxialPreviousButton}) {
         button->setIcon(QIcon());
         button->setText(QString(QChar(0x25C0)));
     }
     for (QToolButton* button : {ui_->sagittalNextButton, ui_->coronalNextButton,
-                                ui_->axialNextButton}) {
+                                ui_->axialNextButton, ui_->registrationSagittalNextButton,
+                                ui_->registrationCoronalNextButton, ui_->registrationAxialNextButton}) {
         button->setIcon(QIcon());
         button->setText(QString(QChar(0x25B6)));
     }
     for (QToolButton* button : {ui_->resetSagittalButton, ui_->resetCoronalButton,
-                                ui_->resetAxialButton}) {
+                                ui_->resetAxialButton, ui_->registrationResetSagittalButton,
+                                ui_->registrationResetCoronalButton, ui_->registrationResetAxialButton,
+                                ui_->resetAllMriViewsButton, ui_->registrationResetAllMriViewsButton}) {
         button->setIcon(QIcon());
         button->setText(QString(QChar(0x21BA)));
     }
+    for (QToolButton* button : {ui_->brightnessDownButton, ui_->registrationBrightnessDownButton}) {
+        button->setIcon(QIcon());
+        button->setText(QString(QChar(0x2193)));
+    }
+    for (QToolButton* button : {ui_->brightnessUpButton, ui_->registrationBrightnessUpButton}) {
+        button->setIcon(QIcon());
+        button->setText(QString(QChar(0x2191)));
+    }
     const QString sliceButtonStyle = QStringLiteral(
         "QToolButton { background: #f7fafb; color: #17313f; border: 1px solid #9eacb4; "
-        "border-radius: 4px; min-width: 28px; min-height: 24px; padding: 2px; "
-        "font-family: 'Segoe UI Symbol'; font-size: 15px; font-weight: 700; } "
+        "border-radius: 3px; min-width: 22px; max-width: 22px; min-height: 20px; max-height: 20px; padding: 0; "
+        "font-family: 'Segoe UI Symbol'; font-size: 12px; font-weight: 700; } "
         "QToolButton:hover { background: #e3f2f6; border-color: #2888a2; } "
         "QToolButton:pressed { background: #cce7ee; } "
         "QToolButton:disabled { background: #e8ecee; border-color: #c9d0d4; }");
@@ -136,13 +152,40 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                                 ui_->coronalPreviousButton, ui_->coronalNextButton,
                                 ui_->axialPreviousButton, ui_->axialNextButton,
                                 ui_->resetSagittalButton, ui_->resetCoronalButton,
-                                ui_->resetAxialButton})
+                                ui_->resetAxialButton, ui_->registrationSagittalPreviousButton,
+                                ui_->registrationSagittalNextButton, ui_->registrationCoronalPreviousButton,
+                                ui_->registrationCoronalNextButton, ui_->registrationAxialPreviousButton,
+                                ui_->registrationAxialNextButton, ui_->registrationResetSagittalButton,
+                                ui_->registrationResetCoronalButton, ui_->registrationResetAxialButton,
+                                ui_->brightnessDownButton, ui_->brightnessUpButton,
+                                ui_->registrationBrightnessDownButton, ui_->registrationBrightnessUpButton,
+                                ui_->resetAllMriViewsButton, ui_->registrationResetAllMriViewsButton})
         button->setStyleSheet(sliceButtonStyle);
+    const QString acceptButtonStyle = QStringLiteral(
+        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; "
+        "border-radius: 5px; min-height: 34px; padding: 4px 18px; font-weight: 700; } "
+        "QPushButton:hover { background: #2083a3; border-color: #0c4357; } "
+        "QPushButton:pressed { background: #10566e; } "
+        "QPushButton:disabled { background: #d9e0e4; color: #75838b; border-color: #c4cdd2; }");
+    for (QPushButton* button : {ui_->acceptDeviceReadinessButton, ui_->acceptImagingButton,
+                                ui_->acceptRegistrationButton}) {
+        button->setStyleSheet(acceptButtonStyle);
+        button->setMinimumWidth(220);
+    }
     for (QLabel* label : findChildren<QLabel*>()) {
         label->setTextInteractionFlags(label->textInteractionFlags() |
                                        Qt::TextSelectableByMouse |
                                        Qt::TextSelectableByKeyboard);
         label->setFocusPolicy(Qt::ClickFocus);
+    }
+    // Fixed-size resource indicators keep the label origin stable while
+    // providing an explicit X for unchecked controls.
+    for (QCheckBox* checkBox : findChildren<QCheckBox*>()) {
+        checkBox->setStyleSheet(QStringLiteral(
+            "QCheckBox { spacing: 6px; padding: 2px 3px; background: transparent; } "
+            "QCheckBox::indicator { width: 13px; height: 13px; } "
+            "QCheckBox::indicator:unchecked { image: url(:/checkbox/checkbox_unchecked.xpm); } "
+            "QCheckBox::indicator:checked { image: url(:/checkbox/checkbox_checked.xpm); }"));
     }
     for (std::size_t i = 0; i < stageCount; ++i) ui_->stageList->addItem(QString());
 
@@ -151,27 +194,76 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     });
     connect(ui_->completeStageButton, &QPushButton::clicked, this, [this] { completeCurrentStage(); });
     connect(ui_->simulatePassButton, &QPushButton::clicked, this, [this] {
-        std::string reason;
-        if (workflow_.complete(beam::gui::WorkflowStage::SystemCheck, &reason)) {
-            ui_->deviceResult->setText(QStringLiteral("Device responded correctly (simulated)."));
-            ui_->deviceHeader->setText(QStringLiteral("● Device ready (simulated)"));
-            showMessage(QStringLiteral("System check passed."), false);
-        } else {
-            showMessage(QString::fromStdString(reason), true);
-        }
+        deviceCheckPassed_ = true;
+        workflow_.change(beam::gui::WorkflowStage::SystemCheck,
+                         "Device readiness check passed; awaiting operator acceptance.");
+        ui_->deviceResult->setText(QStringLiteral("Device responded correctly (simulated). Review and accept readiness."));
+        ui_->deviceHeader->setText(QStringLiteral("● Device ready (simulated)"));
+        ui_->acceptDeviceReadinessButton->setEnabled(true);
+        showMessage(QStringLiteral("System check passed. Accept readiness to continue."), false);
         refresh();
         updateRegistrationAvailability();
     });
     connect(ui_->simulateFailButton, &QPushButton::clicked, this, [this] {
+        deviceCheckPassed_ = false;
+        ui_->acceptDeviceReadinessButton->setEnabled(false);
         workflow_.block(beam::gui::WorkflowStage::SystemCheck, "Device did not respond (simulated).");
         ui_->deviceResult->setText(QStringLiteral("Device did not respond (simulated)."));
         ui_->deviceHeader->setText(QStringLiteral("● Device fault (simulated)"));
         showMessage(QStringLiteral("System check blocked: device did not respond."), true);
         refresh();
     });
+    connect(ui_->acceptDeviceReadinessButton, &QPushButton::clicked, this, [this] {
+        if (!deviceCheckPassed_) {
+            showMessage(QStringLiteral("Run and pass the device readiness check before accepting it."), true);
+            return;
+        }
+        std::string reason;
+        if (!workflow_.complete(beam::gui::WorkflowStage::SystemCheck, &reason)) {
+            showMessage(QString::fromStdString(reason), true);
+            return;
+        }
+        ui_->acceptDeviceReadinessButton->setEnabled(false);
+        showMessage(QStringLiteral("Device readiness accepted. Continuing to Imaging."), false);
+        refresh();
+        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+    });
     connect(ui_->loadNiftiButton, &QPushButton::clicked, this, [this] { chooseNifti(); });
     connect(ui_->loadDicomButton, &QPushButton::clicked, this, [this] { chooseDicomDirectory(); });
     connect(ui_->loadBeamSessionButton, &QPushButton::clicked, this, [this] { chooseBeamSession(); });
+    connect(ui_->showFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
+    connect(ui_->registrationShowFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
+    connect(ui_->showLinkedNavigationCheckBox, &QCheckBox::toggled, this, [this](bool visible) {
+        for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview})
+            view->setNavigationCrosshairVisible(visible);
+    });
+    connect(ui_->registrationShowLinkedNavigationCheckBox, &QCheckBox::toggled, this, [this](bool visible) {
+        for (WorkflowMriView* view : {ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
+                                     ui_->registrationAxialPreview})
+            view->setNavigationCrosshairVisible(visible);
+    });
+    connect(ui_->showLinkedNavigationCheckBox, &QCheckBox::toggled,
+            ui_->registrationShowLinkedNavigationCheckBox, &QCheckBox::setChecked);
+    connect(ui_->registrationShowLinkedNavigationCheckBox, &QCheckBox::toggled,
+            ui_->showLinkedNavigationCheckBox, &QCheckBox::setChecked);
+    const auto adjustAllViewBrightness = [this](double amount) {
+        for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
+                                     ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
+                                     ui_->registrationAxialPreview})
+            view->adjustBrightness(amount);
+    };
+    for (QToolButton* button : {ui_->brightnessDownButton, ui_->registrationBrightnessDownButton})
+        connect(button, &QToolButton::clicked, this, [adjustAllViewBrightness] { adjustAllViewBrightness(-0.1); });
+    for (QToolButton* button : {ui_->brightnessUpButton, ui_->registrationBrightnessUpButton})
+        connect(button, &QToolButton::clicked, this, [adjustAllViewBrightness] { adjustAllViewBrightness(0.1); });
+    const auto resetAllMriViews = [this] {
+        for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
+                                     ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
+                                     ui_->registrationAxialPreview})
+            view->resetView();
+    };
+    connect(ui_->resetAllMriViewsButton, &QToolButton::clicked, this, resetAllMriViews);
+    connect(ui_->registrationResetAllMriViewsButton, &QToolButton::clicked, this, resetAllMriViews);
     connect(ui_->showFieldCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showTargetCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
@@ -198,6 +290,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connectSliceStep(ui_->coronalNextButton, ui_->coronalSlider, 1);
     connectSliceStep(ui_->axialPreviousButton, ui_->axialSlider, -1);
     connectSliceStep(ui_->axialNextButton, ui_->axialSlider, 1);
+    connectSliceStep(ui_->registrationSagittalPreviousButton, ui_->registrationSagittalSlider, -1);
+    connectSliceStep(ui_->registrationSagittalNextButton, ui_->registrationSagittalSlider, 1);
+    connectSliceStep(ui_->registrationCoronalPreviousButton, ui_->registrationCoronalSlider, -1);
+    connectSliceStep(ui_->registrationCoronalNextButton, ui_->registrationCoronalSlider, 1);
+    connectSliceStep(ui_->registrationAxialPreviousButton, ui_->registrationAxialSlider, -1);
+    connectSliceStep(ui_->registrationAxialNextButton, ui_->registrationAxialSlider, 1);
     connect(ui_->registrationSagittalSlider, &QSlider::valueChanged, ui_->sagittalSlider, &QSlider::setValue);
     connect(ui_->registrationCoronalSlider, &QSlider::valueChanged, ui_->coronalSlider, &QSlider::setValue);
     connect(ui_->registrationAxialSlider, &QSlider::valueChanged, ui_->axialSlider, &QSlider::setValue);
@@ -213,6 +311,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->resetAxialButton, &QToolButton::clicked, this, [this] {
         ui_->axialSlider->setValue(static_cast<int>((mriVolume_.nz - 1) / 2));
     });
+    connect(ui_->registrationResetSagittalButton, &QToolButton::clicked, ui_->resetSagittalButton, &QToolButton::click);
+    connect(ui_->registrationResetCoronalButton, &QToolButton::clicked, ui_->resetCoronalButton, &QToolButton::click);
+    connect(ui_->registrationResetAxialButton, &QToolButton::clicked, ui_->resetAxialButton, &QToolButton::click);
     connect(ui_->goToFiducialButton, &QPushButton::clicked, this, [this] {
         const int markerIndex = ui_->fiducialCombo->currentIndex();
         if (markerIndex < 0 || markerIndex >= static_cast<int>(fiducials_.size())) return;
@@ -243,19 +344,25 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         }
         std::string reason;
         if (workflow_.complete(beam::gui::WorkflowStage::Imaging, &reason)) {
-            showMessage(QStringLiteral("MRI accepted. Registration can begin."), false);
+            showMessage(QStringLiteral("MRI accepted. Continuing to Registration."), false);
+            refresh();
+            updateRegistrationAvailability();
+            ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
         } else {
             showMessage(QString::fromStdString(reason), true);
+            refresh();
+            updateRegistrationAvailability();
         }
-        refresh();
-        updateRegistrationAvailability();
     });
     connect(ui_->resetRegistrationButton, &QPushButton::clicked, this, [this] {
         fiducialConfirmed_ = sourceFiducialConfirmed_;
+        fiducialLocated_ = sourceFiducialLocated_;
         fiducials_ = registrationSourceFiducials_;
         populateRegistrationTable();
         showMriPreviews();
         registrationComplete_ = false;
+        pendingRegistrationFit_ = false;
+        ui_->acceptRegistrationButton->setEnabled(false);
         workflow_.change(beam::gui::WorkflowStage::Registration,
                          "Registration measurements changed; later approvals require review.");
         ui_->registrationResult->setText(QStringLiteral("Original fiducial measurements restored. Review them, then fit the transducers."));
@@ -263,13 +370,23 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         updateRegistrationAvailability();
     });
     connect(ui_->placeFiducialButton, &QPushButton::clicked, this, [this] { beginFiducialPlacement(); });
+    connect(ui_->confirmFiducialButton, &QPushButton::clicked, this, [this] { confirmSelectedFiducial(); });
     connect(ui_->registerFiducialsButton, &QPushButton::clicked, this, [this] { performFiducialRegistration(); });
+    connect(ui_->acceptRegistrationButton, &QPushButton::clicked, this, [this] { acceptFiducialRegistration(); });
     connect(ui_->registrationTable, &QTableWidget::currentCellChanged, this,
-            [this](int currentRow, int, int, int) { navigateToRegistrationFiducial(currentRow); });
+            [this](int currentRow, int, int, int) {
+                navigateToRegistrationFiducial(currentRow);
+                ui_->confirmFiducialButton->setEnabled(currentRow >= 0 && currentRow < 6 &&
+                    fiducialLocated_[static_cast<std::size_t>(currentRow)] &&
+                    !fiducialConfirmed_[static_cast<std::size_t>(currentRow)]);
+            });
     connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int, int column) {
-        if (!registrationGeometryLoaded_ || column == 0 || column == 4) return;
+        if (!registrationGeometryLoaded_ || column == 0 || column >= 4) return;
         const int row = ui_->registrationTable->currentRow();
-        if (row >= 0 && row < 6) fiducialConfirmed_[static_cast<std::size_t>(row)] = true;
+        if (row >= 0 && row < 6) {
+            fiducialLocated_[static_cast<std::size_t>(row)] = true;
+            fiducialConfirmed_[static_cast<std::size_t>(row)] = false;
+        }
         if (row >= 0 && row < 6) {
             Eigen::Vector3d point;
             bool valid = true;
@@ -286,10 +403,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         workflow_.change(beam::gui::WorkflowStage::Registration,
                          "Registration measurements changed; later approvals require review.");
         registrationComplete_ = false;
+        pendingRegistrationFit_ = false;
+        ui_->acceptRegistrationButton->setEnabled(false);
         ui_->registrationResult->setText(QStringLiteral("Measurements changed. Run registration again to accept them."));
         refresh();
         ui_->registrationTable->blockSignals(true);
-        ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Measured"));
+        ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Located"));
+        ui_->confirmFiducialButton->setEnabled(true);
         ui_->registrationTable->blockSignals(false);
         updateRegistrationAvailability();
     });
@@ -301,9 +421,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->participantEdit, &QLineEdit::textChanged, this, [this](const QString& value) {
         ui_->participantHeader->setText(QStringLiteral("Participant: %1").arg(value.isEmpty() ? QStringLiteral("—") : value));
     });
-    connect(ui_->visitSpin, &QSpinBox::valueChanged, this, [this](int value) {
-        ui_->visitHeader->setText(QStringLiteral("Visit: %1").arg(value));
-    });
+    ui_->visitEdit->setValidator(new QIntValidator(1, 99, ui_->visitEdit));
+    const auto updateVisitPresentation = [this](const QString& text) {
+        ui_->visitHeader->setText(ui_->visitEdit->hasAcceptableInput()
+                                      ? QStringLiteral("Visit: %1").arg(text)
+                                      : QStringLiteral("Visit: —"));
+    };
+    connect(ui_->visitEdit, &QLineEdit::textChanged, this, updateVisitPresentation);
+    updateVisitPresentation(ui_->visitEdit->text());
     connect(ui_->abortButton, &QPushButton::clicked, this, [this] {
         showMessage(QStringLiteral("No treatment is active; no device command was sent."), true);
     });
@@ -376,6 +501,8 @@ void WorkflowWindow::chooseBeamSession() {
                 registrationSourceFiducials_ = fiducials_;
                 fiducialConfirmed_.fill(true);
                 sourceFiducialConfirmed_.fill(true);
+                fiducialLocated_.fill(true);
+                sourceFiducialLocated_.fill(true);
                 populateRegistrationTable();
                 showMriPreviews();
                 ui_->registrationResult->setText(
@@ -432,7 +559,12 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     ui_->resetSagittalButton->setEnabled(true); ui_->resetCoronalButton->setEnabled(true); ui_->resetAxialButton->setEnabled(true);
     for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->sagittalNextButton,
                                 ui_->coronalPreviousButton, ui_->coronalNextButton,
-                                ui_->axialPreviousButton, ui_->axialNextButton}) button->setEnabled(true);
+                                ui_->axialPreviousButton, ui_->axialNextButton,
+                                ui_->registrationSagittalPreviousButton, ui_->registrationSagittalNextButton,
+                                ui_->registrationCoronalPreviousButton, ui_->registrationCoronalNextButton,
+                                ui_->registrationAxialPreviousButton, ui_->registrationAxialNextButton,
+                                ui_->registrationResetSagittalButton, ui_->registrationResetCoronalButton,
+                                ui_->registrationResetAxialButton}) button->setEnabled(true);
     ui_->acceptImagingButton->setEnabled(true);
     ui_->resetInitialSlicesButton->setEnabled(true);
     resetMriViews();
@@ -499,7 +631,12 @@ void WorkflowWindow::loadMri(const QString& path) {
         ui_->resetAxialButton->setEnabled(true);
         for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->sagittalNextButton,
                                     ui_->coronalPreviousButton, ui_->coronalNextButton,
-                                    ui_->axialPreviousButton, ui_->axialNextButton}) button->setEnabled(true);
+                                    ui_->axialPreviousButton, ui_->axialNextButton,
+                                    ui_->registrationSagittalPreviousButton, ui_->registrationSagittalNextButton,
+                                    ui_->registrationCoronalPreviousButton, ui_->registrationCoronalNextButton,
+                                    ui_->registrationAxialPreviousButton, ui_->registrationAxialNextButton,
+                                    ui_->registrationResetSagittalButton, ui_->registrationResetCoronalButton,
+                                    ui_->registrationResetAxialButton}) button->setEnabled(true);
         ui_->acceptImagingButton->setEnabled(true);
         ui_->resetInitialSlicesButton->setEnabled(true);
         resetMriViews();
@@ -575,6 +712,8 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     registrationSourceFiducials_ = fiducials_;
     fiducialConfirmed_.fill(false);
     sourceFiducialConfirmed_.fill(false);
+    fiducialLocated_.fill(false);
+    sourceFiducialLocated_.fill(false);
     registrationOriginArrayData_ = arrayData_;
     registrationComplete_ = false;
     ui_->fiducialCombo->clear();
@@ -587,6 +726,10 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     ui_->fiducialCombo->setEnabled(!fiducials_.empty());
     ui_->goToFiducialButton->setEnabled(false);
     targetMm_ = arrayData_.arrayTotal.rect.block(16, 0, 3, arrayData_.arrayTotal.rect.cols()).rowwise().mean() * 1000.0;
+    // MATLAB drawMrImages always calls drawFocusOnMRI after its initial
+    // transducer placement. Do the same for every MRI source, including raw
+    // DICOM/NIfTI; previously this was only rebuilt by the MAT-session path.
+    rebuildFocusImage();
     arrayMask_ = beam::gui::rasterizeArrayOntoMriGrid(arrayData_.arrayTotal, mriAxes_, mriVolume_.nx,
                                                        mriVolume_.ny, mriVolume_.nz);
     registrationGeometryLoaded_ = true;
@@ -610,15 +753,26 @@ void WorkflowWindow::populateRegistrationTable() {
             ui_->registrationTable->setItem(row, axis + 1, coordinate);
         }
         const std::size_t statusIndex = static_cast<std::size_t>(row);
-        auto* source = new QTableWidgetItem(!fiducialConfirmed_[statusIndex] ? QStringLiteral("Estimate")
-                                                : sourceFiducialConfirmed_[statusIndex] ? QStringLiteral("Imported")
-                                                                                       : QStringLiteral("Measured"));
+        QString stateText;
+        if (!fiducialLocated_[statusIndex]) stateText = QStringLiteral("Unidentified");
+        else if (!fiducialConfirmed_[statusIndex]) stateText = QStringLiteral("Located");
+        else if (sourceFiducialConfirmed_[statusIndex]) stateText = QStringLiteral("Imported");
+        else stateText = QStringLiteral("Confirmed");
+        auto* source = new QTableWidgetItem(stateText);
         source->setFlags(source->flags() & ~Qt::ItemIsEditable);
         ui_->registrationTable->setItem(row, 4, source);
+        auto* residual = new QTableWidgetItem(QStringLiteral("—"));
+        residual->setFlags(residual->flags() & ~Qt::ItemIsEditable);
+        residual->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        ui_->registrationTable->setItem(row, 5, residual);
     }
     ui_->registrationTable->blockSignals(false);
     if (ui_->registrationTable->currentRow() < 0 && !registrationSourceFiducials_.empty())
         ui_->registrationTable->selectRow(0);
+    const int selectedRow = ui_->registrationTable->currentRow();
+    ui_->confirmFiducialButton->setEnabled(selectedRow >= 0 && selectedRow < 6 &&
+                                            fiducialLocated_[static_cast<std::size_t>(selectedRow)] &&
+                                            !fiducialConfirmed_[static_cast<std::size_t>(selectedRow)]);
     updateRegistrationAvailability();
 }
 
@@ -675,16 +829,55 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm) {
     for (int axis = 0; axis < 3; ++axis)
         ui_->registrationTable->item(row, axis + 1)->setText(QString::number(positionMm(axis), 'f', 2));
     ui_->registrationTable->blockSignals(false);
-    fiducialConfirmed_[static_cast<std::size_t>(row)] = true;
+    fiducialLocated_[static_cast<std::size_t>(row)] = true;
+    fiducialConfirmed_[static_cast<std::size_t>(row)] = false;
     fiducials_[static_cast<std::size_t>(row)].position = positionMm / 1000.0;
+    pendingRegistrationFit_ = false;
+    registrationComplete_ = false;
+    ui_->acceptRegistrationButton->setEnabled(false);
     if (placingFiducial_) setPlacementMode(false);
-    ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Measured"));
+    ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Located"));
+    ui_->confirmFiducialButton->setEnabled(true);
     showMriPreviews();
     workflow_.change(beam::gui::WorkflowStage::Registration,
                      "Fiducial measurements changed; later approvals require review.");
-    showMessage(QStringLiteral("Fiducial measured. Continue until all six rows show Measured."), false);
+    showMessage(QStringLiteral("Fiducial located. Verify it in another plane, then confirm the selected fiducial."), false);
     refresh();
     updateRegistrationAvailability();
+}
+
+void WorkflowWindow::confirmSelectedFiducial() {
+    const int row = ui_->registrationTable->currentRow();
+    if (row < 0 || row >= 6 || !fiducialLocated_[static_cast<std::size_t>(row)]) {
+        showMessage(QStringLiteral("Locate the selected fiducial before confirming it."), true);
+        return;
+    }
+    fiducialConfirmed_[static_cast<std::size_t>(row)] = true;
+    ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Confirmed"));
+    ui_->confirmFiducialButton->setEnabled(false);
+    pendingRegistrationFit_ = false;
+    registrationComplete_ = false;
+    ui_->acceptRegistrationButton->setEnabled(false);
+    workflow_.change(beam::gui::WorkflowStage::Registration,
+                     "Fiducial confirmation changed; registration must be recalculated.");
+    updateRegistrationAvailability();
+
+    int nextRow = -1;
+    for (int candidate = row + 1; candidate < 6; ++candidate) {
+        if (!fiducialConfirmed_[static_cast<std::size_t>(candidate)]) { nextRow = candidate; break; }
+    }
+    if (nextRow < 0) {
+        for (int candidate = 0; candidate < row; ++candidate) {
+            if (!fiducialConfirmed_[static_cast<std::size_t>(candidate)]) { nextRow = candidate; break; }
+        }
+    }
+    if (nextRow >= 0) {
+        ui_->registrationTable->selectRow(nextRow);
+        showMessage(QStringLiteral("Fiducial confirmed. Continue with the next Unidentified row."), false);
+    } else {
+        showMessage(QStringLiteral("All six fiducials are confirmed. Calculate the fit and review residuals."), false);
+    }
+    refresh();
 }
 
 void WorkflowWindow::updateRegistrationAvailability() {
@@ -727,25 +920,66 @@ void WorkflowWindow::performFiducialRegistration() {
     try {
         auto result = beam::registration::registerArrayToFiducials(registrationOriginArrayData_, measured);
         double squaredError = 0.0;
-        for (std::size_t i = 0; i < measured.size(); ++i)
-            squaredError += (result.fiducialMarkers[i].position * 1000.0 - measured[i]).squaredNorm();
+        double maximumError = -1.0;
+        int worstRow = -1;
+        std::array<double, 6> residuals{};
+        for (std::size_t i = 0; i < measured.size(); ++i) {
+            residuals[i] = (result.fiducialMarkers[i].position * 1000.0 - measured[i]).norm();
+            squaredError += residuals[i] * residuals[i];
+            if (residuals[i] > maximumError) { maximumError = residuals[i]; worstRow = static_cast<int>(i); }
+        }
         const double rmsMm = std::sqrt(squaredError / static_cast<double>(measured.size()));
         applyRegistrationResult(std::move(result));
-        std::string reason;
-        if (!workflow_.complete(beam::gui::WorkflowStage::Registration, &reason)) {
-            showMessage(QString::fromStdString(reason), true);
-            return;
+        ui_->registrationTable->blockSignals(true);
+        for (int row = 0; row < 6; ++row) {
+            QTableWidgetItem* item = ui_->registrationTable->item(row, 5);
+            item->setText(QString::number(residuals[static_cast<std::size_t>(row)], 'f', 2));
+            const bool worst = row == worstRow;
+            item->setBackground(worst ? QColor(255, 220, 205) : QColor(Qt::transparent));
+            item->setForeground(worst ? QColor(150, 35, 20) : QColor());
+            item->setToolTip(worst ? QStringLiteral("Largest residual") : QString());
         }
-        registrationComplete_ = true;
+        ui_->registrationTable->blockSignals(false);
+        pendingRegistrationFit_ = true;
+        registrationComplete_ = false;
+        ui_->acceptRegistrationButton->setEnabled(true);
         ui_->registrationResult->setText(QStringLiteral("Registration complete · RMS residual %1 mm · overlays updated")
                                              .arg(rmsMm, 0, 'f', 2));
         showMessage(QStringLiteral("Registration complete — RMS residual %1 mm. Review the updated red fiducials and yellow transducer overlay.")
                         .arg(rmsMm, 0, 'f', 2), false);
+        const QString worstName = ui_->registrationTable->item(worstRow, 0)->text();
+        ui_->registrationResult->setText(QStringLiteral("Fit ready for review: RMS %1 mm, maximum %2 mm (%3)")
+                                             .arg(rmsMm, 0, 'f', 2)
+                                             .arg(maximumError, 0, 'f', 2)
+                                             .arg(worstName));
+        showMessage(QStringLiteral("Fit calculated: RMS %1 mm; maximum %2 mm at %3. Review residuals and overlays, then accept or edit a marker.")
+                        .arg(rmsMm, 0, 'f', 2)
+                        .arg(maximumError, 0, 'f', 2)
+                        .arg(worstName), false);
         refresh();
     } catch (const std::exception& error) {
         ui_->registrationResult->setText(QStringLiteral("Registration failed: %1").arg(QString::fromUtf8(error.what())));
         showMessage(QStringLiteral("Registration failed. Verify that all six points are distinct and correctly paired."), true);
     }
+}
+
+void WorkflowWindow::acceptFiducialRegistration() {
+    if (!pendingRegistrationFit_) {
+        showMessage(QStringLiteral("Calculate and review a fit before accepting registration."), true);
+        return;
+    }
+    std::string reason;
+    if (!workflow_.complete(beam::gui::WorkflowStage::Registration, &reason)) {
+        showMessage(QString::fromStdString(reason), true);
+        return;
+    }
+    pendingRegistrationFit_ = false;
+    registrationComplete_ = true;
+    ui_->acceptRegistrationButton->setEnabled(false);
+    ui_->registrationResult->setText(ui_->registrationResult->text() + QStringLiteral("; accepted"));
+    showMessage(QStringLiteral("Registration accepted. Continuing to the next workflow stage."), false);
+    refresh();
+    ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
 }
 
 void WorkflowWindow::showMriPreviews() {
@@ -817,6 +1051,7 @@ void WorkflowWindow::showMriPreviews() {
         }
 
         std::vector<WorkflowMriMarker> sagMarkers, corMarkers, axialMarkers;
+        std::vector<WorkflowMriMarker> imagingSagMarkers, imagingCorMarkers, imagingAxialMarkers;
         const int selectedFiducial = selectedStage_ == beam::gui::WorkflowStage::Registration
                                          ? ui_->registrationTable->currentRow() : -1;
         for (std::size_t markerIndex = 0; markerIndex < fiducials_.size(); ++markerIndex) {
@@ -824,20 +1059,28 @@ void WorkflowWindow::showMriPreviews() {
             const bool draggable = static_cast<int>(markerIndex) == selectedFiducial;
             const Eigen::Vector3d mm = marker.position * 1000.0;
             const auto voxel = beam::gui::imagePositionToVoxelIndex(mm, mriAxes_);
-            if (voxel.i == sagittal - 1)
-                sagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
-                                               1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                      QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable});
-            if (voxel.j == coronal - 1)
-                corMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
-                                               1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                      QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable});
-            if (voxel.k == axial - 1)
-                axialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
-                                                 1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
-                                        QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable});
+            if (voxel.i == sagittal - 1) {
+                const WorkflowMriMarker viewMarker{QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
+                                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
+                                                   QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable};
+                if (ui_->registrationShowFiducialsCheckBox->isChecked()) sagMarkers.push_back(viewMarker);
+                if (ui_->showFiducialsCheckBox->isChecked()) imagingSagMarkers.push_back(viewMarker);
+            }
+            if (voxel.j == coronal - 1) {
+                const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
+                                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
+                                                   QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable};
+                if (ui_->registrationShowFiducialsCheckBox->isChecked()) corMarkers.push_back(viewMarker);
+                if (ui_->showFiducialsCheckBox->isChecked()) imagingCorMarkers.push_back(viewMarker);
+            }
+            if (voxel.k == axial - 1) {
+                const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
+                                                            1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
+                                                   QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable};
+                if (ui_->registrationShowFiducialsCheckBox->isChecked()) axialMarkers.push_back(viewMarker);
+                if (ui_->showFiducialsCheckBox->isChecked()) imagingAxialMarkers.push_back(viewMarker);
+            }
         }
-        std::vector<WorkflowMriMarker> imagingSagMarkers, imagingCorMarkers, imagingAxialMarkers;
         const auto targetVoxel = beam::gui::imagePositionToVoxelIndex(targetMm_, mriAxes_);
         if (ui_->showTargetCheckBox->isChecked() && targetVoxel.i == sagittal - 1) {
             sagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
@@ -929,8 +1172,9 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
 
 void WorkflowWindow::completeCurrentStage() {
     if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup &&
-        (ui_->participantEdit->text().trimmed().isEmpty() || ui_->siteEdit->text().trimmed().isEmpty())) {
-        showMessage(QStringLiteral("Participant ID and Site ID are required."), true);
+        (ui_->participantEdit->text().trimmed().isEmpty() || ui_->siteEdit->text().trimmed().isEmpty() ||
+         !ui_->visitEdit->hasAcceptableInput())) {
+        showMessage(QStringLiteral("Participant ID, Site ID, and Visit are required."), true);
         return;
     }
     std::string reason;

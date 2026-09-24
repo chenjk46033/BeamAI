@@ -34,6 +34,8 @@ public:
                        double verticalMinMm, double verticalMaxMm,
                        bool reverseHorizontal, bool reverseVertical);
     void setNavigationCrosshair(QPointF normalizedPosition);
+    void setNavigationCrosshairVisible(bool visible);
+    void adjustBrightness(double amount);
     void resetView();
     void focusOn(QPointF normalizedPosition, double zoom = 3.0);
     void setPointPlacementEnabled(bool enabled);
@@ -72,6 +74,7 @@ private:
     bool panning_ = false;
     bool draggingMarker_ = false;
     QPointF crosshair_ = QPointF(0.5, 0.5);
+    bool navigationCrosshairVisible_ = false;
     QString plane_;
     double fixedCoordinateMm_ = 0.0;
     double horizontalMinMm_ = 0.0;

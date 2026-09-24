@@ -35,9 +35,11 @@ private:
     void populateRegistrationTable();
     void navigateToRegistrationFiducial(int row);
     void performFiducialRegistration();
+    void acceptFiducialRegistration();
     void applyRegistrationResult(beam::registration::AffineArrayResult result);
     void beginFiducialPlacement();
     void placeSelectedFiducial(const Eigen::Vector3d& positionMm);
+    void confirmSelectedFiducial();
     void setPlacementMode(bool enabled);
     void updateRegistrationAvailability();
     void refresh();
@@ -56,10 +58,14 @@ private:
     std::vector<beam::registration::FiducialMarker> registrationSourceFiducials_;
     std::array<bool, 6> fiducialConfirmed_{};
     std::array<bool, 6> sourceFiducialConfirmed_{};
+    std::array<bool, 6> fiducialLocated_{};
+    std::array<bool, 6> sourceFiducialLocated_{};
     bool placingFiducial_ = false;
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();
     bool registrationGeometryLoaded_ = false;
     bool registrationComplete_ = false;
+    bool pendingRegistrationFit_ = false;
+    bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
     bool focusImageLoaded_ = false;
     QString mriPath_;
