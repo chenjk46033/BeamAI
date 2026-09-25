@@ -14,16 +14,24 @@
 #include <QListWidgetItem>
 #include <QFileDialog>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QKeyEvent>
 #include <QStringList>
 #include <QMessageBox>
+#include <QMenu>
 #include <QHeaderView>
 #include <QIntValidator>
 #include <QTableWidgetItem>
 #include <QProgressDialog>
+#include <QResizeEvent>
+#include <QScrollArea>
+#include <QSplitter>
 #include <QThread>
+#include <QTimer>
 #include <QStyle>
+#include <QVBoxLayout>
 
 #include "infra_dicom/load_mri_ras.hpp"
 #include "infra_mat/legacy_beam_session.hpp"
@@ -111,18 +119,164 @@ QString statusSymbol(beam::gui::WorkflowStatus status) {
 
 WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new Ui::WorkflowShell) {
     ui_->setupUi(this);
-
-    // Keep the two workflow-gating actions visible while the operator reviews
-    // the large MRI workspace. They remain the same widgets and connections,
-    // but are promoted above the image/table area as full-width actions.
-    ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
-    ui_->registrationLayout->insertWidget(2, ui_->registerFiducialsButton);
-    ui_->registrationLayout->removeWidget(ui_->acceptRegistrationButton);
-    ui_->registrationLayout->insertWidget(3, ui_->acceptRegistrationButton);
-    for (QPushButton* button : {ui_->registerFiducialsButton, ui_->acceptRegistrationButton}) {
-        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        button->setMinimumHeight(40);
+    // Align each workflow body with the top of the process-navigation panel;
+    // the large page-title band is redundant once the stage list identifies
+    // the active step.
+    ui_->pageTitle->hide();
+    ui_->pageSubtitle->hide();
+    ui_->contentLayout->setContentsMargins(28, 0, 28, 12);
+    ui_->registrationInstructions->setStyleSheet(
+        QStringLiteral("QLabel { color: #17313f; background: #f1f8fa; "
+                       "border: 1px solid #b7d1d9; border-radius: 4px; "
+                       "padding: 8px; }"));
+    ui_->registrationInstructions->setText(QStringLiteral(
+        "Select a fiducial row to navigate and zoom. Drag the selected red ring onto the grayscale donut, "
+        "verify it in all three MRI views, and repeat for all six. To enter a point directly, right-click the "
+        "MRI point, choose marker 1-6 from the menu, and paste it into that marker-table row."));
+    ui_->registrationInstructions->hide();
+    // Use the original deep slate-blue work surface.  Inputs/tables retain
+    // their own light surfaces for readability, while the workflow canvas is
+    // deliberately dark to reduce glare during MRI review.
+    // Match the established neutral dark-gray palette used by the startup
+    // screen; this intentionally avoids a blue cast on the main work area.
+    const QColor bodySurface(27, 27, 27);
+    for (QWidget* page : {ui_->casePage, ui_->systemPage, ui_->imagingPage,
+                          ui_->registrationPage, ui_->placeholderPage}) {
+        page->setAutoFillBackground(true);
+        QPalette palette = page->palette();
+        palette.setColor(QPalette::Window, bodySurface);
+        palette.setColor(QPalette::Base, Qt::white);
+        palette.setColor(QPalette::WindowText, QColor(242, 247, 248));
+        palette.setColor(QPalette::Text, QColor(242, 247, 248));
+        page->setPalette(palette);
     }
+    // The page palette is intentionally light-text for the dark work surface.
+    // Restore an explicit dark foreground for editable fields so entered case
+    // identifiers remain visible on their light input backgrounds.
+    for (QLineEdit* edit : findChildren<QLineEdit*>()) {
+        edit->setStyleSheet(QStringLiteral(
+            "QLineEdit { background: #ffffff; color: #17313f; selection-background-color: #58c7e5; "
+            "selection-color: #083d4d; } QLineEdit:disabled { color: #65757d; background: #edf1f2; }"));
+        QPalette palette = edit->palette();
+        palette.setColor(QPalette::Base, QColor(255, 255, 255));
+        palette.setColor(QPalette::Text, QColor(23, 49, 63));
+        palette.setColor(QPalette::PlaceholderText, QColor(105, 121, 129));
+        edit->setPalette(palette);
+    }
+    for (QComboBox* combo : findChildren<QComboBox*>()) {
+        combo->setStyleSheet(QStringLiteral(
+            "QComboBox { background: #ffffff; color: #17313f; } "
+            "QComboBox QAbstractItemView { background: #ffffff; color: #17313f; selection-background-color: #58c7e5; }"));
+    }
+    ui_->stageList->setAutoFillBackground(true);
+    QPalette stagePalette = ui_->stageList->palette();
+    stagePalette.setColor(QPalette::Base, QColor(36, 36, 36));
+    stagePalette.setColor(QPalette::Window, QColor(36, 36, 36));
+    stagePalette.setColor(QPalette::Text, QColor(242, 247, 248));
+    stagePalette.setColor(QPalette::WindowText, QColor(242, 247, 248));
+    ui_->stageList->setPalette(stagePalette);
+    ui_->registrationOverlayControls->setSpacing(4);
+    for (QCheckBox* checkBox : {ui_->registrationShowFieldCheckBox,
+                                ui_->registrationShowTargetCheckBox,
+                                ui_->registrationShowTransducersCheckBox,
+                                ui_->registrationShowFiducialsCheckBox,
+                                ui_->registrationShowLinkedNavigationCheckBox}) {
+        checkBox->setStyleSheet(QStringLiteral("QCheckBox { color: #f2f7f8; spacing: 5px; }"));
+        QPalette palette = checkBox->palette();
+        palette.setColor(QPalette::WindowText, QColor(242, 247, 248));
+        palette.setColor(QPalette::Text, QColor(242, 247, 248));
+        checkBox->setPalette(palette);
+        checkBox->setMinimumWidth(checkBox->sizeHint().width());
+    }
+    for (QLabel* label : {ui_->registrationBrightnessControlsLabel,
+                          ui_->registrationTransparencyLabel})
+        label->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; }"));
+    for (QToolButton* button : {ui_->registrationBrightnessUpButton,
+                                ui_->registrationBrightnessDownButton,
+                                ui_->registrationResetAllMriViewsButton})
+        button->setStyleSheet(QStringLiteral("QToolButton { color: #f2f7f8; }"));
+    // The generic case subtitle consumes vertical space on every workflow
+    // page; Registration needs that space for its review and acceptance
+    // controls.
+    ui_->pageSubtitle->hide();
+
+    // Registration is kept as a fixed, non-scrolling page. Its compact MRI,
+    // table, and action layouts are sized to keep acceptance controls visible.
+
+    // Registration contains additional controls below the MRI row, so its
+    // layout can otherwise compress the image widgets vertically.  Once the
+    // window has been laid out, use the Imaging preview height as the shared
+    // reference for both tabs.
+    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
+
+    // Keep the registration actions in their Designer order: immediately
+    // below the marker table, after the operator has reviewed the layouts.
+    // Make the marker diagram/table split user-adjustable.  The diagram is
+    // deliberately on the left, while the table remains on the right.
+    ui_->registrationDetailsLayout->removeWidget(ui_->registrationFiducialLayout);
+    ui_->registrationDetailsLayout->removeWidget(ui_->registrationTable);
+    auto* markerSplitter = new QSplitter(Qt::Horizontal, this);
+    markerSplitter->setChildrenCollapsible(false);
+    markerSplitter->setHandleWidth(12);
+    markerSplitter->setCursor(Qt::SplitHCursor);
+    markerSplitter->setToolTip(QStringLiteral("Drag the divider left or right to resize the fiducial diagram and marker table"));
+    markerSplitter->setStyleSheet(QStringLiteral(
+        "QSplitter::handle:horizontal { background: #8aa1aa; border-left: 1px solid #5e7882; "
+        "border-right: 1px solid #5e7882; margin: 2px 0; }"
+        "QSplitter::handle:horizontal:hover { background: #2b91ad; }"));
+    ui_->registrationActions->removeWidget(ui_->placeFiducialButton);
+    ui_->placeFiducialButton->hide();
+    ui_->registrationActions->removeWidget(ui_->resetRegistrationButton);
+    ui_->resetRegistrationButton->setText(QStringLiteral("Restore fiducials"));
+    ui_->resetRegistrationButton->setMinimumHeight(30);
+    auto* markerDiagramPanel = new QWidget(markerSplitter);
+    auto* markerDiagramLayout = new QVBoxLayout(markerDiagramPanel);
+    markerDiagramLayout->setContentsMargins(0, 0, 0, 0);
+    markerDiagramLayout->setSpacing(4);
+    markerDiagramLayout->addWidget(ui_->registrationFiducialLayout, 0, Qt::AlignTop);
+    markerDiagramLayout->addWidget(ui_->resetRegistrationButton);
+    markerSplitter->addWidget(markerDiagramPanel);
+    ui_->registrationFiducialLayout->setMinimumWidth(300);
+    ui_->registrationFiducialLayout->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    ui_->registrationFiducialLayout->setFixedHeight(150);
+    for (QVBoxLayout* layout : {ui_->registrationSagittalLayout,
+                                ui_->registrationCoronalLayout,
+                                ui_->registrationAxialLayout}) {
+        layout->setContentsMargins(4, 3, 4, 2);
+        layout->setSpacing(2);
+    }
+    for (QLabel* label : {ui_->registrationSagittalLabel,
+                          ui_->registrationCoronalLabel,
+                          ui_->registrationAxialLabel}) {
+        label->setMaximumHeight(18);
+        label->setContentsMargins(0, 0, 0, 0);
+    }
+    for (QVBoxLayout* layout : {ui_->sagittalLayout, ui_->coronalLayout, ui_->axialLayout}) {
+        layout->setContentsMargins(4, 3, 4, 2);
+        layout->setSpacing(2);
+    }
+    for (QLabel* label : {ui_->sagittalSliceLabel, ui_->coronalSliceLabel, ui_->axialSliceLabel}) {
+        label->setMaximumHeight(18);
+        label->setContentsMargins(0, 0, 0, 0);
+    }
+    auto* markerTablePanel = new QWidget(markerSplitter);
+    auto* markerTableLayout = new QVBoxLayout(markerTablePanel);
+    markerTableLayout->setContentsMargins(0, 0, 0, 0);
+    markerTableLayout->setSpacing(6);
+    ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
+    markerTableLayout->addWidget(ui_->registrationTable);
+    markerTableLayout->addWidget(ui_->registerFiducialsButton);
+    ui_->registerFiducialsButton->setMinimumHeight(40);
+    ui_->registerFiducialsButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    markerSplitter->addWidget(markerTablePanel);
+    markerSplitter->setStretchFactor(0, 1);
+    markerSplitter->setStretchFactor(1, 1);
+    markerSplitter->setSizes({300, 880});
+    ui_->registrationDetailsLayout->addWidget(markerSplitter);
+    ui_->registrationResult->setMaximumHeight(42);
+    ui_->registrationResult->hide();
+    ui_->registrationActions->removeWidget(ui_->confirmFiducialButton);
+    ui_->confirmFiducialButton->hide();
 
     // The imaging page starts as an uncluttered source-data review; users can
     // explicitly reveal fiducials there. Registration keeps them visible.
@@ -394,10 +548,42 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->registrationTable, &QTableWidget::currentCellChanged, this,
             [this](int currentRow, int, int, int) {
                 ui_->registrationFiducialLayout->setSelectedIndex(currentRow);
-                navigateToRegistrationFiducial(currentRow);
+                if (currentRow >= 0) ui_->registrationTable->selectRow(currentRow);
+                for (int row = 0; row < ui_->registrationTable->rowCount(); ++row) {
+                    for (int column = 0; column < ui_->registrationTable->columnCount(); ++column) {
+                        if (auto* item = ui_->registrationTable->item(row, column))
+                            item->setBackground(row == currentRow ? QColor(190, 235, 245)
+                                                                   : QColor(Qt::transparent));
+                    }
+                }
+                if (!suppressRegistrationNavigation_)
+                    navigateToRegistrationFiducial(currentRow);
                 ui_->confirmFiducialButton->setEnabled(currentRow >= 0 && currentRow < 6 &&
                     fiducialLocated_[static_cast<std::size_t>(currentRow)] &&
                     !fiducialConfirmed_[static_cast<std::size_t>(currentRow)]);
+            });
+    ui_->registrationTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui_->registrationTable, &QTableWidget::customContextMenuRequested, this,
+            [this](const QPoint& position) {
+                const int row = ui_->registrationTable->rowAt(position.y());
+                if (row < 0 || row >= ui_->registrationTable->rowCount()) return;
+                ui_->registrationTable->setCurrentCell(row, 0);
+                QMenu menu(this);
+                QAction* confirm = menu.addAction(QStringLiteral("Confirm this fiducial"));
+                confirm->setEnabled(row >= 0 && row < 6 &&
+                                    fiducialLocated_[static_cast<std::size_t>(row)] &&
+                                    !fiducialConfirmed_[static_cast<std::size_t>(row)]);
+                connect(confirm, &QAction::triggered, this, [this, row] {
+                    ui_->registrationTable->setCurrentCell(row, 0);
+                    confirmSelectedFiducial();
+                });
+                menu.exec(ui_->registrationTable->viewport()->mapToGlobal(position));
+            });
+    connect(ui_->registrationTable, &QTableWidget::cellDoubleClicked, this,
+            [this](int row, int) {
+                if (row < 0 || row >= 6) return;
+                ui_->registrationTable->setCurrentCell(row, 0);
+                confirmSelectedFiducial();
             });
     ui_->registrationFiducialLayout->setSelectionHandler([this](int markerIndex) {
         ui_->registrationTable->setCurrentCell(markerIndex, 0);
@@ -436,10 +622,38 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         updateRegistrationAvailability();
     });
     const auto picked = [this](const Eigen::Vector3d& point) { placeSelectedFiducial(point); };
+    const auto pickedMarker = [this](int markerIndex) {
+        if (markerIndex < 0 || markerIndex >= 6) return;
+        suppressRegistrationNavigation_ = true;
+        ui_->registrationTable->setCurrentCell(markerIndex, 0);
+        ui_->registrationTable->selectRow(markerIndex);
+        ui_->registrationTable->setFocus(Qt::OtherFocusReason);
+        suppressRegistrationNavigation_ = false;
+        for (int row = 0; row < ui_->registrationTable->rowCount(); ++row) {
+            for (int column = 0; column < ui_->registrationTable->columnCount(); ++column) {
+                if (auto* item = ui_->registrationTable->item(row, column))
+                    item->setBackground(row == markerIndex ? QColor(190, 235, 245)
+                                                            : QColor(Qt::transparent));
+            }
+        }
+        ui_->registrationFiducialLayout->setSelectedIndex(markerIndex);
+    };
     ui_->registrationSagittalPreview->setPointPickedHandler(picked);
     ui_->registrationCoronalPreview->setPointPickedHandler(picked);
     ui_->registrationAxialPreview->setPointPickedHandler(picked);
+    ui_->registrationSagittalPreview->setMarkerPickedHandler(pickedMarker);
+    ui_->registrationCoronalPreview->setMarkerPickedHandler(pickedMarker);
+    ui_->registrationAxialPreview->setMarkerPickedHandler(pickedMarker);
     ui_->registrationTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui_->registrationTable->verticalHeader()->setDefaultSectionSize(25);
+    ui_->registrationTable->verticalHeader()->setMinimumSectionSize(22);
+    ui_->registrationTable->setMaximumHeight(190);
+    ui_->registrationTable->setStyleSheet(
+        QStringLiteral("QTableWidget { color: #17313f; background: #ffffff; } "
+                       "QTableWidget::item { color: #17313f; background: #ffffff; } "
+                       "QTableWidget::item:alternate { color: #17313f; background: #f1f6f8; } "
+                       "QTableWidget::item:selected, QTableWidget::item:selected:!active "
+                       "{ background: #58c7e5; color: #083d4d; }"));
     connect(ui_->participantEdit, &QLineEdit::textChanged, this, [this](const QString& value) {
         ui_->participantHeader->setText(QStringLiteral("Participant: %1").arg(value.isEmpty() ? QStringLiteral("—") : value));
     });
@@ -456,7 +670,76 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     });
 
     ui_->stageList->setCurrentRow(0);
+    ui_->acceptCaseButton->setEnabled(true);
+    ui_->acceptCaseButton->setFocusPolicy(Qt::StrongFocus);
+    ui_->acceptCaseButton->setAutoDefault(true);
+    ui_->acceptCaseButton->setDefault(true);
+    ui_->acceptImagingButton->setFocusPolicy(Qt::StrongFocus);
+    ui_->acceptImagingButton->setAutoDefault(true);
+    ui_->acceptImagingButton->setDefault(true);
+    for (QPushButton* button : {ui_->simulatePassButton, ui_->simulateFailButton,
+                                ui_->acceptDeviceReadinessButton}) {
+        button->setFocusPolicy(Qt::StrongFocus);
+        button->setAutoDefault(true);
+        button->setDefault(true);
+        button->installEventFilter(this);
+    }
     refresh();
+    // Start the operator in the first required identification field so the
+    // Participant ID can be entered immediately after Beam opens.
+    QTimer::singleShot(0, this, [this] {
+        ui_->participantEdit->setFocus(Qt::OtherFocusReason);
+    });
+}
+
+void WorkflowWindow::resizeEvent(QResizeEvent* event) {
+    QMainWindow::resizeEvent(event);
+    // Let Qt finish the new layout first.  Applying fixed preview heights
+    // during the resize event can capture an intermediate zero/small height,
+    // which makes the registration sliders vanish after repeated maximize /
+    // restore cycles.
+    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
+}
+
+bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
+    if ((watched == ui_->simulatePassButton || watched == ui_->simulateFailButton ||
+         watched == ui_->acceptDeviceReadinessButton) &&
+        event->type() == QEvent::KeyPress) {
+        const auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+            static_cast<QPushButton*>(watched)->click();
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void WorkflowWindow::syncRegistrationPreviewHeights() {
+    if (!ui_ || !ui_->sagittalPreview) return;
+    const int referenceHeight = ui_->sagittalPreview->height();
+    if (referenceHeight < 300) return;
+    // Account for the group margins, slice slider row, and coordinate label
+    // below each preview.  Keep a generous reserve for the four tool buttons
+    // in the slider row; otherwise the details panel can be laid out over the
+    // lower half of those buttons after a maximize/restore cycle.
+    const int registrationGroupHeight = referenceHeight + 72;
+    // Do not let the three-image row negotiate itself below the child layouts.
+    // This is especially important when the stacked page becomes visible
+    // after a window-state change.
+    ui_->registrationImages->setSizeConstraint(QLayout::SetMinimumSize);
+    for (QGroupBox* group : {ui_->registrationSagittalGroup,
+                             ui_->registrationCoronalGroup,
+                             ui_->registrationAxialGroup}) {
+        group->setMinimumHeight(registrationGroupHeight);
+    }
+    for (WorkflowMriView* view : {ui_->registrationSagittalPreview,
+                                  ui_->registrationCoronalPreview,
+                                  ui_->registrationAxialPreview}) {
+        if (!view || view->minimumHeight() == referenceHeight &&
+                      view->maximumHeight() == referenceHeight) continue;
+        view->setMinimumHeight(referenceHeight);
+        view->setMaximumHeight(referenceHeight);
+    }
 }
 
 WorkflowWindow::~WorkflowWindow() { delete ui_; }
@@ -553,16 +836,28 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     mriLoaded_ = true;
     mriPath_ = path;
     workflow_.change(beam::gui::WorkflowStage::Imaging, "MRI changed; registration and later approvals require review.");
-    ui_->mriPathLabel->setText(path);
+    ui_->mriPathLabel->setText(QStringLiteral("%1  ·  Loaded: %2")
+                                   .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate)));
     const auto resolution = beam::mri::computeVoxelResolution(mriAxes_);
     ui_->mriMetadataLabel->setText(
-        QStringLiteral("Volume: %1 × %2 × %3 voxels · spacing: %4 × %5 × %6 mm · legacy Beam session\n"
-                       "RAS bounds — LR: %7 to %8 mm · AP: %9 to %10 mm · IS: %11 to %12 mm")
+        QStringLiteral("Volume: %1 x %2 x %3 voxels; spacing: %4 x %5 x %6 mm; legacy Beam session\n"
+                       "RAS bounds - LR: %7 to %8 mm; AP: %9 to %10 mm; IS: %11 to %12 mm")
             .arg(mriVolume_.nx).arg(mriVolume_.ny).arg(mriVolume_.nz)
             .arg(resolution.lr,0,'f',2).arg(resolution.ap,0,'f',2).arg(resolution.is,0,'f',2)
             .arg(mriAxes_.dimLR(0),0,'f',3).arg(mriAxes_.dimLR(mriAxes_.dimLR.size()-1),0,'f',3)
             .arg(mriAxes_.dimAP(0),0,'f',3).arg(mriAxes_.dimAP(mriAxes_.dimAP.size()-1),0,'f',3)
             .arg(mriAxes_.dimIS(0),0,'f',3).arg(mriAxes_.dimIS(mriAxes_.dimIS.size()-1),0,'f',3));
+    ui_->mriMetadataLabel->setText(ui_->mriMetadataLabel->text() +
+        QStringLiteral("\nInitial slices - LR: %1 mm, AP: %2 mm, IS: %3 mm")
+            .arg(mriAxes_.dimLR(static_cast<Eigen::Index>((mriVolume_.nx - 1) / 2)), 0, 'f', 3)
+            .arg(mriAxes_.dimAP(static_cast<Eigen::Index>((mriVolume_.ny - 1) / 2)), 0, 'f', 3)
+            .arg(mriAxes_.dimIS(static_cast<Eigen::Index>((mriVolume_.nz - 1) / 2)), 0, 'f', 3));
+    ui_->mriMetadataLabel->setText(ui_->mriMetadataLabel->text().left(
+        ui_->mriMetadataLabel->text().indexOf(QStringLiteral("Initial slices"))) +
+        QStringLiteral("\nInitial slices - LR: %1 mm, AP: %2 mm, IS: %3 mm")
+            .arg(mriAxes_.dimLR(static_cast<Eigen::Index>((mriVolume_.nx - 1) / 2)), 0, 'f', 3)
+            .arg(mriAxes_.dimAP(static_cast<Eigen::Index>((mriVolume_.ny - 1) / 2)), 0, 'f', 3)
+            .arg(mriAxes_.dimIS(static_cast<Eigen::Index>((mriVolume_.nz - 1) / 2)), 0, 'f', 3));
     ui_->sagittalSlider->setRange(0, static_cast<int>(mriVolume_.nx - 1));
     ui_->coronalSlider->setRange(0, static_cast<int>(mriVolume_.ny - 1));
     ui_->axialSlider->setRange(0, static_cast<int>(mriVolume_.nz - 1));
@@ -622,16 +917,28 @@ void WorkflowWindow::loadMri(const QString& path) {
         mriPath_ = path;
         workflow_.change(beam::gui::WorkflowStage::Imaging,
                          "MRI changed; registration and later approvals require review.");
-        ui_->mriPathLabel->setText(path);
+        ui_->mriPathLabel->setText(QStringLiteral("%1  ·  Loaded: %2")
+                                       .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate)));
         const beam::mri::VoxelResolution resolution = beam::mri::computeVoxelResolution(mriAxes_);
         ui_->mriMetadataLabel->setText(
-            QStringLiteral("Volume: %1 × %2 × %3 voxels · spacing: %4 × %5 × %6 mm · RAS oriented\n"
-                           "RAS bounds — LR: %7 to %8 mm · AP: %9 to %10 mm · IS: %11 to %12 mm")
+        QStringLiteral("Volume: %1 x %2 x %3 voxels; spacing: %4 x %5 x %6 mm; RAS oriented\n"
+                       "RAS bounds - LR: %7 to %8 mm; AP: %9 to %10 mm; IS: %11 to %12 mm")
                 .arg(mriVolume_.nx).arg(mriVolume_.ny).arg(mriVolume_.nz)
                 .arg(resolution.lr, 0, 'f', 2).arg(resolution.ap, 0, 'f', 2).arg(resolution.is, 0, 'f', 2)
                 .arg(mriAxes_.dimLR(0),0,'f',3).arg(mriAxes_.dimLR(mriAxes_.dimLR.size()-1),0,'f',3)
                 .arg(mriAxes_.dimAP(0),0,'f',3).arg(mriAxes_.dimAP(mriAxes_.dimAP.size()-1),0,'f',3)
                 .arg(mriAxes_.dimIS(0),0,'f',3).arg(mriAxes_.dimIS(mriAxes_.dimIS.size()-1),0,'f',3));
+        ui_->mriMetadataLabel->setText(ui_->mriMetadataLabel->text() +
+            QStringLiteral("\nInitial slices - LR: %1 mm, AP: %2 mm, IS: %3 mm")
+                .arg(mriAxes_.dimLR(static_cast<Eigen::Index>((mriVolume_.nx - 1) / 2)), 0, 'f', 3)
+                .arg(mriAxes_.dimAP(static_cast<Eigen::Index>((mriVolume_.ny - 1) / 2)), 0, 'f', 3)
+                .arg(mriAxes_.dimIS(static_cast<Eigen::Index>((mriVolume_.nz - 1) / 2)), 0, 'f', 3));
+        ui_->mriMetadataLabel->setText(ui_->mriMetadataLabel->text().left(
+            ui_->mriMetadataLabel->text().indexOf(QStringLiteral("Initial slices"))) +
+            QStringLiteral("\nInitial slices - LR: %1 mm, AP: %2 mm, IS: %3 mm")
+                .arg(mriAxes_.dimLR(static_cast<Eigen::Index>((mriVolume_.nx - 1) / 2)), 0, 'f', 3)
+                .arg(mriAxes_.dimAP(static_cast<Eigen::Index>((mriVolume_.ny - 1) / 2)), 0, 'f', 3)
+                .arg(mriAxes_.dimIS(static_cast<Eigen::Index>((mriVolume_.nz - 1) / 2)), 0, 'f', 3));
         ui_->sagittalSlider->setRange(0, static_cast<int>(mriVolume_.nx - 1));
         ui_->coronalSlider->setRange(0, static_cast<int>(mriVolume_.ny - 1));
         ui_->axialSlider->setRange(0, static_cast<int>(mriVolume_.nz - 1));
@@ -893,6 +1200,7 @@ void WorkflowWindow::confirmSelectedFiducial() {
         showMessage(QStringLiteral("All six fiducials are confirmed. Calculate the fit and review residuals."), false);
     }
     refresh();
+    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
 }
 
 void WorkflowWindow::updateRegistrationAvailability() {
@@ -998,6 +1306,28 @@ void WorkflowWindow::acceptFiducialRegistration() {
 }
 
 void WorkflowWindow::showMriPreviews() {
+    QStringList markerNames;
+    for (std::size_t index = 0; index < 6; ++index) {
+        if (index < fiducials_.size() && !fiducials_[index].name.empty())
+            markerNames.push_back(QStringLiteral("%1. %2").arg(index + 1)
+                                  .arg(QString::fromStdString(fiducials_[index].name)));
+        else
+            markerNames.push_back(QStringLiteral("Marker %1").arg(index + 1));
+    }
+    for (WorkflowMriView* view : {ui_->registrationSagittalPreview,
+                                  ui_->registrationCoronalPreview,
+                                  ui_->registrationAxialPreview})
+        view->setCoordinatePasteOptions(markerNames);
+    if (fiducials_.size() >= 6) {
+        std::array<QString, 6> coordinateLabels;
+        for (std::size_t index = 0; index < 6; ++index) {
+            const Eigen::Vector3d rasMm = fiducials_[index].position * 1000.0;
+            coordinateLabels[index] = QStringLiteral("(%1, %2, %3)")
+                .arg(rasMm.x(), 0, 'f', 1).arg(rasMm.y(), 0, 'f', 1).arg(rasMm.z(), 0, 'f', 1);
+        }
+        ui_->imagingFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
+        ui_->registrationFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
+    }
     const int sagittal = ui_->sagittalSlider->value() + 1;
     const int coronal = ui_->coronalSlider->value() + 1;
     const int axial = ui_->axialSlider->value() + 1;
@@ -1067,31 +1397,34 @@ void WorkflowWindow::showMriPreviews() {
 
         std::vector<WorkflowMriMarker> sagMarkers, corMarkers, axialMarkers;
         std::vector<WorkflowMriMarker> imagingSagMarkers, imagingCorMarkers, imagingAxialMarkers;
-        const int selectedFiducial = selectedStage_ == beam::gui::WorkflowStage::Registration
-                                         ? ui_->registrationTable->currentRow() : -1;
         for (std::size_t markerIndex = 0; markerIndex < fiducials_.size(); ++markerIndex) {
             const auto& marker = fiducials_[markerIndex];
-            const bool draggable = static_cast<int>(markerIndex) == selectedFiducial;
+            const QString markerLabel = QStringLiteral("%1. %2").arg(markerIndex + 1)
+                .arg(QString::fromStdString(marker.name));
+            const bool draggable = selectedStage_ == beam::gui::WorkflowStage::Registration;
             const Eigen::Vector3d mm = marker.position * 1000.0;
             const auto voxel = beam::gui::imagePositionToVoxelIndex(mm, mriAxes_);
             if (voxel.i == sagittal - 1) {
                 const WorkflowMriMarker viewMarker{QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                                   QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable};
+                                                   markerLabel, QColor(230, 45, 55), false, draggable,
+                                                   static_cast<int>(markerIndex)};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) sagMarkers.push_back(viewMarker);
                 if (ui_->showFiducialsCheckBox->isChecked()) imagingSagMarkers.push_back(viewMarker);
             }
             if (voxel.j == coronal - 1) {
                 const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                                   QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable};
+                                                   markerLabel, QColor(230, 45, 55), false, draggable,
+                                                   static_cast<int>(markerIndex)};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) corMarkers.push_back(viewMarker);
                 if (ui_->showFiducialsCheckBox->isChecked()) imagingCorMarkers.push_back(viewMarker);
             }
             if (voxel.k == axial - 1) {
                 const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
-                                                   QString::fromStdString(marker.name), QColor(230, 45, 55), false, draggable};
+                                                   markerLabel, QColor(230, 45, 55), false, draggable,
+                                                   static_cast<int>(markerIndex)};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) axialMarkers.push_back(viewMarker);
                 if (ui_->showFiducialsCheckBox->isChecked()) imagingAxialMarkers.push_back(viewMarker);
             }
@@ -1190,6 +1523,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         }
     }
     refresh();
+    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
 }
 
 void WorkflowWindow::completeCurrentStage() {

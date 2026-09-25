@@ -5,6 +5,7 @@
 #include <QColor>
 #include <QPoint>
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 #include <optional>
 #include <functional>
@@ -16,6 +17,7 @@ struct WorkflowMriMarker {
     QColor color;
     bool crosshair = false;
     bool draggable = false;
+    int markerIndex = -1;
 };
 
 // Native image interaction used by the new workflow UI. Kept independent
@@ -41,6 +43,8 @@ public:
     void focusOn(QPointF normalizedPosition, double zoom = 3.0);
     void setPointPlacementEnabled(bool enabled);
     void setPointPickedHandler(std::function<void(const Eigen::Vector3d&)> handler);
+    void setMarkerPickedHandler(std::function<void(int)> handler);
+    void setCoordinatePasteOptions(QStringList options);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -88,4 +92,6 @@ private:
     QPointF mouseWidgetPosition_;
     bool pointPlacementEnabled_ = false;
     std::function<void(const Eigen::Vector3d&)> pointPickedHandler_;
+    std::function<void(int)> markerPickedHandler_;
+    QStringList coordinatePasteOptions_;
 };

@@ -5,6 +5,7 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QComboBox>
 #include <QEvent>
 #include <QFontMetrics>
 #include <QHBoxLayout>
@@ -150,6 +151,14 @@ void WorkflowMriView::setPointPlacementEnabled(bool enabled) {
     setCursor(enabled ? Qt::CrossCursor : Qt::OpenHandCursor);
 }
 
+void WorkflowMriView::setMarkerPickedHandler(std::function<void(int)> handler) {
+    markerPickedHandler_ = std::move(handler);
+}
+
+void WorkflowMriView::setCoordinatePasteOptions(QStringList options) {
+    coordinatePasteOptions_ = std::move(options);
+}
+
 void WorkflowMriView::setPointPickedHandler(std::function<void(const Eigen::Vector3d&)> handler) {
     pointPickedHandler_ = std::move(handler);
 }
@@ -287,6 +296,8 @@ void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
             if (QLineF(point, event->position()).length() <= 14.0) {
                 draggingMarker_ = true;
                 setCursor(Qt::CrossCursor);
+                if (markerPickedHandler_ && marker.markerIndex >= 0)
+                    markerPickedHandler_(marker.markerIndex);
                 if (const auto ras = rasAtWidgetPosition(event->position()); ras && pointPickedHandler_)
                     pointPickedHandler_(*ras);
                 event->accept();
@@ -331,7 +342,43 @@ void WorkflowMriView::leaveEvent(QEvent*) {
 }
 
 void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
+    updateMouseCoordinate(event->pos());
+    // Capture the point before the menu opens.  Opening a popup can cause
+    // the view to receive leaveEvent(), so reading mouseRasMm_ later would
+    // otherwise produce an empty or changed coordinate.
+    const auto coordinateAtContext = rasAtWidgetPosition(event->pos());
     QMenu menu(this);
+    if (markerPickedHandler_) {
+        const QString coordinateText = coordinateAtContext
+            ? QStringLiteral("Mouse point: X %1 mm, Y %2 mm, Z %3 mm")
+                  .arg(coordinateAtContext->x(), 0, 'f', 3)
+                  .arg(coordinateAtContext->y(), 0, 'f', 3)
+                  .arg(coordinateAtContext->z(), 0, 'f', 3)
+            : QStringLiteral("Mouse point is outside the MRI image");
+        QAction* coordinateInfo = menu.addAction(coordinateText);
+        coordinateInfo->setEnabled(false);
+        if (coordinateAtContext && pointPickedHandler_ && !coordinatePasteOptions_.isEmpty()) {
+            auto* targetWidget = new QWidget(&menu);
+            auto* targetLayout = new QHBoxLayout(targetWidget);
+            targetLayout->setContentsMargins(10, 5, 10, 5);
+            auto* targetLabel = new QLabel(QStringLiteral("Marker"), targetWidget);
+            auto* targetCombo = new QComboBox(targetWidget);
+            targetCombo->addItems(coordinatePasteOptions_);
+            targetCombo->setMinimumWidth(170);
+            targetLayout->addWidget(targetLabel);
+            targetLayout->addWidget(targetCombo, 1);
+            auto* targetAction = new QWidgetAction(&menu);
+            targetAction->setDefaultWidget(targetWidget);
+            menu.addAction(targetAction);
+            QAction* paste = menu.addAction(QStringLiteral("Paste coordinate into selected marker"));
+            connect(paste, &QAction::triggered, this, [this, targetCombo, coordinateAtContext] {
+                if (!coordinateAtContext || !pointPickedHandler_) return;
+                if (markerPickedHandler_) markerPickedHandler_(targetCombo->currentIndex());
+                pointPickedHandler_(*coordinateAtContext);
+            });
+        }
+    }
+    menu.addSeparator();
     auto* container = new QWidget(&menu);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(10, 8, 10, 8);

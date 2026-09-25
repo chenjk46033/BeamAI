@@ -20,6 +20,10 @@ public:
     explicit WorkflowWindow(QWidget* parent = nullptr);
     ~WorkflowWindow() override;
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void selectStage(beam::gui::WorkflowStage stage);
     void completeCurrentStage();
@@ -44,6 +48,7 @@ private:
     void updateRegistrationAvailability();
     void refresh();
     void showMessage(const QString& text, bool error);
+    void syncRegistrationPreviewHeights();
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
@@ -68,6 +73,7 @@ private:
     bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
     bool focusImageLoaded_ = false;
+    bool suppressRegistrationNavigation_ = false;
     int registrationStartFiducialRow_ = -1;
     QString mriPath_;
 };

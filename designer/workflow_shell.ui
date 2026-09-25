@@ -164,7 +164,7 @@
                   </size>
                 </property>
                 <property name="styleSheet">
-                  <string notr="true">QListWidget { background: #f8fafb; border: 0; border-right: 1px solid #d9e0e4; padding: 18px 8px; outline: 0; } QListWidget::item { height: 48px; padding: 0 10px; color: #344651; border-radius: 6px; } QListWidget::item:selected { background: #e9f4f7; color: #0b536b; font-weight: 600; }</string>
+                  <string notr="true">QListWidget { background: #242424; border: 0; border-right: 1px solid #454545; padding: 18px 8px; outline: 0; } QListWidget::item { height: 48px; padding: 0 10px; color: #e6e6e6; border-radius: 6px; } QListWidget::item:selected { background: #444444; color: #ffffff; font-weight: 600; } QListWidget::item:hover { background: #373737; }</string>
                 </property>
               </widget>
             </item>
@@ -672,7 +672,14 @@
                                         </property>
                                         <layout class="QVBoxLayout" name="sagittalLayout">
                                           <item>
-                                            <widget class="WorkflowMriView" name="sagittalPreview"/>
+                                      <widget class="WorkflowMriView" name="sagittalPreview">
+                                        <property name="minimumSize">
+                                          <size>
+                                            <width>300</width>
+                                            <height>300</height>
+                                          </size>
+                                        </property>
+                                      </widget>
                                           </item>
                                           <item>
                                             <layout class="QHBoxLayout" name="sagittalSliderRow">
@@ -747,7 +754,14 @@
                                         </property>
                                         <layout class="QVBoxLayout" name="coronalLayout">
                                           <item>
-                                            <widget class="WorkflowMriView" name="coronalPreview"/>
+                                      <widget class="WorkflowMriView" name="coronalPreview">
+                                        <property name="minimumSize">
+                                          <size>
+                                            <width>300</width>
+                                            <height>300</height>
+                                          </size>
+                                        </property>
+                                      </widget>
                                           </item>
                                           <item>
                                             <layout class="QHBoxLayout" name="coronalSliderRow">
@@ -822,7 +836,14 @@
                                         </property>
                                         <layout class="QVBoxLayout" name="axialLayout">
                                           <item>
-                                            <widget class="WorkflowMriView" name="axialPreview"/>
+                                      <widget class="WorkflowMriView" name="axialPreview">
+                                        <property name="minimumSize">
+                                          <size>
+                                            <width>300</width>
+                                            <height>300</height>
+                                          </size>
+                                        </property>
+                                      </widget>
                                           </item>
                                           <item>
                                             <layout class="QHBoxLayout" name="axialSliderRow">
@@ -1264,8 +1285,8 @@
                                       <widget class="WorkflowMriView" name="registrationSagittalPreview">
                                         <property name="minimumSize">
                                           <size>
-                                            <width>200</width>
-                                            <height>240</height>
+                                            <width>300</width>
+                                            <height>300</height>
                                           </size>
                                         </property>
                                       </widget>
@@ -1328,8 +1349,8 @@
                                       <widget class="WorkflowMriView" name="registrationCoronalPreview">
                                         <property name="minimumSize">
                                           <size>
-                                            <width>200</width>
-                                            <height>240</height>
+                                            <width>300</width>
+                                            <height>300</height>
                                           </size>
                                         </property>
                                       </widget>
@@ -1392,8 +1413,8 @@
                                       <widget class="WorkflowMriView" name="registrationAxialPreview">
                                         <property name="minimumSize">
                                           <size>
-                                            <width>200</width>
-                                            <height>240</height>
+                                            <width>300</width>
+                                            <height>300</height>
                                           </size>
                                         </property>
                                       </widget>
