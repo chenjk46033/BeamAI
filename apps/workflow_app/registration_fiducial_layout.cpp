@@ -9,7 +9,10 @@
 #include <utility>
 
 RegistrationFiducialLayout::RegistrationFiducialLayout(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(470, 190);
+    // The registration window controls the pane height; do not impose the
+    // old 190-pixel minimum, which leaves an empty band above the Restore
+    // button when the compact layout is used.
+    setMinimumSize(300, 0);
     setCursor(Qt::PointingHandCursor);
     setToolTip(QStringLiteral("Select a fiducial from the left or right array layout"));
 }

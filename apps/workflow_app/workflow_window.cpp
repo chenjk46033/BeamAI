@@ -218,11 +218,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* markerSplitter = new QSplitter(Qt::Horizontal, this);
     markerSplitter->setChildrenCollapsible(false);
     markerSplitter->setHandleWidth(12);
+    markerSplitter->setMinimumHeight(196);
     markerSplitter->setCursor(Qt::SplitHCursor);
     markerSplitter->setToolTip(QStringLiteral("Drag the divider left or right to resize the fiducial diagram and marker table"));
     markerSplitter->setStyleSheet(QStringLiteral(
         "QSplitter::handle:horizontal { background: #8aa1aa; border-left: 1px solid #5e7882; "
-        "border-right: 1px solid #5e7882; margin: 2px 0; }"
+        "border-right: 1px solid #5e7882; margin: 0; }"
         "QSplitter::handle:horizontal:hover { background: #2b91ad; }"));
     ui_->registrationActions->removeWidget(ui_->placeFiducialButton);
     ui_->placeFiducialButton->hide();
@@ -230,15 +231,20 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->resetRegistrationButton->setText(QStringLiteral("Restore fiducials"));
     ui_->resetRegistrationButton->setMinimumHeight(30);
     auto* markerDiagramPanel = new QWidget(markerSplitter);
+    markerDiagramPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     auto* markerDiagramLayout = new QVBoxLayout(markerDiagramPanel);
     markerDiagramLayout->setContentsMargins(0, 0, 0, 0);
-    markerDiagramLayout->setSpacing(4);
+    markerDiagramLayout->setSpacing(0);
     markerDiagramLayout->addWidget(ui_->registrationFiducialLayout, 0, Qt::AlignTop);
     markerDiagramLayout->addWidget(ui_->resetRegistrationButton);
     markerSplitter->addWidget(markerDiagramPanel);
     ui_->registrationFiducialLayout->setMinimumWidth(300);
+    ui_->registrationFiducialLayout->setMinimumHeight(0);
+    ui_->registrationFiducialLayout->setMaximumHeight(120);
     ui_->registrationFiducialLayout->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    ui_->registrationFiducialLayout->setFixedHeight(150);
+    ui_->registrationFiducialLayout->setFixedHeight(120);
+    markerDiagramPanel->setMinimumHeight(160);
+    markerDiagramPanel->setMaximumHeight(160);
     for (QVBoxLayout* layout : {ui_->registrationSagittalLayout,
                                 ui_->registrationCoronalLayout,
                                 ui_->registrationAxialLayout}) {
@@ -260,31 +266,41 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         label->setContentsMargins(0, 0, 0, 0);
     }
     auto* markerTablePanel = new QWidget(markerSplitter);
+    markerTablePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* markerTableLayout = new QVBoxLayout(markerTablePanel);
     markerTableLayout->setContentsMargins(0, 0, 0, 0);
-    markerTableLayout->setSpacing(6);
+    markerTableLayout->setSpacing(0);
     ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
-    markerTableLayout->addWidget(ui_->registrationTable);
+    markerTableLayout->addWidget(ui_->registrationTable, 1);
     ui_->confirmFiducialButton->setText(QStringLiteral("Confirm all located fiducials"));
     ui_->confirmFiducialButton->setToolTip(QStringLiteral(
         "Confirm every fiducial currently marked Located after reviewing the MRI views"));
-    ui_->confirmFiducialButton->setMinimumHeight(34);
+    ui_->confirmFiducialButton->setMinimumHeight(30);
     ui_->confirmFiducialButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    ui_->registerFiducialsButton->setMinimumHeight(40);
+    ui_->registerFiducialsButton->setMinimumHeight(30);
     ui_->registerFiducialsButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto* markerActions = new QHBoxLayout;
     markerActions->setContentsMargins(0, 0, 0, 0);
-    markerActions->setSpacing(6);
-    markerActions->addWidget(ui_->confirmFiducialButton);
-    markerActions->addWidget(ui_->registerFiducialsButton);
+    markerActions->setSpacing(4);
+    markerActions->addWidget(ui_->confirmFiducialButton, 1);
+    markerActions->addWidget(ui_->registerFiducialsButton, 1);
     markerTableLayout->addLayout(markerActions);
     markerSplitter->addWidget(markerTablePanel);
     markerSplitter->setStretchFactor(0, 1);
     markerSplitter->setStretchFactor(1, 1);
     markerSplitter->setSizes({300, 880});
     ui_->registrationDetailsLayout->addWidget(markerSplitter);
+    // The Designer action row is now empty because its buttons were moved into
+    // the two splitter panes. Remove that empty layout so it cannot leave a
+    // blank band before the final Accept Registration button.
+    ui_->registrationLayout->removeItem(ui_->registrationActions);
+    ui_->registrationLayout->removeWidget(ui_->registrationResult);
+    ui_->registrationLayout->setSpacing(0);
     ui_->registrationResult->setMaximumHeight(42);
     ui_->registrationResult->hide();
+    ui_->registrationDetailsLayout->removeWidget(ui_->registrationResult);
+    ui_->registrationDetailsLayout->setContentsMargins(0, 0, 0, 0);
+    ui_->registrationDetailsLayout->setSpacing(0);
     ui_->registrationActions->removeWidget(ui_->confirmFiducialButton);
 
     // The imaging page starts as an uncluttered source-data review; users can
@@ -660,7 +676,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     ui_->registrationTable->verticalHeader()->setDefaultSectionSize(25);
     ui_->registrationTable->verticalHeader()->setMinimumSectionSize(22);
-    ui_->registrationTable->setMaximumHeight(190);
+    // Six complete rows plus the header, without an oversized viewport.
+    ui_->registrationTable->setFixedHeight(180);
     ui_->registrationTable->setStyleSheet(
         QStringLiteral("QTableWidget { color: #17313f; background: #ffffff; } "
                        "QTableWidget::item { color: #17313f; background: #ffffff; } "
