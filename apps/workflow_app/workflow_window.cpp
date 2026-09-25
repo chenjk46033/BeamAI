@@ -265,9 +265,19 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerTableLayout->setSpacing(6);
     ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
     markerTableLayout->addWidget(ui_->registrationTable);
-    markerTableLayout->addWidget(ui_->registerFiducialsButton);
+    ui_->confirmFiducialButton->setText(QStringLiteral("Confirm all located fiducials"));
+    ui_->confirmFiducialButton->setToolTip(QStringLiteral(
+        "Confirm every fiducial currently marked Located after reviewing the MRI views"));
+    ui_->confirmFiducialButton->setMinimumHeight(34);
+    ui_->confirmFiducialButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     ui_->registerFiducialsButton->setMinimumHeight(40);
     ui_->registerFiducialsButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto* markerActions = new QHBoxLayout;
+    markerActions->setContentsMargins(0, 0, 0, 0);
+    markerActions->setSpacing(6);
+    markerActions->addWidget(ui_->confirmFiducialButton);
+    markerActions->addWidget(ui_->registerFiducialsButton);
+    markerTableLayout->addLayout(markerActions);
     markerSplitter->addWidget(markerTablePanel);
     markerSplitter->setStretchFactor(0, 1);
     markerSplitter->setStretchFactor(1, 1);
@@ -276,7 +286,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationResult->setMaximumHeight(42);
     ui_->registrationResult->hide();
     ui_->registrationActions->removeWidget(ui_->confirmFiducialButton);
-    ui_->confirmFiducialButton->hide();
 
     // The imaging page starts as an uncluttered source-data review; users can
     // explicitly reveal fiducials there. Registration keeps them visible.
@@ -558,9 +567,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 }
                 if (!suppressRegistrationNavigation_)
                     navigateToRegistrationFiducial(currentRow);
-                ui_->confirmFiducialButton->setEnabled(currentRow >= 0 && currentRow < 6 &&
-                    fiducialLocated_[static_cast<std::size_t>(currentRow)] &&
-                    !fiducialConfirmed_[static_cast<std::size_t>(currentRow)]);
+                bool hasPendingLocated = false;
+                for (std::size_t index = 0; index < fiducialLocated_.size(); ++index)
+                    hasPendingLocated = hasPendingLocated || (fiducialLocated_[index] && !fiducialConfirmed_[index]);
+                ui_->confirmFiducialButton->setEnabled(hasPendingLocated);
             });
     ui_->registrationTable->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui_->registrationTable, &QTableWidget::customContextMenuRequested, this,
@@ -588,9 +598,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationFiducialLayout->setSelectionHandler([this](int markerIndex) {
         ui_->registrationTable->setCurrentCell(markerIndex, 0);
     });
-    connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int, int column) {
+    connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int changedRow, int column) {
         if (!registrationGeometryLoaded_ || column == 0 || column >= 4) return;
-        const int row = ui_->registrationTable->currentRow();
+        // Use the row reported by Qt. The current selection may be changing at
+        // the same time; using currentRow() here incorrectly demoted a
+        // previously Confirmed row to Located when another row was clicked.
+        const int row = changedRow;
         if (row >= 0 && row < 6) {
             fiducialLocated_[static_cast<std::size_t>(row)] = true;
             fiducialConfirmed_[static_cast<std::size_t>(row)] = false;
@@ -1092,9 +1105,10 @@ void WorkflowWindow::populateRegistrationTable() {
     if (ui_->registrationTable->currentRow() < 0 && !registrationSourceFiducials_.empty())
         ui_->registrationTable->selectRow(0);
     const int selectedRow = ui_->registrationTable->currentRow();
-    ui_->confirmFiducialButton->setEnabled(selectedRow >= 0 && selectedRow < 6 &&
-                                            fiducialLocated_[static_cast<std::size_t>(selectedRow)] &&
-                                            !fiducialConfirmed_[static_cast<std::size_t>(selectedRow)]);
+    bool hasPendingLocated = false;
+    for (std::size_t index = 0; index < fiducialLocated_.size(); ++index)
+        hasPendingLocated = hasPendingLocated || (fiducialLocated_[index] && !fiducialConfirmed_[index]);
+    ui_->confirmFiducialButton->setEnabled(hasPendingLocated);
     updateRegistrationAvailability();
 }
 
@@ -1169,13 +1183,19 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm) {
 }
 
 void WorkflowWindow::confirmSelectedFiducial() {
-    const int row = ui_->registrationTable->currentRow();
-    if (row < 0 || row >= 6 || !fiducialLocated_[static_cast<std::size_t>(row)]) {
-        showMessage(QStringLiteral("Locate the selected fiducial before confirming it."), true);
+    int confirmedCount = 0;
+    for (int row = 0; row < 6; ++row) {
+        const std::size_t index = static_cast<std::size_t>(row);
+        if (!fiducialLocated_[index] || fiducialConfirmed_[index]) continue;
+        fiducialConfirmed_[index] = true;
+        if (ui_->registrationTable->item(row, 4))
+            ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Confirmed"));
+        ++confirmedCount;
+    }
+    if (confirmedCount == 0) {
+        showMessage(QStringLiteral("Locate at least one fiducial before confirming."), true);
         return;
     }
-    fiducialConfirmed_[static_cast<std::size_t>(row)] = true;
-    ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Confirmed"));
     ui_->confirmFiducialButton->setEnabled(false);
     pendingRegistrationFit_ = false;
     registrationComplete_ = false;
@@ -1184,21 +1204,9 @@ void WorkflowWindow::confirmSelectedFiducial() {
                      "Fiducial confirmation changed; registration must be recalculated.");
     updateRegistrationAvailability();
 
-    int nextRow = -1;
-    for (int candidate = row + 1; candidate < 6; ++candidate) {
-        if (!fiducialConfirmed_[static_cast<std::size_t>(candidate)]) { nextRow = candidate; break; }
-    }
-    if (nextRow < 0) {
-        for (int candidate = 0; candidate < row; ++candidate) {
-            if (!fiducialConfirmed_[static_cast<std::size_t>(candidate)]) { nextRow = candidate; break; }
-        }
-    }
-    if (nextRow >= 0) {
-        ui_->registrationTable->selectRow(nextRow);
-        showMessage(QStringLiteral("Fiducial confirmed. Continue with the next Unidentified row."), false);
-    } else {
-        showMessage(QStringLiteral("All six fiducials are confirmed. Calculate the fit and review residuals."), false);
-    }
+    showMessage(confirmedCount == 1
+                    ? QStringLiteral("Fiducial confirmed.")
+                    : QStringLiteral("%1 located fiducials confirmed.").arg(confirmedCount), false);
     refresh();
     QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
 }

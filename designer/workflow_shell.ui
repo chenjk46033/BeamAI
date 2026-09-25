@@ -1601,10 +1601,10 @@
                               <item>
                                 <widget class="QPushButton" name="registerFiducialsButton">
                                   <property name="text">
-                                    <string>Calculate fit</string>
+                                    <string>Register to MRI fiducials</string>
                                   </property>
                                   <property name="toolTip">
-                                    <string>Calculate and preview the transducer-to-MRI fit without accepting it</string>
+                                    <string>Fit the device array to the measured MRI fiducials and preview the result without accepting it</string>
                                   </property>
                                   <property name="enabled">
                                     <bool>false</bool>
