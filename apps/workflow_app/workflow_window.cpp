@@ -32,6 +32,11 @@
 #include <QTimer>
 #include <QStyle>
 #include <QVBoxLayout>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QPushButton>
+#include <QSlider>
+#include <QLabel>
 
 #include "infra_dicom/load_mri_ras.hpp"
 #include "infra_mat/legacy_beam_session.hpp"
@@ -231,20 +236,30 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->resetRegistrationButton->setText(QStringLiteral("Restore fiducials"));
     ui_->resetRegistrationButton->setMinimumHeight(30);
     auto* markerDiagramPanel = new QWidget(markerSplitter);
-    markerDiagramPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    markerDiagramPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* markerDiagramLayout = new QVBoxLayout(markerDiagramPanel);
     markerDiagramLayout->setContentsMargins(0, 0, 0, 0);
     markerDiagramLayout->setSpacing(0);
-    markerDiagramLayout->addWidget(ui_->registrationFiducialLayout, 0, Qt::AlignTop);
-    markerDiagramLayout->addWidget(ui_->resetRegistrationButton);
+    auto* triangleColumn = new QVBoxLayout;
+    triangleColumn->setContentsMargins(0, 0, 4, 0);
+    triangleColumn->setSpacing(0);
+    auto* triangleStep = new QLabel(QStringLiteral("1"), markerDiagramPanel);
+    triangleStep->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
+    triangleStep->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    triangleStep->setFixedHeight(28);
+    triangleColumn->addWidget(triangleStep);
+    triangleColumn->addWidget(ui_->registrationFiducialLayout, 0, Qt::AlignTop);
+    triangleColumn->addWidget(ui_->resetRegistrationButton);
+    markerDiagramLayout->addLayout(triangleColumn);
     markerSplitter->addWidget(markerDiagramPanel);
     ui_->registrationFiducialLayout->setMinimumWidth(300);
     ui_->registrationFiducialLayout->setMinimumHeight(0);
     ui_->registrationFiducialLayout->setMaximumHeight(120);
     ui_->registrationFiducialLayout->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     ui_->registrationFiducialLayout->setFixedHeight(120);
-    markerDiagramPanel->setMinimumHeight(160);
-    markerDiagramPanel->setMaximumHeight(160);
+    markerDiagramPanel->setMinimumHeight(264);
+    markerDiagramPanel->setMaximumHeight(QWIDGETSIZE_MAX);
     for (QVBoxLayout* layout : {ui_->registrationSagittalLayout,
                                 ui_->registrationCoronalLayout,
                                 ui_->registrationAxialLayout}) {
@@ -271,7 +286,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerTableLayout->setContentsMargins(0, 0, 0, 0);
     markerTableLayout->setSpacing(0);
     ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
-    markerTableLayout->addWidget(ui_->registrationTable, 1);
+    auto* tableStep = new QLabel(QStringLiteral("2"), markerTablePanel);
+    tableStep->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
+    tableStep->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    tableStep->setFixedHeight(28);
+    markerTableLayout->addWidget(tableStep);
     ui_->confirmFiducialButton->setText(QStringLiteral("Confirm all located fiducials"));
     ui_->confirmFiducialButton->setToolTip(QStringLiteral(
         "Confirm every fiducial currently marked Located after reviewing the MRI views"));
@@ -284,11 +304,21 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerActions->setSpacing(4);
     markerActions->addWidget(ui_->confirmFiducialButton, 1);
     markerActions->addWidget(ui_->registerFiducialsButton, 1);
+    markerTableLayout->addWidget(ui_->registrationTable, 1);
     markerTableLayout->addLayout(markerActions);
+    ui_->registrationLayout->removeWidget(ui_->acceptRegistrationButton);
+    ui_->acceptRegistrationButton->setMinimumHeight(30);
+    auto* acceptStep = new QLabel(QStringLiteral("4"), markerTablePanel);
+    acceptStep->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
+    acceptStep->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    acceptStep->setFixedHeight(28);
+    markerTableLayout->addWidget(acceptStep);
+    markerTableLayout->addWidget(ui_->acceptRegistrationButton);
     markerSplitter->addWidget(markerTablePanel);
     markerSplitter->setStretchFactor(0, 1);
     markerSplitter->setStretchFactor(1, 1);
-    markerSplitter->setSizes({300, 880});
+    markerSplitter->setSizes({600, 600});
     ui_->registrationDetailsLayout->addWidget(markerSplitter);
     // The Designer action row is now empty because its buttons were moved into
     // the two splitter panes. Remove that empty layout so it cannot leave a
@@ -296,12 +326,78 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationLayout->removeItem(ui_->registrationActions);
     ui_->registrationLayout->removeWidget(ui_->registrationResult);
     ui_->registrationLayout->setSpacing(0);
-    ui_->registrationResult->setMaximumHeight(42);
+    ui_->registrationResult->setMaximumHeight(28);
     ui_->registrationResult->hide();
     ui_->registrationDetailsLayout->removeWidget(ui_->registrationResult);
     ui_->registrationDetailsLayout->setContentsMargins(0, 0, 0, 0);
     ui_->registrationDetailsLayout->setSpacing(0);
     ui_->registrationActions->removeWidget(ui_->confirmFiducialButton);
+
+    // BeamV0's second registration stage: calibrate the array's lock position
+    // after the MRI-fiducial fit. Left and right lock sliders remain separate
+    // so an alignment mismatch can be reported before applying the offset.
+    auto* calibrationGroup = new QGroupBox(QStringLiteral("Array lock-position calibration"), this);
+    auto* calibrationLayout = new QHBoxLayout(calibrationGroup);
+    calibrationLayout->setContentsMargins(8, 4, 8, 4);
+    calibrationLayout->setSpacing(8);
+    auto* calibrationStep = new QLabel(QStringLiteral("3"), calibrationGroup);
+    calibrationStep->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
+    calibrationStep->setAlignment(Qt::AlignCenter);
+    calibrationLayout->addWidget(calibrationStep, 0);
+    auto makePositionSlider = [](QWidget* parent, Qt::Orientation orientation) {
+        auto* slider = new QSlider(orientation, parent);
+        slider->setRange(1, 10);
+        slider->setValue(1);
+        slider->setSingleStep(1);
+        slider->setPageStep(1);
+        slider->setToolTip(QStringLiteral("Array lock position; each step is 7.5 mm horizontal or 10 mm vertical"));
+        return slider;
+    };
+    auto makeLockPanel = [&](const QString& title, QSlider*& horizontal, QSlider*& vertical) {
+        auto* panel = new QGroupBox(title, calibrationGroup);
+        auto* panelLayout = new QGridLayout(panel);
+        panelLayout->setContentsMargins(5, 2, 5, 2);
+        panelLayout->setSpacing(1);
+        vertical = makePositionSlider(panel, Qt::Vertical);
+        horizontal = makePositionSlider(panel, Qt::Horizontal);
+        vertical->setFixedHeight(44);
+        panelLayout->addWidget(new QLabel(QStringLiteral("V"), panel), 0, 0, Qt::AlignCenter);
+        panelLayout->addWidget(vertical, 1, 0, Qt::AlignCenter);
+        panelLayout->addWidget(new QLabel(QStringLiteral("H"), panel), 1, 1, Qt::AlignCenter);
+        panelLayout->addWidget(horizontal, 2, 1);
+        return panel;
+    };
+    calibrationLayout->addWidget(makeLockPanel(QStringLiteral("Subject Left"),
+                                                leftHorizontalPositionSlider_, leftVerticalPositionSlider_), 0);
+    calibrationLayout->addWidget(makeLockPanel(QStringLiteral("Subject Right"),
+                                                rightHorizontalPositionSlider_, rightVerticalPositionSlider_), 0);
+    registerCurrentPositionButton_ = new QPushButton(QStringLiteral("Register Arrays to Current Position"), calibrationGroup);
+    registerCurrentPositionButton_->setMinimumHeight(30);
+    registerCurrentPositionButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    registerCurrentPositionButton_->setToolTip(QStringLiteral(
+        "Apply the BeamV0 lock-position offset after registering the array to MRI fiducials"));
+    calibrationLayout->addWidget(registerCurrentPositionButton_, 0);
+    calibrationGroup->setMinimumHeight(0);
+    calibrationGroup->setMaximumHeight(QWIDGETSIZE_MAX);
+    calibrationGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    markerDiagramLayout->addWidget(calibrationGroup, 1);
+    // Registration feedback belongs inside the Registration page, below its
+    // acceptance action, rather than in the global footer line.
+    ui_->registrationResult->show();
+    markerTableLayout->addWidget(ui_->registrationResult);
+    auto invalidateCurrentPositionRegistration = [this] {
+        currentPositionRegistrationComplete_ = false;
+        updateRegistrationAvailability();
+    };
+    for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
+                            rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
+        connect(slider, &QSlider::valueChanged, this, [invalidateCurrentPositionRegistration] {
+            invalidateCurrentPositionRegistration();
+        });
+    connect(registerCurrentPositionButton_, &QPushButton::clicked, this,
+            [this] { performCurrentPositionRegistration(); });
+    registerCurrentPositionButton_->setEnabled(false);
 
     // The imaging page starts as an uncluttered source-data review; users can
     // explicitly reveal fiducials there. Registration keeps them visible.
@@ -1232,6 +1328,9 @@ void WorkflowWindow::updateRegistrationAvailability() {
     const bool allMeasured = std::all_of(fiducialConfirmed_.begin(), fiducialConfirmed_.end(), [](bool v) { return v; });
     const bool imagingAccepted = workflow_.state(beam::gui::WorkflowStage::Imaging).status == beam::gui::WorkflowStatus::Complete;
     ui_->registerFiducialsButton->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted);
+    if (registerCurrentPositionButton_)
+        registerCurrentPositionButton_->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted &&
+                                                    registrationComplete_ && !currentPositionRegistrationComplete_);
 }
 
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
@@ -1328,6 +1427,34 @@ void WorkflowWindow::acceptFiducialRegistration() {
     showMessage(QStringLiteral("Registration accepted. Continuing to the next workflow stage."), false);
     refresh();
     ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+}
+
+void WorkflowWindow::performCurrentPositionRegistration() {
+    if (!registrationComplete_ || fiducials_.size() != 6) {
+        showMessage(QStringLiteral("Accept the MRI-fiducial registration before calibrating the current array position."), true);
+        return;
+    }
+    if (leftHorizontalPositionSlider_->value() != rightHorizontalPositionSlider_->value() ||
+        leftVerticalPositionSlider_->value() != rightVerticalPositionSlider_->value()) {
+        showMessage(QStringLiteral("Subject Left and Subject Right lock-position sliders must match."), true);
+        return;
+    }
+    std::vector<Eigen::Vector3d> measured;
+    measured.reserve(6);
+    for (const auto& marker : fiducials_) measured.push_back(marker.position * 1000.0);
+    try {
+        auto result = beam::registration::registerCurrentTransducerPosition(
+            registrationOriginArrayData_, measured,
+            leftHorizontalPositionSlider_->value(), leftVerticalPositionSlider_->value());
+        applyRegistrationResult(std::move(result));
+        currentPositionRegistrationComplete_ = true;
+        registerCurrentPositionButton_->setEnabled(false);
+        showMessage(QStringLiteral("Array registered to current lock position."), false);
+        refresh();
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("Current-position registration failed: %1")
+                        .arg(QString::fromUtf8(error.what())), true);
+    }
 }
 
 void WorkflowWindow::showMriPreviews() {
@@ -1532,6 +1659,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     ui_->pageTitle->setText(QString::fromUtf8(beam::gui::workflowStageName(stage).data()));
     const int stageIndex = static_cast<int>(stage);
     ui_->pageStack->setCurrentIndex(stageIndex <= 3 ? stageIndex : 4);
+    ui_->workflowMessage->setVisible(stage != beam::gui::WorkflowStage::Registration);
     ui_->completeStageButton->setVisible(stage != beam::gui::WorkflowStage::CaseSetup &&
                                          stage != beam::gui::WorkflowStage::SystemCheck &&
                                          stage != beam::gui::WorkflowStage::Imaging &&

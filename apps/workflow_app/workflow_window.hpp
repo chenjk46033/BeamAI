@@ -11,6 +11,9 @@
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class WorkflowShell; }
+class QGroupBox;
+class QPushButton;
+class QSlider;
 QT_END_NAMESPACE
 
 namespace beam::app {
@@ -39,6 +42,7 @@ private:
     void populateRegistrationTable();
     void navigateToRegistrationFiducial(int row);
     void performFiducialRegistration();
+    void performCurrentPositionRegistration();
     void acceptFiducialRegistration();
     void applyRegistrationResult(beam::registration::AffineArrayResult result);
     void beginFiducialPlacement();
@@ -70,12 +74,18 @@ private:
     bool registrationGeometryLoaded_ = false;
     bool registrationComplete_ = false;
     bool pendingRegistrationFit_ = false;
+    bool currentPositionRegistrationComplete_ = false;
     bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
     bool focusImageLoaded_ = false;
     bool suppressRegistrationNavigation_ = false;
     int registrationStartFiducialRow_ = -1;
     QString mriPath_;
+    QSlider* leftHorizontalPositionSlider_ = nullptr;
+    QSlider* leftVerticalPositionSlider_ = nullptr;
+    QSlider* rightHorizontalPositionSlider_ = nullptr;
+    QSlider* rightVerticalPositionSlider_ = nullptr;
+    QPushButton* registerCurrentPositionButton_ = nullptr;
 };
 
 }  // namespace beam::app
