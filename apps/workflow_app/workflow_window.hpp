@@ -16,6 +16,8 @@ class QLabel;
 class QPushButton;
 class QProgressBar;
 class QSlider;
+class QComboBox;
+class QTableWidget;
 QT_END_NAMESPACE
 
 namespace beam::app {
@@ -107,6 +109,22 @@ private:
     QPushButton* acceptCouplingButton_ = nullptr;
     QPushButton* runCorrectionButton_ = nullptr;
     QPushButton* acceptCorrectionButton_ = nullptr;
+    QLabel* treatmentPlanTitleLabel_ = nullptr;
+    QLabel* treatmentPlanDescriptionLabel_ = nullptr;
+    QLabel* treatmentPlanTargetLabel_ = nullptr;
+    QLabel* treatmentProtocolLabel_ = nullptr;
+    QLabel* treatmentTargetTableLabel_ = nullptr;
+    QLabel* treatmentProtocolTableLabel_ = nullptr;
+    QComboBox* treatmentProtocolCombo_ = nullptr;
+    QTableWidget* treatmentTargetTable_ = nullptr;
+    QTableWidget* treatmentProtocolTable_ = nullptr;
+    QPushButton* acceptTreatmentPlanButton_ = nullptr;
+    QLabel* treatmentExecutionTitleLabel_ = nullptr;
+    QLabel* treatmentExecutionDescriptionLabel_ = nullptr;
+    QLabel* treatmentExecutionStatusLabel_ = nullptr;
+    QProgressBar* treatmentExecutionProgressBar_ = nullptr;
+    QPushButton* startTreatmentButton_ = nullptr;
+    QPushButton* abortTreatmentButton_ = nullptr;
 };
 
 }  // namespace beam::app

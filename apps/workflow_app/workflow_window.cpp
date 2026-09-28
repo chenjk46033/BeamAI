@@ -37,6 +37,9 @@
 #include <QGroupBox>
 #include <QPushButton>
 #include <QProgressBar>
+#include <QComboBox>
+#include <QTableWidget>
+#include <QHeaderView>
 #include <QSlider>
 #include <QLabel>
 #include <QPainter>
@@ -748,6 +751,106 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->placeholderLayout->addWidget(correctionProgressBar_);
     ui_->placeholderLayout->addWidget(runCorrectionButton_);
     ui_->placeholderLayout->addWidget(acceptCorrectionButton_);
+
+    treatmentPlanTitleLabel_ = new QLabel(QStringLiteral("Treatment plan"), ui_->placeholderPage);
+    treatmentPlanTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
+    treatmentPlanDescriptionLabel_ = new QLabel(
+        QStringLiteral("Review the registered target and select a treatment protocol. Device output remains disabled until the plan is accepted and Safety Review is complete."),
+        ui_->placeholderPage);
+    treatmentPlanDescriptionLabel_->setWordWrap(true);
+    treatmentPlanDescriptionLabel_->setStyleSheet(QStringLiteral("QLabel { color: #c8d9de; padding: 4px 0 10px 0; }"));
+    treatmentPlanTargetLabel_ = new QLabel(QStringLiteral("Registered target: not available"), ui_->placeholderPage);
+    treatmentPlanTargetLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
+    treatmentProtocolLabel_ = new QLabel(QStringLiteral("Treatment protocol"), ui_->placeholderPage);
+    treatmentProtocolLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-weight: 600; padding-top: 8px; }"));
+    treatmentProtocolCombo_ = new QComboBox(ui_->placeholderPage);
+    treatmentProtocolCombo_->addItems({QStringLiteral("Protocol 1"),
+                                       QStringLiteral("PainACC"),
+                                       QStringLiteral("PainSCCandAMCC")});
+    treatmentProtocolCombo_->setMinimumHeight(32);
+    treatmentProtocolCombo_->setStyleSheet(QStringLiteral(
+        "QComboBox { background: #ffffff; color: #17313f; padding: 5px 8px; border: 1px solid #7c9da8; border-radius: 4px; }"));
+    auto configurePlanTable = [](QTableWidget* table) {
+        table->setAlternatingRowColors(true);
+        table->setStyleSheet(QStringLiteral(
+            "QTableWidget { color: #17313f; background: #ffffff; gridline-color: #b7cbd1; } "
+            "QTableWidget::item { padding: 4px; } "
+            "QHeaderView::section { color: #17313f; background: #dcebef; padding: 5px; font-weight: 600; }"));
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        table->verticalHeader()->setVisible(false);
+    };
+    treatmentTargetTableLabel_ = new QLabel(QStringLiteral("Target list"), ui_->placeholderPage);
+    treatmentTargetTableLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-weight: 600; padding-top: 8px; }"));
+    treatmentTargetTable_ = new QTableWidget(1, 5, ui_->placeholderPage);
+    treatmentTargetTable_->setHorizontalHeaderLabels({QStringLiteral("Target"), QStringLiteral("LR (mm)"),
+                                                       QStringLiteral("AP (mm)"), QStringLiteral("IS (mm)"),
+                                                       QStringLiteral("Status")});
+    treatmentTargetTable_->setFixedHeight(78);
+    configurePlanTable(treatmentTargetTable_);
+    treatmentTargetTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("Target 1")));
+    treatmentTargetTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("0.00")));
+    treatmentTargetTable_->setItem(0, 2, new QTableWidgetItem(QStringLiteral("0.00")));
+    treatmentTargetTable_->setItem(0, 3, new QTableWidgetItem(QStringLiteral("0.00")));
+    treatmentTargetTable_->setItem(0, 4, new QTableWidgetItem(QStringLiteral("Registered")));
+    treatmentProtocolTableLabel_ = new QLabel(QStringLiteral("Treatment protocol details"), ui_->placeholderPage);
+    treatmentProtocolTableLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-weight: 600; padding-top: 8px; }"));
+    treatmentProtocolTable_ = new QTableWidget(1, 11, ui_->placeholderPage);
+    treatmentProtocolTable_->setHorizontalHeaderLabels({QStringLiteral("#"), QStringLiteral("Target"),
+                                                         QStringLiteral("Duration (s)"), QStringLiteral("Amplitude"),
+                                                         QStringLiteral("LR"), QStringLiteral("AP"), QStringLiteral("IS"),
+                                                         QStringLiteral("BD"), QStringLiteral("BI"), QStringLiteral("PD"),
+                                                         QStringLiteral("PI")});
+    treatmentProtocolTable_->setFixedHeight(86);
+    configurePlanTable(treatmentProtocolTable_);
+    const QStringList protocolValues = {QStringLiteral("1"), QStringLiteral("Target 1"), QStringLiteral("30"),
+                                        QStringLiteral("0.75"), QStringLiteral("0"), QStringLiteral("0"),
+                                        QStringLiteral("0"), QStringLiteral("0.03"), QStringLiteral("0.7"),
+                                        QStringLiteral("0.005"), QStringLiteral("0.01")};
+    for (int column = 0; column < protocolValues.size(); ++column)
+        treatmentProtocolTable_->setItem(0, column, new QTableWidgetItem(protocolValues.at(column)));
+    acceptTreatmentPlanButton_ = new QPushButton(QStringLiteral("Accept treatment plan and continue →"), ui_->placeholderPage);
+    acceptTreatmentPlanButton_->setMinimumHeight(40);
+    acceptTreatmentPlanButton_->setStyleSheet(acceptButtonStyle);
+    ui_->placeholderLayout->addWidget(treatmentPlanTitleLabel_);
+    ui_->placeholderLayout->addWidget(treatmentPlanDescriptionLabel_);
+    ui_->placeholderLayout->addSpacing(12);
+    ui_->placeholderLayout->addWidget(treatmentPlanTargetLabel_);
+    ui_->placeholderLayout->addWidget(treatmentProtocolLabel_);
+    ui_->placeholderLayout->addWidget(treatmentProtocolCombo_);
+    ui_->placeholderLayout->addWidget(treatmentTargetTableLabel_);
+    ui_->placeholderLayout->addWidget(treatmentTargetTable_);
+    ui_->placeholderLayout->addWidget(treatmentProtocolTableLabel_);
+    ui_->placeholderLayout->addWidget(treatmentProtocolTable_);
+    ui_->placeholderLayout->addWidget(acceptTreatmentPlanButton_);
+
+    treatmentExecutionTitleLabel_ = new QLabel(QStringLiteral("Treatment execution"), ui_->placeholderPage);
+    treatmentExecutionTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
+    treatmentExecutionDescriptionLabel_ = new QLabel(
+        QStringLiteral("Execute the accepted sonication plan. Hardware output remains simulated until a Beam device is connected."),
+        ui_->placeholderPage);
+    treatmentExecutionDescriptionLabel_->setWordWrap(true);
+    treatmentExecutionDescriptionLabel_->setStyleSheet(QStringLiteral("QLabel { color: #c8d9de; padding: 4px 0 10px 0; }"));
+    treatmentExecutionStatusLabel_ = new QLabel(QStringLiteral("Treatment has not started."), ui_->placeholderPage);
+    treatmentExecutionStatusLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
+    treatmentExecutionProgressBar_ = new QProgressBar(ui_->placeholderPage);
+    treatmentExecutionProgressBar_->setRange(0, 100);
+    treatmentExecutionProgressBar_->setValue(0);
+    treatmentExecutionProgressBar_->setFormat(QStringLiteral("Treatment progress: %p%"));
+    treatmentExecutionProgressBar_->setMinimumHeight(24);
+    startTreatmentButton_ = new QPushButton(QStringLiteral("Start treatment (simulated)"), ui_->placeholderPage);
+    startTreatmentButton_->setMinimumHeight(40);
+    startTreatmentButton_->setStyleSheet(acceptButtonStyle);
+    abortTreatmentButton_ = new QPushButton(QStringLiteral("Abort treatment"), ui_->placeholderPage);
+    abortTreatmentButton_->setMinimumHeight(36);
+    abortTreatmentButton_->setEnabled(false);
+    ui_->placeholderLayout->addWidget(treatmentExecutionTitleLabel_);
+    ui_->placeholderLayout->addWidget(treatmentExecutionDescriptionLabel_);
+    ui_->placeholderLayout->addWidget(treatmentExecutionStatusLabel_);
+    ui_->placeholderLayout->addWidget(treatmentExecutionProgressBar_);
+    ui_->placeholderLayout->addWidget(startTreatmentButton_);
+    ui_->placeholderLayout->addWidget(abortTreatmentButton_);
     ui_->placeholderLayout->addStretch(1);
 
     connect(ui_->stageList, &QListWidget::currentRowChanged, this, [this](int row) {
@@ -846,6 +949,44 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         showMessage(QStringLiteral("Correction and coupling accepted. Continuing to Treatment plan."), false);
         refresh();
         ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+    });
+    connect(acceptTreatmentPlanButton_, &QPushButton::clicked, this, [this] {
+        std::string reason;
+        if (!workflow_.complete(beam::gui::WorkflowStage::TreatmentPlan, &reason)) {
+            showMessage(QString::fromStdString(reason), true);
+            return;
+        }
+        acceptTreatmentPlanButton_->setEnabled(false);
+        showMessage(QStringLiteral("Treatment plan accepted. Continuing to Safety Review."), false);
+        refresh();
+        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+    });
+    connect(startTreatmentButton_, &QPushButton::clicked, this, [this] {
+        std::string reason;
+        if (!workflow_.begin(beam::gui::WorkflowStage::Treatment, &reason)) {
+            showMessage(QString::fromStdString(reason), true);
+            return;
+        }
+        treatmentExecutionProgressBar_->setValue(100);
+        treatmentExecutionStatusLabel_->setText(QStringLiteral(
+            "Treatment completed (simulated). No device was connected; no acoustic output was delivered."));
+        startTreatmentButton_->setEnabled(false);
+        abortTreatmentButton_->setEnabled(false);
+        if (!workflow_.complete(beam::gui::WorkflowStage::Treatment, &reason)) {
+            showMessage(QString::fromStdString(reason), true);
+            return;
+        }
+        showMessage(QStringLiteral("Treatment simulation completed. Continuing to Report."), false);
+        refresh();
+        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+    });
+    connect(abortTreatmentButton_, &QPushButton::clicked, this, [this] {
+        workflow_.block(beam::gui::WorkflowStage::Treatment, "Treatment aborted by operator.");
+        abortTreatmentButton_->setEnabled(false);
+        startTreatmentButton_->setEnabled(true);
+        treatmentExecutionStatusLabel_->setText(QStringLiteral("Treatment aborted by operator."));
+        showMessage(QStringLiteral("Treatment aborted."), true);
+        refresh();
     });
     connect(ui_->simulatePassButton, &QPushButton::clicked, this, [this] {
         deviceCheckPassed_ = true;
@@ -2085,10 +2226,14 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                                          stage != beam::gui::WorkflowStage::Imaging &&
                                          stage != beam::gui::WorkflowStage::Registration &&
                                          stage != beam::gui::WorkflowStage::Coupling &&
-                                         stage != beam::gui::WorkflowStage::Correction);
+                                         stage != beam::gui::WorkflowStage::Correction &&
+                                         stage != beam::gui::WorkflowStage::TreatmentPlan &&
+                                         stage != beam::gui::WorkflowStage::Treatment);
     const bool couplingPage = stage == beam::gui::WorkflowStage::Coupling ||
                               stage == beam::gui::WorkflowStage::Correction;
     const bool correctionPage = false;
+    const bool treatmentPlanPage = stage == beam::gui::WorkflowStage::TreatmentPlan;
+    const bool treatmentExecutionPage = stage == beam::gui::WorkflowStage::Treatment;
     for (QWidget* widget : {static_cast<QWidget*>(couplingTitleLabel_),
                             static_cast<QWidget*>(couplingDescriptionLabel_),
                             static_cast<QWidget*>(couplingStatusLabel_),
@@ -2100,14 +2245,54 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                             static_cast<QWidget*>(correctionStatusLabel_),
                             static_cast<QWidget*>(correctionProgressBar_),
                             static_cast<QWidget*>(runCorrectionButton_),
-                            static_cast<QWidget*>(acceptCorrectionButton_)}) {
+                            static_cast<QWidget*>(acceptCorrectionButton_),
+                            static_cast<QWidget*>(treatmentPlanTitleLabel_),
+                            static_cast<QWidget*>(treatmentPlanDescriptionLabel_),
+                            static_cast<QWidget*>(treatmentPlanTargetLabel_),
+                            static_cast<QWidget*>(treatmentProtocolLabel_),
+                            static_cast<QWidget*>(treatmentProtocolCombo_),
+                            static_cast<QWidget*>(treatmentTargetTableLabel_),
+                            static_cast<QWidget*>(treatmentTargetTable_),
+                            static_cast<QWidget*>(treatmentProtocolTableLabel_),
+                            static_cast<QWidget*>(treatmentProtocolTable_),
+                            static_cast<QWidget*>(acceptTreatmentPlanButton_),
+                            static_cast<QWidget*>(treatmentExecutionTitleLabel_),
+                            static_cast<QWidget*>(treatmentExecutionDescriptionLabel_),
+                            static_cast<QWidget*>(treatmentExecutionStatusLabel_),
+                            static_cast<QWidget*>(treatmentExecutionProgressBar_),
+                            static_cast<QWidget*>(startTreatmentButton_),
+                            static_cast<QWidget*>(abortTreatmentButton_)}) {
         if (!widget) continue;
         const bool isCorrectionWidget = widget == correctionTitleLabel_ || widget == correctionDescriptionLabel_ ||
                                         widget == correctionStatusLabel_ || widget == correctionProgressBar_ ||
                                         widget == runCorrectionButton_ || widget == acceptCorrectionButton_;
-        widget->setVisible(isCorrectionWidget ? correctionPage : couplingPage);
+        const bool isTreatmentWidget = widget == treatmentPlanTitleLabel_ || widget == treatmentPlanDescriptionLabel_ ||
+                                       widget == treatmentPlanTargetLabel_ || widget == treatmentProtocolLabel_ ||
+                                       widget == treatmentProtocolCombo_ || widget == treatmentTargetTableLabel_ ||
+                                       widget == treatmentTargetTable_ || widget == treatmentProtocolTableLabel_ ||
+                                       widget == treatmentProtocolTable_ ||
+                                       widget == acceptTreatmentPlanButton_;
+        const bool isExecutionWidget = widget == treatmentExecutionTitleLabel_ ||
+                                       widget == treatmentExecutionDescriptionLabel_ ||
+                                       widget == treatmentExecutionStatusLabel_ ||
+                                       widget == treatmentExecutionProgressBar_ ||
+                                       widget == startTreatmentButton_ || widget == abortTreatmentButton_;
+        widget->setVisible(isExecutionWidget ? treatmentExecutionPage :
+                           (isTreatmentWidget ? treatmentPlanPage : (isCorrectionWidget ? correctionPage : couplingPage)));
     }
-    if (ui_->placeholderText) ui_->placeholderText->setVisible(!couplingPage && !correctionPage);
+    if (ui_->placeholderText) ui_->placeholderText->setVisible(!couplingPage && !correctionPage && !treatmentPlanPage &&
+                                                               !treatmentExecutionPage);
+    if (treatmentPlanPage && treatmentPlanTargetLabel_) {
+        treatmentPlanTargetLabel_->setText(QStringLiteral("Registered target (RAS): LR %1 mm, AP %2 mm, IS %3 mm")
+                                               .arg(targetMm_.x(), 0, 'f', 2)
+                                               .arg(targetMm_.y(), 0, 'f', 2)
+                                               .arg(targetMm_.z(), 0, 'f', 2));
+        treatmentTargetTable_->item(0, 1)->setText(QString::number(targetMm_.x(), 'f', 2));
+        treatmentTargetTable_->item(0, 2)->setText(QString::number(targetMm_.y(), 'f', 2));
+        treatmentTargetTable_->item(0, 3)->setText(QString::number(targetMm_.z(), 'f', 2));
+        acceptTreatmentPlanButton_->setEnabled(
+            workflow_.state(beam::gui::WorkflowStage::Correction).status == beam::gui::WorkflowStatus::Complete);
+    }
     if (stage == beam::gui::WorkflowStage::Registration && mriLoaded_) {
         showMriPreviews();
         const int row = ui_->registrationTable->currentRow();
