@@ -711,7 +711,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 confirmSelectedFiducial();
             });
     ui_->registrationFiducialLayout->setSelectionHandler([this](int markerIndex) {
+        if (markerIndex < 0 || markerIndex >= 6) return;
         ui_->registrationTable->setCurrentCell(markerIndex, 0);
+        // setCurrentCell() emits no signal when the same row is clicked again.
+        // Navigate explicitly so a repeated triangle click still returns the
+        // MRI views to that marker after Reset to Initial Slice.
+        navigateToRegistrationFiducial(markerIndex);
     });
     connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int changedRow, int column) {
         if (!registrationGeometryLoaded_ || column == 0 || column >= 4) return;
@@ -773,6 +778,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationCoronalPreview->setMarkerPickedHandler(pickedMarker);
     ui_->registrationAxialPreview->setMarkerPickedHandler(pickedMarker);
     ui_->registrationTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    // Do not present a residual/error score to the operator.  The nominal
+    // array geometry is a model, not ground truth, so this value would imply
+    // an accuracy that the workflow cannot independently establish.
+    ui_->registrationTable->setColumnHidden(5, true);
     ui_->registrationTable->verticalHeader()->setDefaultSectionSize(25);
     ui_->registrationTable->verticalHeader()->setMinimumSectionSize(22);
     // Six complete rows plus the header, without an oversized viewport.
@@ -1396,44 +1405,22 @@ void WorkflowWindow::performFiducialRegistration() {
     }
     try {
         auto result = beam::registration::registerArrayToFiducials(registrationOriginArrayData_, measured);
-        double squaredError = 0.0;
-        double maximumError = -1.0;
-        int worstRow = -1;
-        std::array<double, 6> residuals{};
-        for (std::size_t i = 0; i < measured.size(); ++i) {
-            residuals[i] = (result.fiducialMarkers[i].position * 1000.0 - measured[i]).norm();
-            squaredError += residuals[i] * residuals[i];
-            if (residuals[i] > maximumError) { maximumError = residuals[i]; worstRow = static_cast<int>(i); }
-        }
-        const double rmsMm = std::sqrt(squaredError / static_cast<double>(measured.size()));
         applyRegistrationResult(std::move(result));
-        ui_->registrationTable->blockSignals(true);
-        for (int row = 0; row < 6; ++row) {
-            QTableWidgetItem* item = ui_->registrationTable->item(row, 5);
-            item->setText(QString::number(residuals[static_cast<std::size_t>(row)], 'f', 2));
-            const bool worst = row == worstRow;
-            item->setBackground(worst ? QColor(255, 220, 205) : QColor(Qt::transparent));
-            item->setForeground(worst ? QColor(150, 35, 20) : QColor());
-            item->setToolTip(worst ? QStringLiteral("Largest residual") : QString());
-        }
-        ui_->registrationTable->blockSignals(false);
         pendingRegistrationFit_ = true;
         registrationComplete_ = false;
         updateRegistrationStepIndicators();
         ui_->acceptRegistrationButton->setEnabled(true);
-        ui_->registrationResult->setText(QStringLiteral("Registration complete · RMS residual %1 mm · overlays updated")
-                                             .arg(rmsMm, 0, 'f', 2));
-        showMessage(QStringLiteral("Registration complete — RMS residual %1 mm. Review the updated red fiducials and yellow transducer overlay.")
-                        .arg(rmsMm, 0, 'f', 2), false);
-        const QString worstName = ui_->registrationTable->item(worstRow, 0)->text();
-        ui_->registrationResult->setText(QStringLiteral("Fit ready for review: RMS %1 mm, maximum %2 mm (%3)")
-                                             .arg(rmsMm, 0, 'f', 2)
-                                             .arg(maximumError, 0, 'f', 2)
-                                             .arg(worstName));
-        showMessage(QStringLiteral("Fit calculated: RMS %1 mm; maximum %2 mm at %3. Review residuals and overlays, then accept or edit a marker.")
-                        .arg(rmsMm, 0, 'f', 2)
-                        .arg(maximumError, 0, 'f', 2)
-                        .arg(worstName), false);
+        ui_->registrationResult->setText(QStringLiteral(
+            "Registration applied. Verify all overlays against the MRI before accepting."));
+        // Registration can be initiated immediately after returning to the
+        // initial slices. Bring the shared MRI views back to the selected
+        // measured fiducial so the operator can review the new placement.
+        int reviewRow = ui_->registrationTable->currentRow();
+        if (reviewRow < 0 || reviewRow >= static_cast<int>(fiducials_.size())) reviewRow = 0;
+        ui_->registrationTable->setCurrentCell(reviewRow, 0);
+        navigateToRegistrationFiducial(reviewRow);
+        showMessage(QStringLiteral(
+            "Registration applied. Verify all six fiducials and overlays against the MRI before accepting."), false);
         refresh();
     } catch (const std::exception& error) {
         ui_->registrationResult->setText(QStringLiteral("Registration failed: %1").arg(QString::fromUtf8(error.what())));
@@ -1443,7 +1430,7 @@ void WorkflowWindow::performFiducialRegistration() {
 
 void WorkflowWindow::acceptFiducialRegistration() {
     if (!pendingRegistrationFit_) {
-        showMessage(QStringLiteral("Calculate and review a fit before accepting registration."), true);
+        showMessage(QStringLiteral("Run Register to MRI fiducials and review the overlays before accepting."), true);
         return;
     }
     std::string reason;

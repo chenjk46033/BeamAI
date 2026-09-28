@@ -14,6 +14,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPushButton>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -355,26 +356,42 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
                   .arg(coordinateAtContext->y(), 0, 'f', 3)
                   .arg(coordinateAtContext->z(), 0, 'f', 3)
             : QStringLiteral("Mouse point is outside the MRI image");
-        QAction* coordinateInfo = menu.addAction(coordinateText);
-        coordinateInfo->setEnabled(false);
+        // Use the same embedded-widget margins as the Marker selector below.
+        // A normal QAction receives Qt's extra menu indentation, which made
+        // this coordinate line start noticeably farther to the right.
+        auto* coordinateWidget = new QWidget(&menu);
+        auto* coordinateLayout = new QHBoxLayout(coordinateWidget);
+        coordinateLayout->setContentsMargins(10, 5, 10, 5);
+        auto* coordinateLabel = new QLabel(coordinateText, coordinateWidget);
+        coordinateLabel->setStyleSheet(QStringLiteral(
+            "QLabel { background: #d8f1f6; color: #123d4b; border: 1px solid #63b7c9; "
+            "border-radius: 3px; padding: 3px 0px; font-weight: 600; }"));
+        coordinateLayout->addWidget(coordinateLabel);
+        auto* coordinateAction = new QWidgetAction(&menu);
+        coordinateAction->setDefaultWidget(coordinateWidget);
+        menu.addAction(coordinateAction);
         if (coordinateAtContext && pointPickedHandler_ && !coordinatePasteOptions_.isEmpty()) {
             auto* targetWidget = new QWidget(&menu);
             auto* targetLayout = new QHBoxLayout(targetWidget);
-            targetLayout->setContentsMargins(10, 5, 10, 5);
-            auto* targetLabel = new QLabel(QStringLiteral("Marker"), targetWidget);
+            // Slightly indent the action beneath the highlighted coordinate.
+            targetLayout->setContentsMargins(18, 5, 10, 5);
+            auto* targetLabel = new QLabel(QStringLiteral("Move marker"), targetWidget);
             auto* targetCombo = new QComboBox(targetWidget);
             targetCombo->addItems(coordinatePasteOptions_);
             targetCombo->setMinimumWidth(170);
+            auto* moveButton = new QPushButton(QStringLiteral("Move"), targetWidget);
+            moveButton->setMinimumWidth(54);
             targetLayout->addWidget(targetLabel);
             targetLayout->addWidget(targetCombo, 1);
+            targetLayout->addWidget(moveButton);
             auto* targetAction = new QWidgetAction(&menu);
             targetAction->setDefaultWidget(targetWidget);
             menu.addAction(targetAction);
-            QAction* paste = menu.addAction(QStringLiteral("Paste coordinate into selected marker"));
-            connect(paste, &QAction::triggered, this, [this, targetCombo, coordinateAtContext] {
+            connect(moveButton, &QPushButton::clicked, this, [this, targetCombo, coordinateAtContext, &menu] {
                 if (!coordinateAtContext || !pointPickedHandler_) return;
                 if (markerPickedHandler_) markerPickedHandler_(targetCombo->currentIndex());
                 pointPickedHandler_(*coordinateAtContext);
+                menu.close();
             });
         }
     }
