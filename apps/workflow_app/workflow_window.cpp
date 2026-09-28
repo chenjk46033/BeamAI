@@ -243,12 +243,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* triangleColumn = new QVBoxLayout;
     triangleColumn->setContentsMargins(0, 0, 4, 0);
     triangleColumn->setSpacing(0);
-    auto* triangleStep = new QLabel(QStringLiteral("1"), markerDiagramPanel);
-    triangleStep->setStyleSheet(QStringLiteral(
-        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
-    triangleStep->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    triangleStep->setFixedHeight(28);
-    triangleColumn->addWidget(triangleStep);
+    registrationStep1Label_ = new QLabel(QStringLiteral("1"), markerDiagramPanel);
+    registrationStep1Label_->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 30px; font-weight: 700; }"));
+    registrationStep1Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    registrationStep1Label_->setFixedHeight(34);
+    triangleColumn->addWidget(registrationStep1Label_);
     triangleColumn->addWidget(ui_->registrationFiducialLayout, 0, Qt::AlignTop);
     triangleColumn->addWidget(ui_->resetRegistrationButton);
     markerDiagramLayout->addLayout(triangleColumn);
@@ -286,19 +286,25 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerTableLayout->setContentsMargins(0, 0, 0, 0);
     markerTableLayout->setSpacing(0);
     ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
-    auto* tableStep = new QLabel(QStringLiteral("2"), markerTablePanel);
-    tableStep->setStyleSheet(QStringLiteral(
-        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
-    tableStep->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    tableStep->setFixedHeight(28);
-    markerTableLayout->addWidget(tableStep);
+    registrationStep2Label_ = new QLabel(QStringLiteral("2"), markerTablePanel);
+    registrationStep2Label_->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 30px; font-weight: 700; }"));
+    registrationStep2Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    registrationStep2Label_->setFixedHeight(34);
+    markerTableLayout->addWidget(registrationStep2Label_);
     ui_->confirmFiducialButton->setText(QStringLiteral("Confirm all located fiducials"));
     ui_->confirmFiducialButton->setToolTip(QStringLiteral(
         "Confirm every fiducial currently marked Located after reviewing the MRI views"));
     ui_->confirmFiducialButton->setMinimumHeight(30);
     ui_->confirmFiducialButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    ui_->confirmFiducialButton->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
+        "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     ui_->registerFiducialsButton->setMinimumHeight(30);
     ui_->registerFiducialsButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    ui_->registerFiducialsButton->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
+        "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     auto* markerActions = new QHBoxLayout;
     markerActions->setContentsMargins(0, 0, 0, 0);
     markerActions->setSpacing(4);
@@ -308,12 +314,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerTableLayout->addLayout(markerActions);
     ui_->registrationLayout->removeWidget(ui_->acceptRegistrationButton);
     ui_->acceptRegistrationButton->setMinimumHeight(30);
-    auto* acceptStep = new QLabel(QStringLiteral("4"), markerTablePanel);
-    acceptStep->setStyleSheet(QStringLiteral(
-        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
-    acceptStep->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    acceptStep->setFixedHeight(28);
-    markerTableLayout->addWidget(acceptStep);
+    registrationStep4Label_ = new QLabel(QStringLiteral("4"), markerTablePanel);
+    registrationStep4Label_->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 30px; font-weight: 700; }"));
+    registrationStep4Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    registrationStep4Label_->setFixedHeight(34);
+    markerTableLayout->addWidget(registrationStep4Label_);
     markerTableLayout->addWidget(ui_->acceptRegistrationButton);
     markerSplitter->addWidget(markerTablePanel);
     markerSplitter->setStretchFactor(0, 1);
@@ -340,11 +346,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* calibrationLayout = new QHBoxLayout(calibrationGroup);
     calibrationLayout->setContentsMargins(8, 4, 8, 4);
     calibrationLayout->setSpacing(8);
-    auto* calibrationStep = new QLabel(QStringLiteral("3"), calibrationGroup);
-    calibrationStep->setStyleSheet(QStringLiteral(
-        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 24px; font-weight: 700; }"));
-    calibrationStep->setAlignment(Qt::AlignCenter);
-    calibrationLayout->addWidget(calibrationStep, 0);
+    registrationStep3Label_ = new QLabel(QStringLiteral("3"), calibrationGroup);
+    registrationStep3Label_->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgba(230, 240, 244, 150); background: transparent; font-size: 30px; font-weight: 700; }"));
+    registrationStep3Label_->setAlignment(Qt::AlignCenter);
+    calibrationLayout->addWidget(registrationStep3Label_, 0);
     auto makePositionSlider = [](QWidget* parent, Qt::Orientation orientation) {
         auto* slider = new QSlider(orientation, parent);
         slider->setRange(1, 10);
@@ -679,10 +685,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 }
                 if (!suppressRegistrationNavigation_)
                     navigateToRegistrationFiducial(currentRow);
-                bool hasPendingLocated = false;
-                for (std::size_t index = 0; index < fiducialLocated_.size(); ++index)
-                    hasPendingLocated = hasPendingLocated || (fiducialLocated_[index] && !fiducialConfirmed_[index]);
-                ui_->confirmFiducialButton->setEnabled(hasPendingLocated);
+                updateRegistrationAvailability();
             });
     ui_->registrationTable->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui_->registrationTable, &QTableWidget::customContextMenuRequested, this,
@@ -1325,17 +1328,44 @@ void WorkflowWindow::confirmSelectedFiducial() {
 }
 
 void WorkflowWindow::updateRegistrationAvailability() {
+    const bool allLocated = std::all_of(fiducialLocated_.begin(), fiducialLocated_.end(), [](bool v) { return v; });
+    const bool hasPendingLocated = std::any_of(fiducialLocated_.begin(), fiducialLocated_.end(),
+                                               [this, index = std::size_t{0}](bool located) mutable {
+                                                   const bool pending = located && !fiducialConfirmed_[index];
+                                                   ++index;
+                                                   return pending;
+                                               });
     const bool allMeasured = std::all_of(fiducialConfirmed_.begin(), fiducialConfirmed_.end(), [](bool v) { return v; });
     const bool imagingAccepted = workflow_.state(beam::gui::WorkflowStage::Imaging).status == beam::gui::WorkflowStatus::Complete;
+    ui_->confirmFiducialButton->setEnabled(allLocated && hasPendingLocated);
     ui_->registerFiducialsButton->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted);
     if (registerCurrentPositionButton_)
         registerCurrentPositionButton_->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted &&
                                                     registrationComplete_ && !currentPositionRegistrationComplete_);
+    updateRegistrationStepIndicators();
+}
+
+void WorkflowWindow::updateRegistrationStepIndicators() {
+    const auto apply = [](QLabel* label, bool active) {
+        if (!label) return;
+        label->setStyleSheet(QStringLiteral(
+            "QLabel { color: %1; background: transparent; font-size: 30px; font-weight: 700; }")
+                                 .arg(active ? QStringLiteral("rgba(85, 215, 240, 245)")
+                                             : QStringLiteral("rgba(230, 240, 244, 105)")));
+    };
+    const bool registrationStarted = registrationGeometryLoaded_;
+    apply(registrationStep1Label_, registrationStarted);
+    apply(registrationStep2Label_, registrationStarted);
+    apply(registrationStep3Label_, pendingRegistrationFit_ || registrationComplete_);
+    apply(registrationStep4Label_, registrationComplete_);
 }
 
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
     arrayData_ = std::move(result.arrayData);
-    fiducials_ = std::move(result.fiducialMarkers);
+    // Keep the red MRI fiducials at the operator-measured coordinates. The
+    // registration result's marker positions are the fitted model points and
+    // may differ by the residual error; BeamV0 moves the array geometry, not
+    // the MRI observations.
     targetMm_ = arrayData_.arrayTotal.rect.block(16, 0, 3, arrayData_.arrayTotal.rect.cols()).rowwise().mean() * 1000.0;
     arrayMask_ = beam::gui::rasterizeArrayOntoMriGrid(arrayData_.arrayTotal, mriAxes_, mriVolume_.nx,
                                                        mriVolume_.ny, mriVolume_.nz);
@@ -1389,6 +1419,7 @@ void WorkflowWindow::performFiducialRegistration() {
         ui_->registrationTable->blockSignals(false);
         pendingRegistrationFit_ = true;
         registrationComplete_ = false;
+        updateRegistrationStepIndicators();
         ui_->acceptRegistrationButton->setEnabled(true);
         ui_->registrationResult->setText(QStringLiteral("Registration complete · RMS residual %1 mm · overlays updated")
                                              .arg(rmsMm, 0, 'f', 2));
@@ -1422,6 +1453,7 @@ void WorkflowWindow::acceptFiducialRegistration() {
     }
     pendingRegistrationFit_ = false;
     registrationComplete_ = true;
+    updateRegistrationStepIndicators();
     ui_->acceptRegistrationButton->setEnabled(false);
     ui_->registrationResult->setText(ui_->registrationResult->text() + QStringLiteral("; accepted"));
     showMessage(QStringLiteral("Registration accepted. Continuing to the next workflow stage."), false);

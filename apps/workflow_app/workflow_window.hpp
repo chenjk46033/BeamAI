@@ -12,6 +12,7 @@
 QT_BEGIN_NAMESPACE
 namespace Ui { class WorkflowShell; }
 class QGroupBox;
+class QLabel;
 class QPushButton;
 class QSlider;
 QT_END_NAMESPACE
@@ -50,6 +51,7 @@ private:
     void confirmSelectedFiducial();
     void setPlacementMode(bool enabled);
     void updateRegistrationAvailability();
+    void updateRegistrationStepIndicators();
     void refresh();
     void showMessage(const QString& text, bool error);
     void syncRegistrationPreviewHeights();
@@ -86,6 +88,10 @@ private:
     QSlider* rightHorizontalPositionSlider_ = nullptr;
     QSlider* rightVerticalPositionSlider_ = nullptr;
     QPushButton* registerCurrentPositionButton_ = nullptr;
+    QLabel* registrationStep1Label_ = nullptr;
+    QLabel* registrationStep2Label_ = nullptr;
+    QLabel* registrationStep3Label_ = nullptr;
+    QLabel* registrationStep4Label_ = nullptr;
 };
 
 }  // namespace beam::app
