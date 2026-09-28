@@ -327,7 +327,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         label->setFixedHeight(10);
         label->setMinimumHeight(10);
         label->setMaximumHeight(10);
-        label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        label->setFixedWidth(78);
+        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         label->setContentsMargins(0, 0, 0, 0);
         label->setMargin(0);
         label->setIndent(0);
@@ -342,13 +343,20 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         label->setFixedHeight(10);
         label->setMinimumHeight(10);
         label->setMaximumHeight(10);
-        label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        label->setFixedWidth(78);
+        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         label->setContentsMargins(0, 0, 0, 0);
         label->setMargin(0);
         label->setIndent(0);
         label->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
         label->setStyleSheet(QStringLiteral("QLabel { font-size: 8px; padding: 0; }"));
     }
+    ui_->sagittalLayout->setAlignment(ui_->sagittalSliceLabel, Qt::AlignHCenter);
+    ui_->coronalLayout->setAlignment(ui_->coronalSliceLabel, Qt::AlignHCenter);
+    ui_->axialLayout->setAlignment(ui_->axialSliceLabel, Qt::AlignHCenter);
+    ui_->registrationSagittalLayout->setAlignment(ui_->registrationSagittalLabel, Qt::AlignHCenter);
+    ui_->registrationCoronalLayout->setAlignment(ui_->registrationCoronalLabel, Qt::AlignHCenter);
+    ui_->registrationAxialLayout->setAlignment(ui_->registrationAxialLabel, Qt::AlignHCenter);
     auto* markerTablePanel = new QWidget(markerSplitter);
     markerTablePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* markerTableLayout = new QVBoxLayout(markerTablePanel);
@@ -359,9 +367,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     registrationStep2Label_->setStyleSheet(QStringLiteral(
         "QLabel { color: #dff7ff; background: rgba(15, 54, 68, 190); border-radius: 3px; font-size: 30px; font-weight: 700; }"));
     registrationStep2Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    registrationStep2Label_->setFixedSize(28, 34);
+    registrationStep2Label_->setFixedSize(20, 20);
     registrationStep2Label_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    registrationStep2Label_->setParent(ui_->registrationTable->viewport());
+    registrationStep2Label_->setParent(ui_->registrationTable->horizontalHeader());
+    registrationStep2Label_->move(0, 0);
     registrationStep2Label_->show();
     registrationStep2Label_->raise();
     ui_->confirmFiducialButton->setText(QStringLiteral("Confirm all located fiducials"));
@@ -893,6 +902,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationTable->verticalHeader()->setMinimumSectionSize(22);
     // Six complete rows plus the header, without an oversized viewport.
     ui_->registrationTable->setFixedHeight(180);
+    if (auto* fiducialHeader = ui_->registrationTable->horizontalHeaderItem(0))
+        fiducialHeader->setText(QStringLiteral("2  Fiducial"));
+    ui_->acceptRegistrationButton->setText(QStringLiteral("4  Accept registration and continue →"));
+    registrationStep2Label_->hide();
+    registrationStep4Label_->hide();
     ui_->registrationTable->setStyleSheet(
         QStringLiteral("QTableWidget { color: #17313f; background: #ffffff; } "
                        "QTableWidget::item { color: #17313f; background: #ffffff; } "
@@ -1462,18 +1476,19 @@ void WorkflowWindow::updateRegistrationAvailability() {
 }
 
 void WorkflowWindow::updateRegistrationStepIndicators() {
-    const auto apply = [](QLabel* label, bool active) {
+    const auto apply = [this](QLabel* label, bool active, const QString& activeColor) {
         if (!label) return;
         label->setStyleSheet(QStringLiteral(
-            "QLabel { color: %1; background: transparent; font-size: 30px; font-weight: 700; }")
-                                 .arg(active ? QStringLiteral("rgba(85, 215, 240, 245)")
-                                             : QStringLiteral("rgba(230, 240, 244, 105)")));
+            "QLabel { color: %1; background: rgba(18, 43, 53, 220); border-radius: 3px; "
+            "font-size: %2px; font-weight: 700; }")
+                                 .arg(active ? activeColor : QStringLiteral("rgba(230, 240, 244, 150)"))
+                                 .arg(label == registrationStep2Label_ ? 20 : 30));
     };
     const bool registrationStarted = registrationGeometryLoaded_;
-    apply(registrationStep1Label_, registrationStarted);
-    apply(registrationStep2Label_, registrationStarted);
-    apply(registrationStep3Label_, pendingRegistrationFit_ || registrationComplete_);
-    apply(registrationStep4Label_, registrationComplete_);
+    apply(registrationStep1Label_, registrationStarted, QStringLiteral("#58d9f2"));
+    apply(registrationStep2Label_, registrationStarted, QStringLiteral("#ffd166"));
+    apply(registrationStep3Label_, pendingRegistrationFit_ || registrationComplete_, QStringLiteral("#72e6a1"));
+    apply(registrationStep4Label_, registrationComplete_, QStringLiteral("#d6a5ff"));
 }
 
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
