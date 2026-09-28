@@ -83,6 +83,7 @@ private:
     bool focusImageLoaded_ = false;
     bool suppressRegistrationNavigation_ = false;
     bool couplingCheckPassed_ = false;
+    bool correctionCheckPassed_ = false;
     int registrationStartFiducialRow_ = -1;
     QString mriPath_;
     QSlider* leftHorizontalPositionSlider_ = nullptr;
@@ -97,9 +98,15 @@ private:
     QLabel* couplingStatusLabel_ = nullptr;
     QLabel* couplingTitleLabel_ = nullptr;
     QLabel* couplingDescriptionLabel_ = nullptr;
+    QLabel* correctionTitleLabel_ = nullptr;
+    QLabel* correctionDescriptionLabel_ = nullptr;
+    QLabel* correctionStatusLabel_ = nullptr;
     QProgressBar* couplingProgressBar_ = nullptr;
+    QProgressBar* correctionProgressBar_ = nullptr;
     QPushButton* runCouplingCheckButton_ = nullptr;
     QPushButton* acceptCouplingButton_ = nullptr;
+    QPushButton* runCorrectionButton_ = nullptr;
+    QPushButton* acceptCorrectionButton_ = nullptr;
 };
 
 }  // namespace beam::app

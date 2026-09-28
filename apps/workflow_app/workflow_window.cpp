@@ -711,6 +711,40 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->placeholderLayout->addWidget(couplingProgressBar_);
     ui_->placeholderLayout->addWidget(runCouplingCheckButton_);
     ui_->placeholderLayout->addWidget(acceptCouplingButton_);
+
+    correctionTitleLabel_ = new QLabel(QStringLiteral("Correction"), ui_->placeholderPage);
+    correctionTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
+    correctionDescriptionLabel_ = new QLabel(
+        QStringLiteral("Run the BeamV0 through-transmit correction measurement, review the transmission level, and accept the correction before treatment planning."),
+        ui_->placeholderPage);
+    correctionDescriptionLabel_->setWordWrap(true);
+    correctionDescriptionLabel_->setStyleSheet(QStringLiteral("QLabel { color: #c8d9de; padding: 4px 0 10px 0; }"));
+    correctionStatusLabel_ = new QLabel(QStringLiteral("No correction measurement has been run."), ui_->placeholderPage);
+    correctionStatusLabel_->setWordWrap(true);
+    correctionStatusLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
+    correctionProgressBar_ = new QProgressBar(ui_->placeholderPage);
+    correctionProgressBar_->setRange(0, 100);
+    correctionProgressBar_->setValue(0);
+    correctionProgressBar_->setFormat(QStringLiteral("Current transmission: %p%"));
+    correctionProgressBar_->setMinimumHeight(24);
+    correctionProgressBar_->setStyleSheet(QStringLiteral(
+        "QProgressBar { color: #eafaff; background: #263a42; border: 1px solid #416b78; border-radius: 4px; text-align: center; } "
+        "QProgressBar::chunk { background: #43b581; border-radius: 3px; }"));
+    runCorrectionButton_ = new QPushButton(QStringLiteral("Run correction measurement"), ui_->placeholderPage);
+    runCorrectionButton_->setMinimumHeight(38);
+    runCorrectionButton_->setStyleSheet(acceptButtonStyle);
+    acceptCorrectionButton_ = new QPushButton(QStringLiteral("Accept correction and continue →"), ui_->placeholderPage);
+    acceptCorrectionButton_->setMinimumHeight(40);
+    acceptCorrectionButton_->setEnabled(false);
+    acceptCorrectionButton_->setStyleSheet(acceptButtonStyle);
+    ui_->placeholderLayout->addWidget(correctionTitleLabel_);
+    ui_->placeholderLayout->addWidget(correctionDescriptionLabel_);
+    ui_->placeholderLayout->addSpacing(12);
+    ui_->placeholderLayout->addWidget(correctionStatusLabel_);
+    ui_->placeholderLayout->addWidget(correctionProgressBar_);
+    ui_->placeholderLayout->addWidget(runCorrectionButton_);
+    ui_->placeholderLayout->addWidget(acceptCorrectionButton_);
     ui_->placeholderLayout->addStretch(1);
 
     connect(ui_->stageList, &QListWidget::currentRowChanged, this, [this](int row) {
@@ -745,6 +779,36 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         acceptCouplingButton_->setEnabled(false);
         runCouplingCheckButton_->setEnabled(false);
         showMessage(QStringLiteral("Coupling accepted. Continuing to Correction."), false);
+        refresh();
+        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+    });
+    connect(runCorrectionButton_, &QPushButton::clicked, this, [this] {
+        // Deterministic stand-in for the device waveform read while no Beam
+        // serial connection is present.  The production path will feed the
+        // measured through-transmit amplitude into this same result state.
+        correctionCheckPassed_ = true;
+        correctionProgressBar_->setValue(88);
+        correctionStatusLabel_->setText(QStringLiteral(
+            "Correction measurement passed (simulated): current transmission 88%. The through-transmit level is above the safety threshold."));
+        workflow_.change(beam::gui::WorkflowStage::Correction,
+                         "Correction measured; awaiting operator acceptance.");
+        acceptCorrectionButton_->setEnabled(true);
+        showMessage(QStringLiteral("Correction measurement passed. Accept correction to continue."), false);
+        refresh();
+    });
+    connect(acceptCorrectionButton_, &QPushButton::clicked, this, [this] {
+        if (!correctionCheckPassed_) {
+            showMessage(QStringLiteral("Run the correction measurement before accepting it."), true);
+            return;
+        }
+        std::string reason;
+        if (!workflow_.complete(beam::gui::WorkflowStage::Correction, &reason)) {
+            showMessage(QString::fromStdString(reason), true);
+            return;
+        }
+        acceptCorrectionButton_->setEnabled(false);
+        runCorrectionButton_->setEnabled(false);
+        showMessage(QStringLiteral("Correction accepted. Continuing to Treatment plan."), false);
         refresh();
         ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
     });
@@ -1982,17 +2046,29 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                                          stage != beam::gui::WorkflowStage::SystemCheck &&
                                          stage != beam::gui::WorkflowStage::Imaging &&
                                          stage != beam::gui::WorkflowStage::Registration &&
-                                         stage != beam::gui::WorkflowStage::Coupling);
+                                         stage != beam::gui::WorkflowStage::Coupling &&
+                                         stage != beam::gui::WorkflowStage::Correction);
     const bool couplingPage = stage == beam::gui::WorkflowStage::Coupling;
+    const bool correctionPage = stage == beam::gui::WorkflowStage::Correction;
     for (QWidget* widget : {static_cast<QWidget*>(couplingTitleLabel_),
                             static_cast<QWidget*>(couplingDescriptionLabel_),
                             static_cast<QWidget*>(couplingStatusLabel_),
                             static_cast<QWidget*>(couplingProgressBar_),
                             static_cast<QWidget*>(runCouplingCheckButton_),
-                            static_cast<QWidget*>(acceptCouplingButton_)}) {
-        if (widget) widget->setVisible(couplingPage);
+                            static_cast<QWidget*>(acceptCouplingButton_),
+                            static_cast<QWidget*>(correctionTitleLabel_),
+                            static_cast<QWidget*>(correctionDescriptionLabel_),
+                            static_cast<QWidget*>(correctionStatusLabel_),
+                            static_cast<QWidget*>(correctionProgressBar_),
+                            static_cast<QWidget*>(runCorrectionButton_),
+                            static_cast<QWidget*>(acceptCorrectionButton_)}) {
+        if (!widget) continue;
+        const bool isCorrectionWidget = widget == correctionTitleLabel_ || widget == correctionDescriptionLabel_ ||
+                                        widget == correctionStatusLabel_ || widget == correctionProgressBar_ ||
+                                        widget == runCorrectionButton_ || widget == acceptCorrectionButton_;
+        widget->setVisible(isCorrectionWidget ? correctionPage : couplingPage);
     }
-    if (ui_->placeholderText) ui_->placeholderText->setVisible(!couplingPage);
+    if (ui_->placeholderText) ui_->placeholderText->setVisible(!couplingPage && !correctionPage);
     if (stage == beam::gui::WorkflowStage::Registration && mriLoaded_) {
         showMriPreviews();
         const int row = ui_->registrationTable->currentRow();
