@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <functional>
 #include <utility>
 
 #include <QListWidgetItem>
@@ -40,6 +41,7 @@
 #include <QPainter>
 #include <QPen>
 #include <QStyleOptionSlider>
+#include <QEvent>
 
 #include "infra_dicom/load_mri_ras.hpp"
 #include "infra_mat/legacy_beam_session.hpp"
@@ -90,7 +92,7 @@ protected:
                     painter.setBrush(QColor(91, 74, 28, 210));
                     painter.drawRoundedRect(QRect(x - 10, y + 5, 20, 16), 3, 3);
                 }
-                painter.drawText(QRect(x - 10, y + 6, 20, height() - y - 6),
+                painter.drawText(QRect(x - 12, y + 6, 24, 20),
                                  Qt::AlignHCenter | Qt::AlignTop, text);
             } else {
                 const int start = groove.top() + handleHalf;
@@ -106,6 +108,22 @@ protected:
             }
         }
     }
+};
+
+class CalibrationPaneMouseFilter final : public QObject {
+public:
+    CalibrationPaneMouseFilter(QObject* parent, std::function<void()> onPress)
+        : QObject(parent), onPress_(std::move(onPress)) {}
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::MouseButtonPress && onPress_)
+            onPress_();
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    std::function<void()> onPress_;
 };
 
 }  // namespace
@@ -495,10 +513,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto makeLockPanel = [&](const QString& title, QSlider*& horizontal, QSlider*& vertical) {
         auto* panel = new QGroupBox(title, calibrationGroup);
         panel->setMinimumWidth(195);
-        panel->setMaximumWidth(220);
         panel->setMinimumHeight(145);
         panel->setMaximumHeight(145);
-        panel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         auto* panelLayout = new QGridLayout(panel);
         panelLayout->setContentsMargins(5, 2, 5, 2);
         panelLayout->setHorizontalSpacing(7);
@@ -508,8 +525,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         horizontal = makePositionSlider(panel, Qt::Horizontal);
         vertical->setFixedHeight(88);
         vertical->setFixedWidth(50);
+        vertical->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         horizontal->setMinimumWidth(120);
-        horizontal->setFixedHeight(38);
+        horizontal->setMinimumHeight(48);
+        horizontal->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         panelLayout->addWidget(new QLabel(QStringLiteral("Vertical"), panel), 0, 0, 1, 2, Qt::AlignCenter);
         panelLayout->addWidget(vertical, 1, 0, 2, 2, Qt::AlignCenter);
         panelLayout->addWidget(new QLabel(QStringLiteral("Horizontal"), panel), 0, 2, Qt::AlignCenter);
@@ -534,6 +553,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     calibrationGroup->setMaximumHeight(QWIDGETSIZE_MAX);
     calibrationGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     markerDiagramLayout->addWidget(calibrationGroup, 1);
+    auto* calibrationMouseFilter = new CalibrationPaneMouseFilter(calibrationGroup, [this] {
+        currentPositionRegistrationComplete_ = false;
+        updateRegistrationAvailability();
+    });
+    calibrationGroup->installEventFilter(calibrationMouseFilter);
+    for (QWidget* child : calibrationGroup->findChildren<QWidget*>())
+        child->installEventFilter(calibrationMouseFilter);
     // Child views/tables are added after the step labels are created; raise
     // the overlays once the pane hierarchy is complete so they remain visible
     // even before any MRI or fiducial data exists.
@@ -553,6 +579,15 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
         connect(slider, &QSlider::valueChanged, this, [invalidateCurrentPositionRegistration] {
             invalidateCurrentPositionRegistration();
+        });
+    for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
+                            rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
+        connect(slider, &QSlider::sliderPressed, this, [this] {
+            // Pressing a calibration track is an explicit request to review
+            // or redo Step 3, even when the handle is pressed at its current
+            // value and therefore emits no valueChanged signal.
+            currentPositionRegistrationComplete_ = false;
+            updateRegistrationAvailability();
         });
     connect(registerCurrentPositionButton_, &QPushButton::clicked, this,
             [this] { performCurrentPositionRegistration(); });
@@ -814,6 +849,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         showMriPreviews();
         registrationComplete_ = false;
         pendingRegistrationFit_ = false;
+        currentPositionRegistrationComplete_ = false;
         ui_->acceptRegistrationButton->setEnabled(false);
         workflow_.change(beam::gui::WorkflowStage::Registration,
                          "Registration measurements changed; later approvals require review.");
@@ -838,6 +874,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 }
                 if (!suppressRegistrationNavigation_)
                     navigateToRegistrationFiducial(currentRow);
+                if (pendingRegistrationFit_ || registrationComplete_)
+                    currentPositionRegistrationComplete_ = false;
                 updateRegistrationAvailability();
                 // Selecting a Step 1/2 item signals that the operator wants
                 // to review or rerun the MRI-fiducial fit.
@@ -875,6 +913,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         // MRI views to that marker after Reset to Initial Slice.
         navigateToRegistrationFiducial(markerIndex);
         if (pendingRegistrationFit_ || registrationComplete_)
+            currentPositionRegistrationComplete_ = false;
+        if (pendingRegistrationFit_ || registrationComplete_)
             ui_->registerFiducialsButton->setEnabled(true);
     });
     connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int changedRow, int column) {
@@ -904,6 +944,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                          "Registration measurements changed; later approvals require review.");
         registrationComplete_ = false;
         pendingRegistrationFit_ = false;
+        currentPositionRegistrationComplete_ = false;
         ui_->acceptRegistrationButton->setEnabled(false);
         ui_->registrationResult->setText(QStringLiteral("Measurements changed. Run registration again to accept them."));
         refresh();
@@ -1589,6 +1630,7 @@ void WorkflowWindow::performFiducialRegistration() {
         applyRegistrationResult(std::move(result));
         pendingRegistrationFit_ = true;
         registrationComplete_ = false;
+        currentPositionRegistrationComplete_ = false;
         updateRegistrationStepIndicators();
         // Step 4 remains locked until the Step 3 lock-position registration
         // has been completed.
@@ -1886,6 +1928,12 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                 label->show();
                 label->raise();
             }
+        }
+        if (registrationComplete_ && currentPositionRegistrationComplete_) {
+            // Returning to a completed Registration page is a review state;
+            // do not present Step 3/4 as if they still require action.
+            if (registerCurrentPositionButton_) registerCurrentPositionButton_->setEnabled(false);
+            ui_->acceptRegistrationButton->setEnabled(false);
         }
     }
     refresh();

@@ -375,14 +375,16 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
             auto* targetLayout = new QHBoxLayout(targetWidget);
             // Slightly indent the action beneath the highlighted coordinate.
             targetLayout->setContentsMargins(18, 5, 10, 5);
-            auto* targetLabel = new QLabel(QStringLiteral("Move marker"), targetWidget);
+            auto* targetLabel = new QLabel(QStringLiteral("Move fiducial"), targetWidget);
             auto* targetCombo = new QComboBox(targetWidget);
             targetCombo->addItems(coordinatePasteOptions_);
-            targetCombo->setMinimumWidth(170);
+            targetCombo->setMinimumWidth(100);
+            auto* targetSuffix = new QLabel(QStringLiteral("to mouse point."), targetWidget);
             auto* moveButton = new QPushButton(QStringLiteral("Move"), targetWidget);
             moveButton->setMinimumWidth(54);
             targetLayout->addWidget(targetLabel);
             targetLayout->addWidget(targetCombo, 1);
+            targetLayout->addWidget(targetSuffix);
             targetLayout->addWidget(moveButton);
             auto* targetAction = new QWidgetAction(&menu);
             targetAction->setDefaultWidget(targetWidget);
