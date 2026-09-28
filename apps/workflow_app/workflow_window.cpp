@@ -70,10 +70,13 @@ protected:
         if (high <= low) return;
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, false);
-        painter.setPen(QPen(QColor("#b9cbd1"), 1));
-        painter.setFont(QFont(font().family(), 9));
         const int handleHalf = style()->pixelMetric(QStyle::PM_SliderLength, &option, this) / 2;
         for (int value = low; value <= high; ++value) {
+            const bool selected = (value == this->value());
+            painter.setPen(QPen(selected ? QColor("#ffe08a") : QColor("#b9cbd1"), 1));
+            QFont labelFont(font().family(), 11);
+            labelFont.setBold(selected);
+            painter.setFont(labelFont);
             const double fraction = static_cast<double>(value - low) / (high - low);
             if (orientation() == Qt::Horizontal) {
                 // Match Qt's handle-center endpoints rather than using a
@@ -83,6 +86,10 @@ protected:
                 const int x = qRound(start + fraction * (end - start));
                 const int y = groove.center().y();
                 const QString text = QString::number(value);
+                if (selected) {
+                    painter.setBrush(QColor(91, 74, 28, 210));
+                    painter.drawRoundedRect(QRect(x - 10, y + 5, 20, 16), 3, 3);
+                }
                 painter.drawText(QRect(x - 10, y + 6, 20, height() - y - 6),
                                  Qt::AlignHCenter | Qt::AlignTop, text);
             } else {
@@ -90,6 +97,10 @@ protected:
                 const int end = groove.bottom() - handleHalf;
                 const int y = qRound(end - fraction * (end - start));
                 const int x = groove.center().x();
+                if (selected) {
+                    painter.setBrush(QColor(91, 74, 28, 210));
+                    painter.drawRoundedRect(QRect(x + 6, y - 10, 20, 20), 3, 3);
+                }
                 painter.drawText(QRect(x + 7, y - 9, width() - x - 7, 18),
                                  Qt::AlignLeft | Qt::AlignVCenter, QString::number(value));
             }
@@ -324,39 +335,39 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     for (QLabel* label : {ui_->registrationSagittalLabel,
                           ui_->registrationCoronalLabel,
                           ui_->registrationAxialLabel}) {
-        label->setFixedHeight(10);
-        label->setMinimumHeight(10);
-        label->setMaximumHeight(10);
+        label->setFixedHeight(14);
+        label->setMinimumHeight(14);
+        label->setMaximumHeight(14);
         label->setFixedWidth(78);
         label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         label->setContentsMargins(0, 0, 0, 0);
         label->setMargin(0);
         label->setIndent(0);
         label->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-        label->setStyleSheet(QStringLiteral("QLabel { font-size: 8px; padding: 0; }"));
+        label->setStyleSheet(QStringLiteral("QLabel { font-size: 10px; padding: 0; }"));
     }
     for (QVBoxLayout* layout : {ui_->sagittalLayout, ui_->coronalLayout, ui_->axialLayout}) {
         layout->setContentsMargins(4, 3, 4, 2);
         layout->setSpacing(0);
     }
     for (QLabel* label : {ui_->sagittalSliceLabel, ui_->coronalSliceLabel, ui_->axialSliceLabel}) {
-        label->setFixedHeight(10);
-        label->setMinimumHeight(10);
-        label->setMaximumHeight(10);
+        label->setFixedHeight(14);
+        label->setMinimumHeight(14);
+        label->setMaximumHeight(14);
         label->setFixedWidth(78);
         label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         label->setContentsMargins(0, 0, 0, 0);
         label->setMargin(0);
         label->setIndent(0);
         label->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-        label->setStyleSheet(QStringLiteral("QLabel { font-size: 8px; padding: 0; }"));
+        label->setStyleSheet(QStringLiteral("QLabel { font-size: 10px; padding: 0; }"));
     }
-    ui_->sagittalLayout->setAlignment(ui_->sagittalSliceLabel, Qt::AlignHCenter);
-    ui_->coronalLayout->setAlignment(ui_->coronalSliceLabel, Qt::AlignHCenter);
-    ui_->axialLayout->setAlignment(ui_->axialSliceLabel, Qt::AlignHCenter);
-    ui_->registrationSagittalLayout->setAlignment(ui_->registrationSagittalLabel, Qt::AlignHCenter);
-    ui_->registrationCoronalLayout->setAlignment(ui_->registrationCoronalLabel, Qt::AlignHCenter);
-    ui_->registrationAxialLayout->setAlignment(ui_->registrationAxialLabel, Qt::AlignHCenter);
+    ui_->sagittalLayout->setAlignment(ui_->sagittalSliceLabel, Qt::AlignHCenter | Qt::AlignTop);
+    ui_->coronalLayout->setAlignment(ui_->coronalSliceLabel, Qt::AlignHCenter | Qt::AlignTop);
+    ui_->axialLayout->setAlignment(ui_->axialSliceLabel, Qt::AlignHCenter | Qt::AlignTop);
+    ui_->registrationSagittalLayout->setAlignment(ui_->registrationSagittalLabel, Qt::AlignHCenter | Qt::AlignTop);
+    ui_->registrationCoronalLayout->setAlignment(ui_->registrationCoronalLabel, Qt::AlignHCenter | Qt::AlignTop);
+    ui_->registrationAxialLayout->setAlignment(ui_->registrationAxialLabel, Qt::AlignHCenter | Qt::AlignTop);
     auto* markerTablePanel = new QWidget(markerSplitter);
     markerTablePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* markerTableLayout = new QVBoxLayout(markerTablePanel);
@@ -391,8 +402,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerActions->setSpacing(4);
     markerActions->addWidget(ui_->confirmFiducialButton, 1);
     markerActions->addWidget(ui_->registerFiducialsButton, 1);
-    markerTableLayout->addWidget(ui_->registrationTable, 1);
+    markerTableLayout->addWidget(ui_->registrationTable, 0);
     markerTableLayout->addLayout(markerActions);
+    markerTableLayout->setAlignment(ui_->registrationTable, Qt::AlignTop);
+    markerTableLayout->setAlignment(markerActions, Qt::AlignTop);
     ui_->registrationLayout->removeWidget(ui_->acceptRegistrationButton);
     ui_->acceptRegistrationButton->setMinimumHeight(30);
     registrationStep4Label_ = new QLabel(QStringLiteral("4"), markerTablePanel);
@@ -436,12 +449,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // BeamV0's second registration stage: calibrate the array's lock position
     // after the MRI-fiducial fit. Left and right lock sliders remain separate
     // so an alignment mismatch can be reported before applying the offset.
-    auto* calibrationGroup = new QGroupBox(QStringLiteral("Array lock-position calibration"), this);
+    auto* calibrationGroup = new QGroupBox(QStringLiteral("Transducer lock position"), this);
     auto* calibrationLayout = new QVBoxLayout(calibrationGroup);
     calibrationLayout->setContentsMargins(8, 4, 8, 4);
     calibrationLayout->setSpacing(8);
     auto* calibrationControls = new QHBoxLayout;
     calibrationControls->setSpacing(8);
+    calibrationControls->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     calibrationLayout->addLayout(calibrationControls);
     registrationStep3Label_ = new QLabel(QStringLiteral("3"), calibrationGroup);
     registrationStep3Label_->setStyleSheet(QStringLiteral(
@@ -451,7 +465,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     registrationStep3Label_->setFixedSize(28, 34);
     registrationStep3Label_->setAttribute(Qt::WA_TransparentForMouseEvents);
     registrationStep3Label_->setParent(calibrationGroup);
-    registrationStep3Label_->move(4, 4);
+    // Keep the step indicator in the content area.  Placing it at the
+    // group's top edge overlaps the QGroupBox title (for example, turning
+    // "Subject Left" into "bject Left"), especially when the pane is narrow.
+    // The calibration panels begin below the group title, so keep the
+    // indicator well inside the content area rather than over either panel's
+    // title.  The previous position still intersected the child group-box
+    // title after layout margins were applied.
+    registrationStep3Label_->move(4, 112);
     registrationStep3Label_->show();
     registrationStep3Label_->raise();
     auto makePositionSlider = [](QWidget* parent, Qt::Orientation orientation) {
@@ -462,10 +483,22 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         slider->setPageStep(1);
         slider->setTickPosition(QSlider::NoTicks);
         slider->setToolTip(QStringLiteral("Array lock position; each step is 7.5 mm horizontal or 10 mm vertical"));
+        slider->setStyleSheet(QStringLiteral(
+            "QSlider::groove:horizontal { height: 7px; background: #24495a; border: 1px solid #39758e; border-radius: 3px; } "
+            "QSlider::handle:horizontal { width: 16px; margin: -5px 0; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 8px; } "
+            "QSlider::sub-page:horizontal { background: #1686a8; border-radius: 3px; } "
+            "QSlider::groove:vertical { width: 7px; background: #24495a; border: 1px solid #39758e; border-radius: 3px; } "
+            "QSlider::handle:vertical { height: 16px; margin: 0 -5px; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 8px; } "
+            "QSlider::add-page:vertical { background: #1686a8; border-radius: 3px; }"));
         return slider;
     };
     auto makeLockPanel = [&](const QString& title, QSlider*& horizontal, QSlider*& vertical) {
         auto* panel = new QGroupBox(title, calibrationGroup);
+        panel->setMinimumWidth(195);
+        panel->setMaximumWidth(220);
+        panel->setMinimumHeight(145);
+        panel->setMaximumHeight(145);
+        panel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         auto* panelLayout = new QGridLayout(panel);
         panelLayout->setContentsMargins(5, 2, 5, 2);
         panelLayout->setHorizontalSpacing(7);
@@ -474,12 +507,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         vertical = makePositionSlider(panel, Qt::Vertical);
         horizontal = makePositionSlider(panel, Qt::Horizontal);
         vertical->setFixedHeight(88);
-        vertical->setFixedWidth(42);
-        horizontal->setMinimumWidth(82);
+        vertical->setFixedWidth(50);
+        horizontal->setMinimumWidth(120);
         horizontal->setFixedHeight(38);
-        panelLayout->addWidget(new QLabel(QStringLiteral("V"), panel), 0, 0, 1, 2, Qt::AlignCenter);
+        panelLayout->addWidget(new QLabel(QStringLiteral("Vertical"), panel), 0, 0, 1, 2, Qt::AlignCenter);
         panelLayout->addWidget(vertical, 1, 0, 2, 2, Qt::AlignCenter);
-        panelLayout->addWidget(new QLabel(QStringLiteral("H"), panel), 0, 2, Qt::AlignCenter);
+        panelLayout->addWidget(new QLabel(QStringLiteral("Horizontal"), panel), 0, 2, Qt::AlignCenter);
         panelLayout->addWidget(horizontal, 1, 2, 2, 1, Qt::AlignCenter);
         return panel;
     };
@@ -490,6 +523,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     registerCurrentPositionButton_ = new QPushButton(QStringLiteral("Register Arrays to Current Position"), calibrationGroup);
     registerCurrentPositionButton_->setMinimumHeight(30);
     registerCurrentPositionButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    registerCurrentPositionButton_->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
+        "QPushButton:hover { background: #2083a3; } "
+        "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     registerCurrentPositionButton_->setToolTip(QStringLiteral(
         "Apply the BeamV0 lock-position offset after registering the array to MRI fiducials"));
     calibrationLayout->addWidget(registerCurrentPositionButton_);
@@ -802,6 +839,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 if (!suppressRegistrationNavigation_)
                     navigateToRegistrationFiducial(currentRow);
                 updateRegistrationAvailability();
+                // Selecting a Step 1/2 item signals that the operator wants
+                // to review or rerun the MRI-fiducial fit.
+                if (pendingRegistrationFit_ || registrationComplete_)
+                    ui_->registerFiducialsButton->setEnabled(true);
             });
     ui_->registrationTable->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui_->registrationTable, &QTableWidget::customContextMenuRequested, this,
@@ -833,6 +874,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         // Navigate explicitly so a repeated triangle click still returns the
         // MRI views to that marker after Reset to Initial Slice.
         navigateToRegistrationFiducial(markerIndex);
+        if (pendingRegistrationFit_ || registrationComplete_)
+            ui_->registerFiducialsButton->setEnabled(true);
     });
     connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int changedRow, int column) {
         if (!registrationGeometryLoaded_ || column == 0 || column >= 4) return;
@@ -894,6 +937,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationCoronalPreview->setMarkerPickedHandler(pickedMarker);
     ui_->registrationAxialPreview->setMarkerPickedHandler(pickedMarker);
     ui_->registrationTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui_->registrationTable->horizontalHeader()->setFixedHeight(30);
     // Do not present a residual/error score to the operator.  The nominal
     // array geometry is a model, not ground truth, so this value would imply
     // an accuracy that the workflow cannot independently establish.
@@ -901,9 +945,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationTable->verticalHeader()->setDefaultSectionSize(25);
     ui_->registrationTable->verticalHeader()->setMinimumSectionSize(22);
     // Six complete rows plus the header, without an oversized viewport.
-    ui_->registrationTable->setFixedHeight(180);
+    ui_->registrationTable->setFixedHeight(186);
     if (auto* fiducialHeader = ui_->registrationTable->horizontalHeaderItem(0))
-        fiducialHeader->setText(QStringLiteral("2  Fiducial"));
+        fiducialHeader->setText(QStringLiteral("Fiducial"));
     ui_->acceptRegistrationButton->setText(QStringLiteral("4  Accept registration and continue →"));
     registrationStep2Label_->hide();
     registrationStep4Label_->hide();
@@ -913,6 +957,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                        "QTableWidget::item:alternate { color: #17313f; background: #f1f6f8; } "
                        "QTableWidget::item:selected, QTableWidget::item:selected:!active "
                        "{ background: #58c7e5; color: #083d4d; }"));
+    ui_->registrationTable->horizontalHeader()->setStyleSheet(
+        QStringLiteral("QHeaderView::section { padding: 0px; margin: 0px; }"));
     connect(ui_->participantEdit, &QLineEdit::textChanged, this, [this](const QString& value) {
         ui_->participantHeader->setText(QStringLiteral("Participant: %1").arg(value.isEmpty() ? QStringLiteral("—") : value));
     });
@@ -981,7 +1027,7 @@ void WorkflowWindow::syncRegistrationPreviewHeights() {
     // below each preview.  Keep a generous reserve for the four tool buttons
     // in the slider row; otherwise the details panel can be laid out over the
     // lower half of those buttons after a maximize/restore cycle.
-    const int registrationGroupHeight = referenceHeight + 46;
+    const int registrationGroupHeight = referenceHeight + 64;
     // Do not let the three-image row negotiate itself below the child layouts.
     // This is especially important when the stacked page becomes visible
     // after a window-state change.
@@ -990,6 +1036,7 @@ void WorkflowWindow::syncRegistrationPreviewHeights() {
                              ui_->registrationCoronalGroup,
                              ui_->registrationAxialGroup}) {
         group->setMinimumHeight(registrationGroupHeight);
+        group->setMaximumHeight(registrationGroupHeight);
     }
     for (WorkflowMriView* view : {ui_->registrationSagittalPreview,
                                   ui_->registrationCoronalPreview,
@@ -1468,10 +1515,12 @@ void WorkflowWindow::updateRegistrationAvailability() {
     const bool allMeasured = std::all_of(fiducialConfirmed_.begin(), fiducialConfirmed_.end(), [](bool v) { return v; });
     const bool imagingAccepted = workflow_.state(beam::gui::WorkflowStage::Imaging).status == beam::gui::WorkflowStatus::Complete;
     ui_->confirmFiducialButton->setEnabled(allLocated && hasPendingLocated);
-    ui_->registerFiducialsButton->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted);
+    ui_->registerFiducialsButton->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted &&
+                                             !pendingRegistrationFit_ && !registrationComplete_);
     if (registerCurrentPositionButton_)
         registerCurrentPositionButton_->setEnabled(registrationGeometryLoaded_ && allMeasured && imagingAccepted &&
-                                                    registrationComplete_ && !currentPositionRegistrationComplete_);
+                                                    (registrationComplete_ || pendingRegistrationFit_) &&
+                                                    !currentPositionRegistrationComplete_);
     updateRegistrationStepIndicators();
 }
 
@@ -1489,6 +1538,16 @@ void WorkflowWindow::updateRegistrationStepIndicators() {
     apply(registrationStep2Label_, registrationStarted, QStringLiteral("#ffd166"));
     apply(registrationStep3Label_, pendingRegistrationFit_ || registrationComplete_, QStringLiteral("#72e6a1"));
     apply(registrationStep4Label_, registrationComplete_, QStringLiteral("#d6a5ff"));
+    // Lock-position calibration is Step 3.  Do not allow either panel to be
+    // adjusted while the operator is still locating/confirming fiducials or
+    // before the MRI-fiducial fit has been applied.
+    const bool calibrationReady = pendingRegistrationFit_ || registrationComplete_;
+    for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
+                            rightHorizontalPositionSlider_, rightVerticalPositionSlider_}) {
+        if (slider) slider->setEnabled(calibrationReady);
+    }
+    if (registerCurrentPositionButton_ && (pendingRegistrationFit_ || registrationComplete_))
+        registerCurrentPositionButton_->setEnabled(!currentPositionRegistrationComplete_);
 }
 
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
@@ -1531,7 +1590,10 @@ void WorkflowWindow::performFiducialRegistration() {
         pendingRegistrationFit_ = true;
         registrationComplete_ = false;
         updateRegistrationStepIndicators();
-        ui_->acceptRegistrationButton->setEnabled(true);
+        // Step 4 remains locked until the Step 3 lock-position registration
+        // has been completed.
+        ui_->acceptRegistrationButton->setEnabled(false);
+        ui_->registerFiducialsButton->setEnabled(false);
         ui_->registrationResult->setText(QStringLiteral(
             "Registration applied. Verify all overlays against the MRI before accepting."));
         // Registration can be initiated immediately after returning to the
@@ -1551,8 +1613,8 @@ void WorkflowWindow::performFiducialRegistration() {
 }
 
 void WorkflowWindow::acceptFiducialRegistration() {
-    if (!pendingRegistrationFit_) {
-        showMessage(QStringLiteral("Run Register to MRI fiducials and review the overlays before accepting."), true);
+    if (!pendingRegistrationFit_ || !currentPositionRegistrationComplete_) {
+        showMessage(QStringLiteral("Complete the Step 3 transducer lock-position registration before accepting."), true);
         return;
     }
     std::string reason;
@@ -1571,8 +1633,8 @@ void WorkflowWindow::acceptFiducialRegistration() {
 }
 
 void WorkflowWindow::performCurrentPositionRegistration() {
-    if (!registrationComplete_ || fiducials_.size() != 6) {
-        showMessage(QStringLiteral("Accept the MRI-fiducial registration before calibrating the current array position."), true);
+    if ((!pendingRegistrationFit_ && !registrationComplete_) || fiducials_.size() != 6) {
+        showMessage(QStringLiteral("Run Register to MRI fiducials before calibrating the current array position."), true);
         return;
     }
     if (leftHorizontalPositionSlider_->value() != rightHorizontalPositionSlider_->value() ||
@@ -1590,6 +1652,7 @@ void WorkflowWindow::performCurrentPositionRegistration() {
         applyRegistrationResult(std::move(result));
         currentPositionRegistrationComplete_ = true;
         registerCurrentPositionButton_->setEnabled(false);
+        ui_->acceptRegistrationButton->setEnabled(true);
         showMessage(QStringLiteral("Array registered to current lock position."), false);
         refresh();
     } catch (const std::exception& error) {
@@ -1826,6 +1889,9 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         }
     }
     refresh();
+    if (stage == beam::gui::WorkflowStage::Registration && registerCurrentPositionButton_ &&
+        !currentPositionRegistrationComplete_)
+        registerCurrentPositionButton_->setEnabled(true);
     QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
 }
 
