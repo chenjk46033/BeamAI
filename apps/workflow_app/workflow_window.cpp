@@ -36,6 +36,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QPushButton>
+#include <QProgressBar>
 #include <QSlider>
 #include <QLabel>
 #include <QPainter>
@@ -671,11 +672,82 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     }
     for (std::size_t i = 0; i < stageCount; ++i) ui_->stageList->addItem(QString());
 
+    // Coupling is kept as a real Qt page (rather than the former generic
+    // placeholder) so the operator can measure, review, and accept acoustic
+    // transmission before moving on to correction.
+    ui_->placeholderText->hide();
+    couplingTitleLabel_ = new QLabel(QStringLiteral("Coupling verification"), ui_->placeholderPage);
+    couplingTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
+    couplingTitleLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    couplingDescriptionLabel_ = new QLabel(
+        QStringLiteral("Verify that the transducer is seated against the coupling medium and that acoustic transmission is adequate before treatment."),
+        ui_->placeholderPage);
+    couplingDescriptionLabel_->setWordWrap(true);
+    couplingDescriptionLabel_->setStyleSheet(QStringLiteral("QLabel { color: #c8d9de; padding: 4px 0 10px 0; }"));
+    couplingStatusLabel_ = new QLabel(QStringLiteral("No coupling measurement has been run."), ui_->placeholderPage);
+    couplingStatusLabel_->setWordWrap(true);
+    couplingStatusLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
+    couplingProgressBar_ = new QProgressBar(ui_->placeholderPage);
+    couplingProgressBar_->setRange(0, 100);
+    couplingProgressBar_->setValue(0);
+    couplingProgressBar_->setFormat(QStringLiteral("Transmission: %p%"));
+    couplingProgressBar_->setMinimumHeight(24);
+    couplingProgressBar_->setStyleSheet(QStringLiteral(
+        "QProgressBar { color: #eafaff; background: #263a42; border: 1px solid #416b78; border-radius: 4px; text-align: center; } "
+        "QProgressBar::chunk { background: #2fa7c7; border-radius: 3px; }"));
+    runCouplingCheckButton_ = new QPushButton(QStringLiteral("Run coupling check"), ui_->placeholderPage);
+    runCouplingCheckButton_->setMinimumHeight(38);
+    runCouplingCheckButton_->setStyleSheet(acceptButtonStyle);
+    acceptCouplingButton_ = new QPushButton(QStringLiteral("Accept coupling and continue →"), ui_->placeholderPage);
+    acceptCouplingButton_->setMinimumHeight(40);
+    acceptCouplingButton_->setEnabled(false);
+    acceptCouplingButton_->setStyleSheet(acceptButtonStyle);
+    ui_->placeholderLayout->setAlignment(Qt::AlignTop);
+    ui_->placeholderLayout->addWidget(couplingTitleLabel_);
+    ui_->placeholderLayout->addWidget(couplingDescriptionLabel_);
+    ui_->placeholderLayout->addSpacing(12);
+    ui_->placeholderLayout->addWidget(couplingStatusLabel_);
+    ui_->placeholderLayout->addWidget(couplingProgressBar_);
+    ui_->placeholderLayout->addWidget(runCouplingCheckButton_);
+    ui_->placeholderLayout->addWidget(acceptCouplingButton_);
+    ui_->placeholderLayout->addStretch(1);
+
     connect(ui_->stageList, &QListWidget::currentRowChanged, this, [this](int row) {
         if (row >= 0 && row < static_cast<int>(stageCount)) selectStage(static_cast<beam::gui::WorkflowStage>(row));
     });
     connect(ui_->completeStageButton, &QPushButton::clicked, this, [this] { completeCurrentStage(); });
     connect(ui_->acceptCaseButton, &QPushButton::clicked, this, [this] { completeCurrentStage(); });
+    connect(runCouplingCheckButton_, &QPushButton::clicked, this, [this] {
+        // Until the hardware adapter is connected, this is the safe
+        // deterministic simulation used by the workflow UI.  The same page
+        // will consume the device's measured transmission value later.
+        couplingCheckPassed_ = true;
+        couplingProgressBar_->setValue(92);
+        couplingStatusLabel_->setText(QStringLiteral(
+            "Coupling check passed (simulated): 92% transmission. Contact is within the acceptable range. Review and accept to continue."));
+        workflow_.change(beam::gui::WorkflowStage::Coupling,
+                         "Coupling measured; awaiting operator acceptance.");
+        acceptCouplingButton_->setEnabled(true);
+        showMessage(QStringLiteral("Coupling check passed. Accept coupling to continue."), false);
+        refresh();
+    });
+    connect(acceptCouplingButton_, &QPushButton::clicked, this, [this] {
+        if (!couplingCheckPassed_) {
+            showMessage(QStringLiteral("Run and pass the coupling check before accepting it."), true);
+            return;
+        }
+        std::string reason;
+        if (!workflow_.complete(beam::gui::WorkflowStage::Coupling, &reason)) {
+            showMessage(QString::fromStdString(reason), true);
+            return;
+        }
+        acceptCouplingButton_->setEnabled(false);
+        runCouplingCheckButton_->setEnabled(false);
+        showMessage(QStringLiteral("Coupling accepted. Continuing to Correction."), false);
+        refresh();
+        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+    });
     connect(ui_->simulatePassButton, &QPushButton::clicked, this, [this] {
         deviceCheckPassed_ = true;
         workflow_.change(beam::gui::WorkflowStage::SystemCheck,
@@ -1909,7 +1981,18 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     ui_->completeStageButton->setVisible(stage != beam::gui::WorkflowStage::CaseSetup &&
                                          stage != beam::gui::WorkflowStage::SystemCheck &&
                                          stage != beam::gui::WorkflowStage::Imaging &&
-                                         stage != beam::gui::WorkflowStage::Registration);
+                                         stage != beam::gui::WorkflowStage::Registration &&
+                                         stage != beam::gui::WorkflowStage::Coupling);
+    const bool couplingPage = stage == beam::gui::WorkflowStage::Coupling;
+    for (QWidget* widget : {static_cast<QWidget*>(couplingTitleLabel_),
+                            static_cast<QWidget*>(couplingDescriptionLabel_),
+                            static_cast<QWidget*>(couplingStatusLabel_),
+                            static_cast<QWidget*>(couplingProgressBar_),
+                            static_cast<QWidget*>(runCouplingCheckButton_),
+                            static_cast<QWidget*>(acceptCouplingButton_)}) {
+        if (widget) widget->setVisible(couplingPage);
+    }
+    if (ui_->placeholderText) ui_->placeholderText->setVisible(!couplingPage);
     if (stage == beam::gui::WorkflowStage::Registration && mriLoaded_) {
         showMriPreviews();
         const int row = ui_->registrationTable->currentRow();

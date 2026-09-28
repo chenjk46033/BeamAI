@@ -14,6 +14,7 @@ namespace Ui { class WorkflowShell; }
 class QGroupBox;
 class QLabel;
 class QPushButton;
+class QProgressBar;
 class QSlider;
 QT_END_NAMESPACE
 
@@ -81,6 +82,7 @@ private:
     bool mriLoaded_ = false;
     bool focusImageLoaded_ = false;
     bool suppressRegistrationNavigation_ = false;
+    bool couplingCheckPassed_ = false;
     int registrationStartFiducialRow_ = -1;
     QString mriPath_;
     QSlider* leftHorizontalPositionSlider_ = nullptr;
@@ -92,6 +94,12 @@ private:
     QLabel* registrationStep2Label_ = nullptr;
     QLabel* registrationStep3Label_ = nullptr;
     QLabel* registrationStep4Label_ = nullptr;
+    QLabel* couplingStatusLabel_ = nullptr;
+    QLabel* couplingTitleLabel_ = nullptr;
+    QLabel* couplingDescriptionLabel_ = nullptr;
+    QProgressBar* couplingProgressBar_ = nullptr;
+    QPushButton* runCouplingCheckButton_ = nullptr;
+    QPushButton* acceptCouplingButton_ = nullptr;
 };
 
 }  // namespace beam::app
