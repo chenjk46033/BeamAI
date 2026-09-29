@@ -1675,11 +1675,14 @@
                                             </widget>
                                           </item>
                                           <item>
-                                            <widget class="QSlider" name="treatmentSagittalSlider">
-                                              <property name="orientation"><enum>Qt::Horizontal</enum></property>
-                                              <property name="enabled"><bool>false</bool></property>
-                                            </widget>
+                                            <layout class="QHBoxLayout" name="treatmentSagittalSliderRow">
+                                              <item><widget class="QToolButton" name="treatmentSagittalPreviousButton"><property name="text"><string>◀</string></property></widget></item>
+                                              <item><widget class="QSlider" name="treatmentSagittalSlider"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="enabled"><bool>false</bool></property></widget></item>
+                                              <item><widget class="QToolButton" name="treatmentSagittalNextButton"><property name="text"><string>▶</string></property></widget></item>
+                                              <item><widget class="QToolButton" name="treatmentSagittalResetButton"><property name="text"><string>↪</string></property></widget></item>
+                                            </layout>
                                           </item>
+                                          <item><widget class="QLabel" name="treatmentSagittalSliceLabel"><property name="text"><string>LR — mm</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
                                         </layout>
                                       </widget>
                                     </item>
@@ -1703,11 +1706,14 @@
                                             </widget>
                                           </item>
                                           <item>
-                                            <widget class="QSlider" name="treatmentCoronalSlider">
-                                              <property name="orientation"><enum>Qt::Horizontal</enum></property>
-                                              <property name="enabled"><bool>false</bool></property>
-                                            </widget>
+                                            <layout class="QHBoxLayout" name="treatmentCoronalSliderRow">
+                                              <item><widget class="QToolButton" name="treatmentCoronalPreviousButton"><property name="text"><string>◀</string></property></widget></item>
+                                              <item><widget class="QSlider" name="treatmentCoronalSlider"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="enabled"><bool>false</bool></property></widget></item>
+                                              <item><widget class="QToolButton" name="treatmentCoronalNextButton"><property name="text"><string>▶</string></property></widget></item>
+                                              <item><widget class="QToolButton" name="treatmentCoronalResetButton"><property name="text"><string>↪</string></property></widget></item>
+                                            </layout>
                                           </item>
+                                          <item><widget class="QLabel" name="treatmentCoronalSliceLabel"><property name="text"><string>AP — mm</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
                                         </layout>
                                       </widget>
                                     </item>
@@ -1731,11 +1737,14 @@
                                             </widget>
                                           </item>
                                           <item>
-                                            <widget class="QSlider" name="treatmentAxialSlider">
-                                              <property name="orientation"><enum>Qt::Horizontal</enum></property>
-                                              <property name="enabled"><bool>false</bool></property>
-                                            </widget>
+                                            <layout class="QHBoxLayout" name="treatmentAxialSliderRow">
+                                              <item><widget class="QToolButton" name="treatmentAxialPreviousButton"><property name="text"><string>◀</string></property></widget></item>
+                                              <item><widget class="QSlider" name="treatmentAxialSlider"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="enabled"><bool>false</bool></property></widget></item>
+                                              <item><widget class="QToolButton" name="treatmentAxialNextButton"><property name="text"><string>▶</string></property></widget></item>
+                                              <item><widget class="QToolButton" name="treatmentAxialResetButton"><property name="text"><string>↪</string></property></widget></item>
+                                            </layout>
                                           </item>
+                                          <item><widget class="QLabel" name="treatmentAxialSliceLabel"><property name="text"><string>IS — mm</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
                                         </layout>
                                       </widget>
                                     </item>

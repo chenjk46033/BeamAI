@@ -252,6 +252,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationLayout->setAlignment(Qt::AlignTop);
     ui_->imagingGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     ui_->registrationImages->setAlignment(Qt::AlignTop);
+    ui_->placeholderPage->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    ui_->placeholderLayout->setContentsMargins(0, 0, 0, 0);
+    ui_->placeholderLayout->setStretch(0, 1);
+    ui_->treatmentMriLayout->setStretch(1, 1);
     for (QGroupBox* group : {ui_->registrationSagittalGroup,
                              ui_->registrationCoronalGroup,
                              ui_->registrationAxialGroup}) {
@@ -891,7 +895,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // Designer form, just like Imaging and Registration.  Runtime code only
     // supplies the treatment-specific control row and data connections.
     treatmentMriPage_ = ui_->treatmentMriPage;
-    ui_->placeholderLayout->removeWidget(treatmentMriPage_);
+    treatmentMriPage_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* treatmentMriLayout = ui_->treatmentMriLayout;
     auto* treatmentMriInstruction = new QLabel(
         QStringLiteral("Select a target row, then click a location in any MRI plane. The selected target is updated in RAS coordinates and shown in all three planes."),
@@ -931,6 +935,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentViewerControls->addWidget(treatmentTransparency);
     treatmentViewerControls->addStretch(1);
     treatmentMriLayout->insertLayout(0, treatmentViewerControls);
+    // The control row was inserted at index 0, so the static MRI row is now
+    // index 1. Give that row the available vertical expansion.
+    treatmentMriLayout->setStretch(1, 1);
     connect(treatmentShowField, &QCheckBox::toggled, ui_->showFieldCheckBox, &QCheckBox::setChecked);
     connect(treatmentShowTarget, &QCheckBox::toggled, ui_->showTargetCheckBox, &QCheckBox::setChecked);
     connect(treatmentShowTransducers, &QCheckBox::toggled, ui_->showTransducersCheckBox, &QCheckBox::setChecked);
@@ -961,11 +968,46 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentSagittalSlider_ = ui_->treatmentSagittalSlider;
     treatmentCoronalSlider_ = ui_->treatmentCoronalSlider;
     treatmentAxialSlider_ = ui_->treatmentAxialSlider;
-    for (QGroupBox* group : {ui_->treatmentSagittalGroup,
-                             ui_->treatmentCoronalGroup,
-                             ui_->treatmentAxialGroup}) {
-        group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    for (QToolButton* button : {ui_->treatmentSagittalPreviousButton,
+                                ui_->treatmentCoronalPreviousButton,
+                                ui_->treatmentAxialPreviousButton})
+    {
+        button->setText(QString());
+        button->setArrowType(Qt::LeftArrow);
     }
+    for (QToolButton* button : {ui_->treatmentSagittalNextButton,
+                                ui_->treatmentCoronalNextButton,
+                                ui_->treatmentAxialNextButton})
+    {
+        button->setText(QString());
+        button->setArrowType(Qt::RightArrow);
+    }
+    for (QToolButton* button : {ui_->treatmentSagittalResetButton,
+                                ui_->treatmentCoronalResetButton,
+                                ui_->treatmentAxialResetButton})
+    {
+        button->setText(QString());
+        button->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+        button->setIconSize(QSize(14, 14));
+    }
+    connect(ui_->treatmentSagittalPreviousButton, &QToolButton::clicked,
+            ui_->sagittalPreviousButton, &QToolButton::click);
+    connect(ui_->treatmentSagittalNextButton, &QToolButton::clicked,
+            ui_->sagittalNextButton, &QToolButton::click);
+    connect(ui_->treatmentSagittalResetButton, &QToolButton::clicked,
+            ui_->resetSagittalButton, &QToolButton::click);
+    connect(ui_->treatmentCoronalPreviousButton, &QToolButton::clicked,
+            ui_->coronalPreviousButton, &QToolButton::click);
+    connect(ui_->treatmentCoronalNextButton, &QToolButton::clicked,
+            ui_->coronalNextButton, &QToolButton::click);
+    connect(ui_->treatmentCoronalResetButton, &QToolButton::clicked,
+            ui_->resetCoronalButton, &QToolButton::click);
+    connect(ui_->treatmentAxialPreviousButton, &QToolButton::clicked,
+            ui_->axialPreviousButton, &QToolButton::click);
+    connect(ui_->treatmentAxialNextButton, &QToolButton::clicked,
+            ui_->axialNextButton, &QToolButton::click);
+    connect(ui_->treatmentAxialResetButton, &QToolButton::clicked,
+            ui_->resetAxialButton, &QToolButton::click);
     for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
         view->setPointPlacementEnabled(true);
         view->setStyleSheet(QStringLiteral("background: #101820;"));
@@ -1019,23 +1061,18 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* targetingLayout = new QVBoxLayout(targetingPage);
     targetingLayout->addWidget(new TargetingExampleCanvas);
     treatmentTabs_->addTab(targetingPage, QStringLiteral("Targeting examples"));
-    treatmentBodySplitter_ = new QSplitter(Qt::Vertical, ui_->placeholderPage);
-    auto* treatmentBodySplitter = static_cast<QSplitter*>(treatmentBodySplitter_);
-    treatmentBodySplitter->setChildrenCollapsible(false);
-    treatmentBodySplitter->addWidget(treatmentMriPage_);
     auto* treatmentExtras = new QWidget(ui_->placeholderPage);
+    treatmentExtras->setMinimumSize(0, 0);
+    treatmentExtras->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     auto* treatmentExtrasLayout = new QVBoxLayout(treatmentExtras);
     treatmentExtrasLayout->setContentsMargins(0, 0, 0, 0);
     treatmentExtrasLayout->addWidget(treatmentControlsPanel_, 1);
     treatmentExtrasLayout->addWidget(treatmentTabs_, 1);
-    treatmentBodySplitter->addWidget(treatmentExtras);
-    treatmentBodySplitter->setStretchFactor(0, 1);
-    treatmentBodySplitter->setStretchFactor(1, 0);
-    // Give the MRI section the same visual priority as the Imaging and
-    // Registration viewers. The lower treatment tables remain available in
-    // the second splitter pane.
-    treatmentBodySplitter->setSizes({700, 360});
-    ui_->placeholderLayout->addWidget(treatmentBodySplitter, 1);
+    // Keep only the MRI viewer visible while the lower Treatment Plan body is
+    // being redesigned. The protocol/target widgets remain available in code
+    // but are not part of the visible page yet.
+    treatmentExtras->setVisible(false);
+    treatmentBodySplitter_ = nullptr;
 
     treatmentExecutionTitleLabel_ = new QLabel(QStringLiteral("Treatment execution"), ui_->placeholderPage);
     treatmentExecutionTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
@@ -1778,8 +1815,18 @@ bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
 }
 
 void WorkflowWindow::syncRegistrationPreviewHeights() {
-    // Viewer geometry remains owned by the Designer form.  Do not alter it
-    // from resize callbacks; this keeps maximize/restore deterministic.
+    // Viewer geometry remains owned by the Designer form.  Do not alter the
+    // Imaging/Registration panes from resize callbacks. Treatment's upper
+    // pane is deliberately matched to the actual Imaging MRI section so all
+    // three tabs present the same viewer size.
+    if (!ui_ || !treatmentBodySplitter_ || ui_->imagingGroup->height() <= 0) return;
+    auto* splitter = static_cast<QSplitter*>(treatmentBodySplitter_);
+    const int totalHeight = splitter->height();
+    const int imagingHeight = ui_->imagingGroup->height();
+    if (totalHeight > 0 && imagingHeight > 0) {
+        const int treatmentViewerHeight = std::min(imagingHeight, totalHeight);
+        splitter->setSizes({treatmentViewerHeight, totalHeight - treatmentViewerHeight});
+    }
 }
 
 WorkflowWindow::~WorkflowWindow() { delete ui_; }
@@ -2699,6 +2746,9 @@ void WorkflowWindow::showMriPreviews() {
     ui_->registrationSagittalLabel->setText(QStringLiteral("LR %1 mm").arg(lr, 0, 'f', 1));
     ui_->registrationCoronalLabel->setText(QStringLiteral("AP %1 mm").arg(ap, 0, 'f', 1));
     ui_->registrationAxialLabel->setText(QStringLiteral("IS %1 mm").arg(is, 0, 'f', 1));
+    ui_->treatmentSagittalSliceLabel->setText(QStringLiteral("LR %1 mm").arg(lr, 0, 'f', 1));
+    ui_->treatmentCoronalSliceLabel->setText(QStringLiteral("AP %1 mm").arg(ap, 0, 'f', 1));
+    ui_->treatmentAxialSliceLabel->setText(QStringLiteral("IS %1 mm").arg(is, 0, 'f', 1));
     ui_->sagittalSlider->setToolTip(QStringLiteral("LR %1 mm · %2 mm from initial center")
                                         .arg(lr, 0, 'f', 1).arg(lr - lrCenter, 0, 'f', 1));
     ui_->coronalSlider->setToolTip(QStringLiteral("AP %1 mm · %2 mm from initial center")
@@ -2737,6 +2787,8 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     const bool treatmentPlanPage = stage == beam::gui::WorkflowStage::TreatmentPlan;
     const bool treatmentExecutionPage = stage == beam::gui::WorkflowStage::Treatment;
     const bool safetyReviewPage = stage == beam::gui::WorkflowStage::SafetyReview;
+    if (ui_->treatmentMriPage)
+        ui_->treatmentMriPage->setVisible(treatmentPlanPage);
     for (QWidget* widget : {static_cast<QWidget*>(couplingTitleLabel_),
                             static_cast<QWidget*>(couplingDescriptionLabel_),
                             static_cast<QWidget*>(couplingStatusLabel_),
