@@ -653,6 +653,9 @@
                                             <height>300</height>
                                           </size>
                                         </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>420</height></size>
+                                        </property>
                                       </widget>
                                           </item>
                                           <item>
@@ -735,6 +738,9 @@
                                             <height>300</height>
                                           </size>
                                         </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>420</height></size>
+                                        </property>
                                       </widget>
                                           </item>
                                           <item>
@@ -816,6 +822,9 @@
                                             <width>300</width>
                                             <height>300</height>
                                           </size>
+                                        </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>420</height></size>
                                         </property>
                                       </widget>
                                           </item>
@@ -1263,6 +1272,9 @@
                                             <height>300</height>
                                           </size>
                                         </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>420</height></size>
+                                        </property>
                                       </widget>
                                     </item>
                                     <item>
@@ -1327,6 +1339,9 @@
                                             <height>300</height>
                                           </size>
                                         </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>420</height></size>
+                                        </property>
                                       </widget>
                                     </item>
                                     <item>
@@ -1390,6 +1405,9 @@
                                             <width>300</width>
                                             <height>300</height>
                                           </size>
+                                        </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>420</height></size>
                                         </property>
                                       </widget>
                                     </item>
@@ -1626,6 +1644,88 @@
                       </widget>
                       <widget class="QWidget" name="placeholderPage">
                         <layout class="QVBoxLayout" name="placeholderLayout">
+                          <item>
+                            <widget class="QWidget" name="treatmentMriPage">
+                              <layout class="QVBoxLayout" name="treatmentMriLayout">
+                                <property name="spacing">
+                                  <number>4</number>
+                                </property>
+                                <item>
+                                  <layout class="QHBoxLayout" name="treatmentMriViews">
+                                    <property name="spacing">
+                                      <number>4</number>
+                                    </property>
+                                    <item>
+                                      <widget class="QGroupBox" name="treatmentSagittalGroup">
+                                        <property name="title">
+                                          <string>Sagittal (LR)</string>
+                                        </property>
+                                        <layout class="QVBoxLayout" name="treatmentSagittalLayout">
+                                          <item>
+                                            <widget class="WorkflowMriView" name="treatmentSagittalPreview">
+                                              <property name="minimumSize">
+                                                <size><width>300</width><height>300</height></size>
+                                              </property>
+                                            </widget>
+                                          </item>
+                                          <item>
+                                            <widget class="QSlider" name="treatmentSagittalSlider">
+                                              <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                                              <property name="enabled"><bool>false</bool></property>
+                                            </widget>
+                                          </item>
+                                        </layout>
+                                      </widget>
+                                    </item>
+                                    <item>
+                                      <widget class="QGroupBox" name="treatmentCoronalGroup">
+                                        <property name="title">
+                                          <string>Coronal (AP)</string>
+                                        </property>
+                                        <layout class="QVBoxLayout" name="treatmentCoronalLayout">
+                                          <item>
+                                            <widget class="WorkflowMriView" name="treatmentCoronalPreview">
+                                              <property name="minimumSize">
+                                                <size><width>300</width><height>300</height></size>
+                                              </property>
+                                            </widget>
+                                          </item>
+                                          <item>
+                                            <widget class="QSlider" name="treatmentCoronalSlider">
+                                              <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                                              <property name="enabled"><bool>false</bool></property>
+                                            </widget>
+                                          </item>
+                                        </layout>
+                                      </widget>
+                                    </item>
+                                    <item>
+                                      <widget class="QGroupBox" name="treatmentAxialGroup">
+                                        <property name="title">
+                                          <string>Axial (IS)</string>
+                                        </property>
+                                        <layout class="QVBoxLayout" name="treatmentAxialLayout">
+                                          <item>
+                                            <widget class="WorkflowMriView" name="treatmentAxialPreview">
+                                              <property name="minimumSize">
+                                                <size><width>300</width><height>300</height></size>
+                                              </property>
+                                            </widget>
+                                          </item>
+                                          <item>
+                                            <widget class="QSlider" name="treatmentAxialSlider">
+                                              <property name="orientation"><enum>Qt::Horizontal</enum></property>
+                                              <property name="enabled"><bool>false</bool></property>
+                                            </widget>
+                                          </item>
+                                        </layout>
+                                      </widget>
+                                    </item>
+                                  </layout>
+                                </item>
+                              </layout>
+                            </widget>
+                          </item>
                           <item>
                             <widget class="QLabel" name="placeholderText">
                               <property name="text">

@@ -73,15 +73,10 @@ AffineArrayResult registerCurrentTransducerPosition(const beam::array::ArrayData
     const AffineArrayResult fiducialFit = registerArrayToFiducials(originArrayData, mriFiducialsMm);
 
     TransducerBasis basis = getTranslationMatrixFromTransducerFiducials(fiducialFit.fiducialMarkers);
-    Eigen::Vector3d zVector = basis.zVector;
-    if (zVector.z() < 0.0) {
-        zVector = -zVector;
-    }
-
     Eigen::Matrix3d m;
     m.col(0) = basis.xVector;
     m.col(1) = basis.yVector;
-    m.col(2) = zVector;
+    m.col(2) = basis.zVector;
 
     const double dH = horizontalSliderValue - 1.0;
     const double dV = verticalSliderValue - 1.0;
