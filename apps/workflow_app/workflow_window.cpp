@@ -612,27 +612,35 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     };
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
-        connect(slider, &QSlider::valueChanged, this, [invalidateCurrentPositionRegistration] {
-            invalidateCurrentPositionRegistration();
+        connect(slider, &QSlider::valueChanged, this, [this, invalidateCurrentPositionRegistration] {
+            // Let QSlider finish dispatching its native value-change event
+            // before changing registration controls. Updating enabled states
+            // from inside that event can strand the mouse grab on Windows.
+            QTimer::singleShot(0, this, [invalidateCurrentPositionRegistration] {
+                invalidateCurrentPositionRegistration();
+            });
         });
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
         connect(slider, &QSlider::sliderPressed, this, [this] {
             // Pressing a calibration track is an explicit request to review
             // or redo Step 3, even when the handle is pressed at its current
-            // value and therefore emits no valueChanged signal.
-            if (registrationLockPositionRegistered())
-                setRegistrationPhase(RegistrationPhase::FitApplied);
-            else
-                updateRegistrationAvailability();
+            // value and therefore emits no valueChanged signal. Defer the
+            // state change until after the native press event completes.
+            QTimer::singleShot(0, this, [this] {
+                if (registrationLockPositionRegistered())
+                    setRegistrationPhase(RegistrationPhase::FitApplied);
+                else
+                    updateRegistrationAvailability();
+            });
         });
     connect(registerCurrentPositionButton_, &QPushButton::clicked, this,
             [this] { performCurrentPositionRegistration(); });
     registerCurrentPositionButton_->setEnabled(false);
 
-    // The imaging page starts as an uncluttered source-data review; users can
-    // explicitly reveal fiducials there. Registration keeps them visible.
-    ui_->showFiducialsCheckBox->setChecked(false);
+    // Fiducials are part of the operator's spatial reference and are visible
+    // by default on Imaging, Registration, and Treatment. The Designer file
+    // carries the same default; do not override it here.
     for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->coronalPreviousButton,
                                 ui_->axialPreviousButton, ui_->registrationSagittalPreviousButton,
                                 ui_->registrationCoronalPreviousButton, ui_->registrationAxialPreviousButton}) {
@@ -707,6 +715,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             "QCheckBox::indicator:checked { image: url(:/checkbox/checkbox_checked.xpm); }"));
     }
     for (std::size_t i = 0; i < stageCount; ++i) ui_->stageList->addItem(QString());
+    // Hardware readiness is not a prerequisite for offline MRI loading and
+    // registration. Keep the internal stage for later device integration, but
+    // remove it from the operator workflow for this release.
+    ui_->stageList->item(static_cast<int>(beam::gui::WorkflowStage::SystemCheck))->setHidden(true);
+    ui_->deviceGroup->hide();
     // Correction is executed as part of the combined Correction & coupling
     // gate; keep its workflow state internally but do not present a duplicate
     // navigation tab to the operator.
@@ -793,6 +806,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         ui_->placeholderPage);
     treatmentPlanDescriptionLabel_->setWordWrap(true);
     treatmentPlanDescriptionLabel_->setStyleSheet(QStringLiteral("QLabel { color: #c8d9de; padding: 4px 0 10px 0; }"));
+    treatmentPlanTitleLabel_->hide();
+    treatmentPlanDescriptionLabel_->hide();
     treatmentPlanTargetLabel_ = new QLabel(QStringLiteral("Registered target: not available"), ui_->placeholderPage);
     treatmentPlanTargetLabel_->setStyleSheet(QStringLiteral(
         "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
@@ -862,7 +877,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         treatmentMriPage_);
     treatmentMriInstruction->setWordWrap(true);
     treatmentMriInstruction->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; padding: 4px; }"));
-    treatmentMriLayout->addWidget(treatmentMriInstruction);
+    treatmentMriInstruction->hide();
     auto* treatmentViewerControls = new QHBoxLayout;
     auto* treatmentShowField = new QCheckBox(QStringLiteral("Show field"), treatmentMriPage_);
     auto* treatmentShowTarget = new QCheckBox(QStringLiteral("Show target"), treatmentMriPage_);
@@ -883,8 +898,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* treatmentBrightnessReset = new QToolButton(treatmentMriPage_);
     treatmentBrightnessReset->setText(QStringLiteral("Reset"));
     treatmentBrightnessReset->setToolTip(QStringLiteral("Reset MRI view brightness"));
-    treatmentViewerControls->addWidget(treatmentBrightnessDown);
     treatmentViewerControls->addWidget(treatmentBrightnessUp);
+    treatmentViewerControls->addWidget(treatmentBrightnessDown);
     treatmentViewerControls->addWidget(treatmentBrightnessReset);
     auto* treatmentTransparencyLabel = new QLabel(QStringLiteral("Transducer transparency"), treatmentMriPage_);
     auto* treatmentTransparency = new QSlider(Qt::Horizontal, treatmentMriPage_);
@@ -999,8 +1014,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentBodySplitter->setStretchFactor(0, 3);
     treatmentBodySplitter->setStretchFactor(1, 2);
     treatmentBodySplitter->setSizes({520, 360});
-    ui_->placeholderLayout->addWidget(treatmentPlanTitleLabel_);
-    ui_->placeholderLayout->addWidget(treatmentPlanDescriptionLabel_);
     ui_->placeholderLayout->addWidget(treatmentBodySplitter, 1);
 
     treatmentExecutionTitleLabel_ = new QLabel(QStringLiteral("Treatment execution"), ui_->placeholderPage);
@@ -1368,8 +1381,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     const auto adjustAllViewBrightness = [this](double amount) {
         for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
                                      ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
-                                     ui_->registrationAxialPreview})
-            view->adjustBrightness(amount);
+                                     ui_->registrationAxialPreview, treatmentSagittalPreview_,
+                                     treatmentCoronalPreview_, treatmentAxialPreview_}) {
+            if (view)
+                view->adjustBrightness(amount);
+        }
     };
     for (QToolButton* button : {ui_->brightnessDownButton, ui_->registrationBrightnessDownButton})
         connect(button, &QToolButton::clicked, this, [adjustAllViewBrightness] { adjustAllViewBrightness(-0.1); });
@@ -1378,8 +1394,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     const auto resetAllViewBrightness = [this] {
         for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
                                      ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
-                                     ui_->registrationAxialPreview})
-            view->resetBrightness();
+                                     ui_->registrationAxialPreview, treatmentSagittalPreview_,
+                                     treatmentCoronalPreview_, treatmentAxialPreview_}) {
+            if (view)
+                view->resetBrightness();
+        }
     };
     connect(ui_->resetAllMriViewsButton, &QToolButton::clicked, this, resetAllViewBrightness);
     connect(ui_->registrationResetAllMriViewsButton, &QToolButton::clicked, this, resetAllViewBrightness);
@@ -1452,7 +1471,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     };
     for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
         view->setPointPickedHandler(treatmentPointPicked);
-        view->setNavigationCrosshairVisible(true);
+        view->setNavigationCrosshairVisible(treatmentShowNavigation->isChecked());
     }
     connect(treatmentTargetTable_, &QTableWidget::currentCellChanged, this,
             [this](int row, int, int, int) {
@@ -1770,6 +1789,22 @@ void WorkflowWindow::syncRegistrationPreviewHeights() {
                       view->maximumHeight() == registrationPreviewHeight) continue;
         view->setMinimumHeight(registrationPreviewHeight);
         view->setMaximumHeight(registrationPreviewHeight);
+    }
+    // Treatment uses the same three-plane viewer geometry as Registration.
+    // Keep the top MRI pane large enough that its previews are not compressed
+    // by the protocol controls below.
+    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
+        if (!view) continue;
+        view->setMinimumHeight(registrationPreviewHeight);
+        view->setMaximumHeight(registrationPreviewHeight);
+    }
+    if (treatmentMriPage_) {
+        treatmentMriPage_->setMinimumHeight(registrationGroupHeight + 70);
+        treatmentMriPage_->setMaximumHeight(QWIDGETSIZE_MAX);
+    }
+    if (treatmentBodySplitter_) {
+        auto* splitter = static_cast<QSplitter*>(treatmentBodySplitter_);
+        splitter->setSizes({registrationGroupHeight + 70, 360});
     }
 }
 
@@ -2273,7 +2308,12 @@ void WorkflowWindow::updateRegistrationAvailability() {
     ui_->acceptRegistrationButton->setEnabled(registrationPhase_ == RegistrationPhase::LockPositionRegistered);
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_}) {
-        if (slider) slider->setEnabled(calibrationReady);
+        // Do not write the enabled state back on every slider event. Qt is
+        // still dispatching the mouse press/value change at that point, and
+        // re-applying setEnabled() to the active slider can leave the native
+        // slider interaction stuck. Only change the state when it differs.
+        if (slider && slider->isEnabled() != calibrationReady)
+            slider->setEnabled(calibrationReady);
     }
     updateRegistrationStepIndicators();
 }
@@ -2734,8 +2774,6 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                             static_cast<QWidget*>(correctionProgressBar_),
                             static_cast<QWidget*>(runCorrectionButton_),
                             static_cast<QWidget*>(acceptCorrectionButton_),
-                            static_cast<QWidget*>(treatmentPlanTitleLabel_),
-                            static_cast<QWidget*>(treatmentPlanDescriptionLabel_),
                             static_cast<QWidget*>(treatmentPlanTargetLabel_),
                             static_cast<QWidget*>(treatmentProtocolLabel_),
                             static_cast<QWidget*>(treatmentProtocolCombo_),
@@ -2765,8 +2803,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         const bool isCorrectionWidget = widget == correctionTitleLabel_ || widget == correctionDescriptionLabel_ ||
                                         widget == correctionStatusLabel_ || widget == correctionProgressBar_ ||
                                         widget == runCorrectionButton_ || widget == acceptCorrectionButton_;
-        const bool isTreatmentWidget = widget == treatmentPlanTitleLabel_ || widget == treatmentPlanDescriptionLabel_ ||
-                                       widget == treatmentPlanTargetLabel_ || widget == treatmentProtocolLabel_ ||
+        const bool isTreatmentWidget = widget == treatmentPlanTargetLabel_ || widget == treatmentProtocolLabel_ ||
                                        widget == treatmentProtocolCombo_ || widget == treatmentTargetTableLabel_ ||
                                        widget == treatmentTargetTable_ || widget == treatmentProtocolTableLabel_ ||
                                        widget == treatmentProtocolTable_ || widget == addSonicationButton_ ||
@@ -2857,6 +2894,11 @@ void WorkflowWindow::completeCurrentStage() {
     if (!workflow_.complete(selectedStage_, &reason)) {
         showMessage(QString::fromStdString(reason), true);
         return;
+    }
+    if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup) {
+        // Mark the optional hardware gate complete so Imaging is immediately
+        // available for NIfTI, DICOM, and saved Beam-session workflows.
+        workflow_.complete(beam::gui::WorkflowStage::SystemCheck, nullptr);
     }
     showMessage(QStringLiteral("%1 complete.").arg(QString::fromUtf8(beam::gui::workflowStageName(selectedStage_).data())), false);
     const auto next = workflow_.nextStage();

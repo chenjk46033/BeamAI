@@ -258,33 +258,7 @@
                                     </property>
                                   </widget>
                                 </item>
-                                <item row="3" column="0">
-                                  <widget class="QLabel" name="protocolLabel">
-                                    <property name="text">
-                                      <string>Protocol</string>
-                                    </property>
-                                  </widget>
-                                </item>
                                 <item row="3" column="1">
-                                  <widget class="QComboBox" name="protocolCombo">
-                                    <item>
-                                      <property name="text">
-                                        <string>PainSCCandAMCC</string>
-                                      </property>
-                                    </item>
-                                    <item>
-                                      <property name="text">
-                                        <string>PainAMCCandSCC</string>
-                                      </property>
-                                    </item>
-                                    <item>
-                                      <property name="text">
-                                        <string>PainACC</string>
-                                      </property>
-                                    </item>
-                                  </widget>
-                                </item>
-                                <item row="4" column="1">
                                   <widget class="QPushButton" name="acceptCaseButton">
                                     <property name="text">
                                       <string>Accept case and continue →</string>
