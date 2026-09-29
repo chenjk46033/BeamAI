@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QSize>
 #include <array>
+#include <memory>
 
 #include "gui/treatment_workflow.hpp"
 #include "array/array_types.hpp"
@@ -13,17 +15,36 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class WorkflowShell; }
 class QGroupBox;
 class QLabel;
+class QListWidget;
 class QPushButton;
 class QProgressBar;
+class QRadioButton;
 class QSlider;
+class QSpacerItem;
+class QSpinBox;
 class QComboBox;
+class QTableView;
 class QTableWidget;
 class QCheckBox;
 class QTabWidget;
+class QTimer;
 class WorkflowMriView;
 class QWidget;
 class QGroupBox;
 QT_END_NAMESPACE
+
+// The Treatment plan and Treatment stages reuse BeamV0's own Sonicate-tab
+// models and plots; see treatment_plan_body.cpp.
+namespace beam::gui_qt {
+class PulseWaveformView;
+class StimParamTableModel;
+class TotalSonicationView;
+class TreatmentProtocolTableModel;
+}  // namespace beam::gui_qt
+
+namespace beam::serialcom {
+class SerialPort;
+}  // namespace beam::serialcom
 
 namespace beam::app {
 
@@ -67,6 +88,42 @@ private:
     void refresh();
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
+
+    // Treatment plan stage (BeamV0's Sonicate tab) -- treatment_plan_body.cpp.
+    void buildTreatmentPlanBody(const QString& acceptButtonStyle);
+    void wireTreatmentPlanBody();
+    void addTargetListRow(const QString& name, int atRow = -1);
+    void loadSelectedTargetPosition();
+    void updateStimGridHeight();
+    void loadTreatmentProtocol(const QString& protocolName);
+    void selectSonicationRow(int row);
+    int selectedSonicationRow() const;
+    void setSonicationTargetFromMri(const Eigen::Vector3d& positionMm);
+    void focusTreatmentViewsOn(const Eigen::Vector3d& positionMm);
+    void updateTreatmentPlanSummary();
+    void updateSonicationPlots();
+    void updateBestTargets();
+    void updateExampleTargetImage();
+
+    // Treatment stage: the firing half of that tab, gated behind Safety
+    // Review by the workflow model rather than by a button's enabled state.
+    void buildTreatmentExecutionBody(const QString& acceptButtonStyle);
+    void setSerialConnectedLamp(bool connected);
+    void runSonication(bool sham);
+    void startSonicationCountdown(int durationSeconds);
+    void abortSonication();
+    void finishTreatmentStage();
+
+    // app.sys.RTT(1).couplingThreshold. beam_app's port uses the same value.
+    static constexpr double kCouplingThreshold = 0.10;
+    // Height the Treatment plan body is guaranteed under the MRI viewers; it
+    // scrolls below that rather than squeezing them. syncMriViewerHeights
+    // reserves it so the viewers stay the same size as on the other stages.
+    static constexpr int kTreatmentBodyMinHeight = 420;
+    // Fixed viewer height for the Treatment plan stage, which shares its page
+    // with the whole Sonicate body. Small enough that the body fits under it
+    // on an ordinary screen, large enough to place a target in.
+    static constexpr int kTreatmentViewerHeight = 360;
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
@@ -120,32 +177,70 @@ private:
     QLabel* treatmentPlanDescriptionLabel_ = nullptr;
     QLabel* treatmentPlanTargetLabel_ = nullptr;
     QLabel* treatmentProtocolLabel_ = nullptr;
-    QLabel* treatmentTargetTableLabel_ = nullptr;
-    QLabel* treatmentProtocolTableLabel_ = nullptr;
     QComboBox* treatmentProtocolCombo_ = nullptr;
-    QTableWidget* treatmentTargetTable_ = nullptr;
-    QTableWidget* treatmentProtocolTable_ = nullptr;
-    QPushButton* addSonicationButton_ = nullptr;
-    QPushButton* removeSonicationButton_ = nullptr;
     QTabWidget* treatmentTabs_ = nullptr;
     QPushButton* acceptTreatmentPlanButton_ = nullptr;
     QWidget* treatmentMriPage_ = nullptr;
-    QWidget* treatmentBodySplitter_ = nullptr;
     int mriHeightSyncPasses_ = 0;
-    QWidget* treatmentControlsPanel_ = nullptr;
+    QSize lastMriSyncWindowSize_;
+    QSpacerItem* placeholderTailSpacer_ = nullptr;
     QGroupBox* calibrationGroup_ = nullptr;
+    // Treatment plan body: BeamV0's Sonicate-tab planning half.
+    QWidget* treatmentPlanBody_ = nullptr;
+    beam::gui_qt::StimParamTableModel* stimParamModel_ = nullptr;
+    beam::gui_qt::TreatmentProtocolTableModel* protocolModel_ = nullptr;
+    QTableView* stimParamView_ = nullptr;
+    QTableView* protocolView_ = nullptr;
+    QListWidget* targetListWidget_ = nullptr;
+    QPushButton* moveToTargetButton_ = nullptr;
+    QPushButton* sortByOrderButton_ = nullptr;
+    QPushButton* addSonicationButton_ = nullptr;
+    QPushButton* removeSonicationButton_ = nullptr;
+    QComboBox* visitNumberCombo_ = nullptr;
+    QPushButton* newVisitButton_ = nullptr;
+    QRadioButton* hydrogelSmallRadio_ = nullptr;
+    QRadioButton* hydrogelMediumRadio_ = nullptr;
+    QRadioButton* hydrogelLargeRadio_ = nullptr;
+    QSpinBox* currentSonicationNumberEdit_ = nullptr;
+    QComboBox* accFlagCombo_ = nullptr;
+    QPushButton* computeBestTargetsButton_ = nullptr;
+    QListWidget* bestTargetsList_ = nullptr;
+    QLabel* exampleTargetImage_ = nullptr;
+    QLabel* exampleTargetImage2_ = nullptr;
+    QLabel* exampleTargetImage3_ = nullptr;
+    QLabel* exampleTargetText_ = nullptr;
+    beam::gui_qt::PulseWaveformView* pulsePlotView_ = nullptr;
+    beam::gui_qt::PulseWaveformView* burstPlotView_ = nullptr;
+    beam::gui_qt::TotalSonicationView* timelineView_ = nullptr;
     WorkflowMriView* treatmentSagittalPreview_ = nullptr;
     WorkflowMriView* treatmentCoronalPreview_ = nullptr;
     WorkflowMriView* treatmentAxialPreview_ = nullptr;
     QSlider* treatmentSagittalSlider_ = nullptr;
     QSlider* treatmentCoronalSlider_ = nullptr;
     QSlider* treatmentAxialSlider_ = nullptr;
+    // Treatment execution body: that tab's firing half.
+    QWidget* treatmentExecutionBody_ = nullptr;
     QLabel* treatmentExecutionTitleLabel_ = nullptr;
     QLabel* treatmentExecutionDescriptionLabel_ = nullptr;
     QLabel* treatmentExecutionStatusLabel_ = nullptr;
     QProgressBar* treatmentExecutionProgressBar_ = nullptr;
     QPushButton* startTreatmentButton_ = nullptr;
     QPushButton* abortTreatmentButton_ = nullptr;
+    QPushButton* shamButton_ = nullptr;
+    QPushButton* finishTreatmentButton_ = nullptr;
+    QComboBox* serialPortCombo_ = nullptr;
+    QPushButton* serialConnectButton_ = nullptr;
+    QLabel* serialConnectedLamp_ = nullptr;
+    QComboBox* triggerModeCombo_ = nullptr;
+    QLabel* sonicationCountdownLabel_ = nullptr;
+    QTimer* sonicationCountdownTimer_ = nullptr;
+    int sonicationCountdownSeconds_ = 0;
+    int sonicationCountdownTicks_ = 0;
+    std::unique_ptr<beam::serialcom::SerialPort> serialLink_;
+    // The through-transmit amplitude the Correction stage measured.
+    // prepareSonication compares it against kCouplingThreshold, so it has to
+    // outlive that measurement rather than only its pass/fail verdict.
+    double transmissionAmplitude_ = 0.0;
     QLabel* safetyReviewTitleLabel_ = nullptr;
     QLabel* safetyReviewDescriptionLabel_ = nullptr;
     QLabel* safetyReviewStatusLabel_ = nullptr;

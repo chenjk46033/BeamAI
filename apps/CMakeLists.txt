@@ -58,14 +58,30 @@ if(Qt6_FOUND AND TARGET gui_qt)
         workflow_app/registration_fiducial_layout.hpp
         workflow_app/workflow_window.cpp
         workflow_app/workflow_window.hpp
+        # The Treatment plan and Treatment stage bodies (BeamV0's Sonicate tab,
+        # re-homed into this workflow's stage model). Its own translation unit
+        # so the shell's constructor does not grow another several hundred
+        # lines.
+        workflow_app/treatment_plan_body.cpp
         workflow_app/resources/workflow_resources.qrc
         ../designer/workflow_shell.ui
+        # AUTORCC compiles this into the Targeting Examples sub-tab's
+        # reference images -- BeamV0.mlapp's own SonicationTab/ExampleTargets.
+        ../designer/resources/example_targets.qrc
     )
     target_include_directories(workflow_app PRIVATE workflow_app)
-    target_link_libraries(workflow_app PRIVATE gui mri correction serialcom infra_dicom infra_mat Qt6::Widgets)
+    target_link_libraries(workflow_app PRIVATE gui gui_qt_models gui_qt_views mri correction stimulation sham
+                                                serialcom infra_dicom infra_mat Qt6::Widgets)
     set_target_properties(workflow_app PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
         AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../designer")
     beam_deploy_qt_platform(workflow_app)
 else()
     message(STATUS "Qt6 not found -- skipping beam_app.")
 endif()
+
+
+
+
+
+
+

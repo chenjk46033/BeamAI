@@ -12,14 +12,9 @@ endif()
 add_library(gui_qt STATIC
     src/safety_report_view.cpp
     src/correction_tab_chart.cpp
-    src/chart_axis_utils.cpp
     src/sonication_tab_chart.cpp
-    src/stim_param_table_model.cpp
-    src/treatment_protocol_table_model.cpp
     src/fiducial_table_model.cpp
     src/mri_slice_view.cpp
-    src/total_sonication_view.cpp
-    src/pulse_waveform_view.cpp
     src/zoomable_image_view.cpp
     src/main_window.cpp
     src/startup_screen_window.cpp
@@ -35,15 +30,12 @@ add_library(gui_qt STATIC
     # their .cpp, so the include-path heuristic alone misses them):
     include/gui_qt/safety_report_view.hpp
     include/gui_qt/main_window.hpp
-    include/gui_qt/stim_param_table_model.hpp
-    include/gui_qt/treatment_protocol_table_model.hpp
     include/gui_qt/fiducial_table_model.hpp
     include/gui_qt/mri_slice_view.hpp
-    include/gui_qt/total_sonication_view.hpp
     include/gui_qt/zoomable_image_view.hpp
     include/gui_qt/startup_screen_window.hpp
 )
 target_include_directories(gui_qt PUBLIC include)
-target_link_libraries(gui_qt PUBLIC gui mri Qt6::Widgets Qt6::Charts)
+target_link_libraries(gui_qt PUBLIC gui gui_qt_models gui_qt_views mri Qt6::Widgets Qt6::Charts)
 set_target_properties(gui_qt PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
     AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../designer")

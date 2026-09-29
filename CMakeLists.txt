@@ -29,6 +29,8 @@ add_subdirectory(libs/serialcom)
 add_subdirectory(libs/sham)
 add_subdirectory(libs/safety)
 add_subdirectory(libs/gui)
+add_subdirectory(libs/gui_qt_models)
+add_subdirectory(libs/gui_qt_views)
 add_subdirectory(libs/gui_qt)
 add_subdirectory(apps)
 

@@ -402,16 +402,16 @@
                                 <item>
                                   <layout class="QHBoxLayout" name="loadMriButtons">
                                     <item>
-                                      <widget class="QPushButton" name="loadNiftiButton">
+                                      <widget class="QPushButton" name="loadDicomButton">
                                         <property name="text">
-                                          <string>Load NIfTI file…</string>
+                                          <string>Load DICOM folder…</string>
                                         </property>
                                       </widget>
                                     </item>
                                     <item>
-                                      <widget class="QPushButton" name="loadDicomButton">
+                                      <widget class="QPushButton" name="loadNiftiButton">
                                         <property name="text">
-                                          <string>Load DICOM folder…</string>
+                                          <string>Load NIfTI file…</string>
                                         </property>
                                       </widget>
                                     </item>
