@@ -250,13 +250,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // below the viewers.
     ui_->imagingLayout->setAlignment(Qt::AlignTop);
     ui_->registrationLayout->setAlignment(Qt::AlignTop);
-    ui_->imagingGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    ui_->imagingGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     ui_->registrationImages->setAlignment(Qt::AlignTop);
     for (QGroupBox* group : {ui_->registrationSagittalGroup,
                              ui_->registrationCoronalGroup,
                              ui_->registrationAxialGroup}) {
-        group->setMaximumHeight(484);
-        group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        group->setMaximumHeight(QWIDGETSIZE_MAX);
+        group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     }
     // Keep the loaded-file line compact.  Its parent layout can otherwise
     // stretch the word-wrapped QLabel vertically, leaving large dark bands
@@ -961,6 +961,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentSagittalSlider_ = ui_->treatmentSagittalSlider;
     treatmentCoronalSlider_ = ui_->treatmentCoronalSlider;
     treatmentAxialSlider_ = ui_->treatmentAxialSlider;
+    for (QGroupBox* group : {ui_->treatmentSagittalGroup,
+                             ui_->treatmentCoronalGroup,
+                             ui_->treatmentAxialGroup}) {
+        group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    }
     for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
         view->setPointPlacementEnabled(true);
         view->setStyleSheet(QStringLiteral("background: #101820;"));
@@ -1024,9 +1029,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentExtrasLayout->addWidget(treatmentControlsPanel_, 1);
     treatmentExtrasLayout->addWidget(treatmentTabs_, 1);
     treatmentBodySplitter->addWidget(treatmentExtras);
-    treatmentBodySplitter->setStretchFactor(0, 3);
-    treatmentBodySplitter->setStretchFactor(1, 2);
-    treatmentBodySplitter->setSizes({520, 360});
+    treatmentBodySplitter->setStretchFactor(0, 1);
+    treatmentBodySplitter->setStretchFactor(1, 0);
+    // Give the MRI section the same visual priority as the Imaging and
+    // Registration viewers. The lower treatment tables remain available in
+    // the second splitter pane.
+    treatmentBodySplitter->setSizes({700, 360});
     ui_->placeholderLayout->addWidget(treatmentBodySplitter, 1);
 
     treatmentExecutionTitleLabel_ = new QLabel(QStringLiteral("Treatment execution"), ui_->placeholderPage);
@@ -1770,9 +1778,8 @@ bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
 }
 
 void WorkflowWindow::syncRegistrationPreviewHeights() {
-    // Imaging and Registration viewer geometry is owned by the Designer form.
-    // Do not rewrite widget sizes after maximize/restore; doing so caused the
-    // image panes to drift and grow differently across tabs.
+    // Viewer geometry remains owned by the Designer form.  Do not alter it
+    // from resize callbacks; this keeps maximize/restore deterministic.
 }
 
 WorkflowWindow::~WorkflowWindow() { delete ui_; }

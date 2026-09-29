@@ -153,13 +153,13 @@
               <widget class="QListWidget" name="stageList">
                 <property name="minimumSize">
                   <size>
-                    <width>255</width>
+                    <width>205</width>
                     <height>0</height>
                   </size>
                 </property>
                 <property name="maximumSize">
                   <size>
-                    <width>255</width>
+                    <width>205</width>
                     <height>16777215</height>
                   </size>
                 </property>
@@ -654,7 +654,7 @@
                                           </size>
                                         </property>
                                         <property name="maximumSize">
-                                          <size><width>16777215</width><height>420</height></size>
+                                          <size><width>16777215</width><height>16777215</height></size>
                                         </property>
                                       </widget>
                                           </item>
@@ -739,7 +739,7 @@
                                           </size>
                                         </property>
                                         <property name="maximumSize">
-                                          <size><width>16777215</width><height>420</height></size>
+                                          <size><width>16777215</width><height>16777215</height></size>
                                         </property>
                                       </widget>
                                           </item>
@@ -824,7 +824,7 @@
                                           </size>
                                         </property>
                                         <property name="maximumSize">
-                                          <size><width>16777215</width><height>420</height></size>
+                                          <size><width>16777215</width><height>16777215</height></size>
                                         </property>
                                       </widget>
                                           </item>
@@ -1273,7 +1273,7 @@
                                           </size>
                                         </property>
                                         <property name="maximumSize">
-                                          <size><width>16777215</width><height>420</height></size>
+                                          <size><width>16777215</width><height>16777215</height></size>
                                         </property>
                                       </widget>
                                     </item>
@@ -1340,7 +1340,7 @@
                                           </size>
                                         </property>
                                         <property name="maximumSize">
-                                          <size><width>16777215</width><height>420</height></size>
+                                          <size><width>16777215</width><height>16777215</height></size>
                                         </property>
                                       </widget>
                                     </item>
@@ -1407,7 +1407,7 @@
                                           </size>
                                         </property>
                                         <property name="maximumSize">
-                                          <size><width>16777215</width><height>420</height></size>
+                                          <size><width>16777215</width><height>16777215</height></size>
                                         </property>
                                       </widget>
                                     </item>
@@ -1660,11 +1660,17 @@
                                         <property name="title">
                                           <string>Sagittal (LR)</string>
                                         </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>16777215</height></size>
+                                        </property>
                                         <layout class="QVBoxLayout" name="treatmentSagittalLayout">
                                           <item>
                                             <widget class="WorkflowMriView" name="treatmentSagittalPreview">
                                               <property name="minimumSize">
                                                 <size><width>300</width><height>300</height></size>
+                                              </property>
+                                              <property name="maximumSize">
+                                                <size><width>16777215</width><height>16777215</height></size>
                                               </property>
                                             </widget>
                                           </item>
@@ -1682,11 +1688,17 @@
                                         <property name="title">
                                           <string>Coronal (AP)</string>
                                         </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>16777215</height></size>
+                                        </property>
                                         <layout class="QVBoxLayout" name="treatmentCoronalLayout">
                                           <item>
                                             <widget class="WorkflowMriView" name="treatmentCoronalPreview">
                                               <property name="minimumSize">
                                                 <size><width>300</width><height>300</height></size>
+                                              </property>
+                                              <property name="maximumSize">
+                                                <size><width>16777215</width><height>16777215</height></size>
                                               </property>
                                             </widget>
                                           </item>
@@ -1704,11 +1716,17 @@
                                         <property name="title">
                                           <string>Axial (IS)</string>
                                         </property>
+                                        <property name="maximumSize">
+                                          <size><width>16777215</width><height>16777215</height></size>
+                                        </property>
                                         <layout class="QVBoxLayout" name="treatmentAxialLayout">
                                           <item>
                                             <widget class="WorkflowMriView" name="treatmentAxialPreview">
                                               <property name="minimumSize">
                                                 <size><width>300</width><height>300</height></size>
+                                              </property>
+                                              <property name="maximumSize">
+                                                <size><width>16777215</width><height>16777215</height></size>
                                               </property>
                                             </widget>
                                           </item>
