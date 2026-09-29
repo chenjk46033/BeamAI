@@ -66,7 +66,7 @@ private:
     void updateRegistrationStepIndicators();
     void refresh();
     void showMessage(const QString& text, bool error);
-    void syncRegistrationPreviewHeights();
+    void syncMriViewerHeights();
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
@@ -131,6 +131,7 @@ private:
     QPushButton* acceptTreatmentPlanButton_ = nullptr;
     QWidget* treatmentMriPage_ = nullptr;
     QWidget* treatmentBodySplitter_ = nullptr;
+    int mriHeightSyncPasses_ = 0;
     QWidget* treatmentControlsPanel_ = nullptr;
     QGroupBox* calibrationGroup_ = nullptr;
     WorkflowMriView* treatmentSagittalPreview_ = nullptr;

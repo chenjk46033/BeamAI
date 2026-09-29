@@ -223,6 +223,12 @@ double normalizedAxisPosition(const Eigen::VectorXd& axis, double mm) {
     return std::clamp((mm - axis(0)) / (axis(axis.size() - 1) - axis(0)), 0.0, 1.0);
 }
 
+// Bounds for the shared MRI viewer height chosen in syncMriViewerHeights().
+// The floor is the Designer form's own minimum, so a short window degrades to
+// the layout the form describes rather than to unreadable slivers.
+constexpr int kMinMriViewerHeight = 300;
+constexpr int kMaxMriViewerHeight = 900;
+
 QString statusSymbol(beam::gui::WorkflowStatus status) {
     switch (status) {
         case beam::gui::WorkflowStatus::Complete: return QStringLiteral("✓");
@@ -244,24 +250,32 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->pageTitle->hide();
     ui_->pageSubtitle->hide();
     ui_->contentLayout->setContentsMargins(28, 0, 28, 12);
-    // Keep the bounded MRI sections packed at the top of their pages.  Without
-    // this, a maximized window gives the page layout's spare height to the
-    // section after the slice labels, producing a large dark band immediately
-    // below the viewers.
-    ui_->imagingLayout->setAlignment(Qt::AlignTop);
-    ui_->registrationLayout->setAlignment(Qt::AlignTop);
+    // Imaging, Registration and Treatment plan all show the same three MRI
+    // viewers, so one rule sizes them on every page: a viewer column is as
+    // tall as its own content (the 300x300 minimum from the Designer form
+    // plus the slider row and slice label) and no taller.  A vertically Fixed
+    // policy is what enforces that -- alignment alone does not, because a box
+    // layout hands a nested row the full height it allocated regardless of the
+    // row's alignment.  Left growable, each column would instead swallow a
+    // share of whatever vertical space the rest of its page left over, which
+    // differs per page, so the viewers came out a different size on each tab.
+    for (QHBoxLayout* mriRow : {ui_->mriPreviewLayout, ui_->registrationImages,
+                                ui_->treatmentMriViews})
+        mriRow->setAlignment(Qt::AlignTop);
+    for (QGroupBox* group : {ui_->sagittalGroup, ui_->coronalGroup, ui_->axialGroup,
+                             ui_->registrationSagittalGroup, ui_->registrationCoronalGroup,
+                             ui_->registrationAxialGroup, ui_->treatmentSagittalGroup,
+                             ui_->treatmentCoronalGroup, ui_->treatmentAxialGroup})
+        group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    // Spare page height belongs below the viewers.  Registration gives it to
+    // the marker splitter and Treatment plan to the trailing stretch shared by
+    // every placeholder page; Imaging has no expanding section of its own, so
+    // a stretch below the group box collects the slack instead of letting it
+    // inflate the legend, metadata and accept rows.
     ui_->imagingGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    ui_->registrationImages->setAlignment(Qt::AlignTop);
+    ui_->imagingLayout->addStretch(1);
     ui_->placeholderPage->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     ui_->placeholderLayout->setContentsMargins(0, 0, 0, 0);
-    ui_->placeholderLayout->setStretch(0, 1);
-    ui_->treatmentMriLayout->setStretch(1, 1);
-    for (QGroupBox* group : {ui_->registrationSagittalGroup,
-                             ui_->registrationCoronalGroup,
-                             ui_->registrationAxialGroup}) {
-        group->setMaximumHeight(QWIDGETSIZE_MAX);
-        group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    }
     // Keep the loaded-file line compact.  Its parent layout can otherwise
     // stretch the word-wrapped QLabel vertically, leaving large dark bands
     // above and below the filename.
@@ -351,7 +365,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // layout can otherwise compress the image widgets vertically.  Once the
     // window has been laid out, use the Imaging preview height as the shared
     // reference for both tabs.
-    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
+    QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 
     // Keep the registration actions in their Designer order: immediately
     // below the marker table, after the operator has reviewed the layouts.
@@ -403,48 +417,34 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationFiducialLayout->setFixedHeight(120);
     markerDiagramPanel->setMinimumHeight(264);
     markerDiagramPanel->setMaximumHeight(QWIDGETSIZE_MAX);
-    for (QVBoxLayout* layout : {ui_->registrationSagittalLayout,
-                                ui_->registrationCoronalLayout,
-                                ui_->registrationAxialLayout}) {
-        layout->setContentsMargins(4, 3, 4, 2);
-        layout->setSpacing(0);
+    // Every viewer column on every page is built the same way: tight margins
+    // around the viewer, then the slider row, then a compact centred slice
+    // label.  Keeping the nine columns in one list is what makes the three
+    // pages agree on the height a viewer column occupies.
+    struct SliceColumn {
+        QVBoxLayout* layout;
+        QLabel* label;
+    };
+    for (const SliceColumn column : {
+             SliceColumn{ui_->sagittalLayout, ui_->sagittalSliceLabel},
+             SliceColumn{ui_->coronalLayout, ui_->coronalSliceLabel},
+             SliceColumn{ui_->axialLayout, ui_->axialSliceLabel},
+             SliceColumn{ui_->registrationSagittalLayout, ui_->registrationSagittalLabel},
+             SliceColumn{ui_->registrationCoronalLayout, ui_->registrationCoronalLabel},
+             SliceColumn{ui_->registrationAxialLayout, ui_->registrationAxialLabel},
+             SliceColumn{ui_->treatmentSagittalLayout, ui_->treatmentSagittalSliceLabel},
+             SliceColumn{ui_->treatmentCoronalLayout, ui_->treatmentCoronalSliceLabel},
+             SliceColumn{ui_->treatmentAxialLayout, ui_->treatmentAxialSliceLabel}}) {
+        column.layout->setContentsMargins(4, 3, 4, 2);
+        column.layout->setSpacing(0);
+        column.label->setFixedSize(78, 14);
+        column.label->setContentsMargins(0, 0, 0, 0);
+        column.label->setMargin(0);
+        column.label->setIndent(0);
+        column.label->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+        column.label->setStyleSheet(QStringLiteral("QLabel { font-size: 10px; padding: 0; }"));
+        column.layout->setAlignment(column.label, Qt::AlignHCenter | Qt::AlignTop);
     }
-    for (QLabel* label : {ui_->registrationSagittalLabel,
-                          ui_->registrationCoronalLabel,
-                          ui_->registrationAxialLabel}) {
-        label->setFixedHeight(14);
-        label->setMinimumHeight(14);
-        label->setMaximumHeight(14);
-        label->setFixedWidth(78);
-        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        label->setContentsMargins(0, 0, 0, 0);
-        label->setMargin(0);
-        label->setIndent(0);
-        label->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-        label->setStyleSheet(QStringLiteral("QLabel { font-size: 10px; padding: 0; }"));
-    }
-    for (QVBoxLayout* layout : {ui_->sagittalLayout, ui_->coronalLayout, ui_->axialLayout}) {
-        layout->setContentsMargins(4, 3, 4, 2);
-        layout->setSpacing(0);
-    }
-    for (QLabel* label : {ui_->sagittalSliceLabel, ui_->coronalSliceLabel, ui_->axialSliceLabel}) {
-        label->setFixedHeight(14);
-        label->setMinimumHeight(14);
-        label->setMaximumHeight(14);
-        label->setFixedWidth(78);
-        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        label->setContentsMargins(0, 0, 0, 0);
-        label->setMargin(0);
-        label->setIndent(0);
-        label->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-        label->setStyleSheet(QStringLiteral("QLabel { font-size: 10px; padding: 0; }"));
-    }
-    ui_->sagittalLayout->setAlignment(ui_->sagittalSliceLabel, Qt::AlignHCenter | Qt::AlignTop);
-    ui_->coronalLayout->setAlignment(ui_->coronalSliceLabel, Qt::AlignHCenter | Qt::AlignTop);
-    ui_->axialLayout->setAlignment(ui_->axialSliceLabel, Qt::AlignHCenter | Qt::AlignTop);
-    ui_->registrationSagittalLayout->setAlignment(ui_->registrationSagittalLabel, Qt::AlignHCenter | Qt::AlignTop);
-    ui_->registrationCoronalLayout->setAlignment(ui_->registrationCoronalLabel, Qt::AlignHCenter | Qt::AlignTop);
-    ui_->registrationAxialLayout->setAlignment(ui_->registrationAxialLabel, Qt::AlignHCenter | Qt::AlignTop);
     auto* markerTablePanel = new QWidget(markerSplitter);
     markerTablePanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* markerTableLayout = new QVBoxLayout(markerTablePanel);
@@ -664,19 +664,25 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // carries the same default; do not override it here.
     for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->coronalPreviousButton,
                                 ui_->axialPreviousButton, ui_->registrationSagittalPreviousButton,
-                                ui_->registrationCoronalPreviousButton, ui_->registrationAxialPreviousButton}) {
+                                ui_->registrationCoronalPreviousButton, ui_->registrationAxialPreviousButton,
+                                ui_->treatmentSagittalPreviousButton, ui_->treatmentCoronalPreviousButton,
+                                ui_->treatmentAxialPreviousButton}) {
         button->setIcon(QIcon());
         button->setText(QString(QChar(0x25C0)));
     }
     for (QToolButton* button : {ui_->sagittalNextButton, ui_->coronalNextButton,
                                 ui_->axialNextButton, ui_->registrationSagittalNextButton,
-                                ui_->registrationCoronalNextButton, ui_->registrationAxialNextButton}) {
+                                ui_->registrationCoronalNextButton, ui_->registrationAxialNextButton,
+                                ui_->treatmentSagittalNextButton, ui_->treatmentCoronalNextButton,
+                                ui_->treatmentAxialNextButton}) {
         button->setIcon(QIcon());
         button->setText(QString(QChar(0x25B6)));
     }
     for (QToolButton* button : {ui_->resetSagittalButton, ui_->resetCoronalButton,
                                 ui_->resetAxialButton, ui_->registrationResetSagittalButton,
                                 ui_->registrationResetCoronalButton, ui_->registrationResetAxialButton,
+                                ui_->treatmentSagittalResetButton, ui_->treatmentCoronalResetButton,
+                                ui_->treatmentAxialResetButton,
                                 ui_->resetAllMriViewsButton, ui_->registrationResetAllMriViewsButton}) {
         button->setIcon(QIcon());
         button->setText(QString(QChar(0x21BA)));
@@ -705,6 +711,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                                 ui_->registrationCoronalNextButton, ui_->registrationAxialPreviousButton,
                                 ui_->registrationAxialNextButton, ui_->registrationResetSagittalButton,
                                 ui_->registrationResetCoronalButton, ui_->registrationResetAxialButton,
+                                ui_->treatmentSagittalPreviousButton, ui_->treatmentSagittalNextButton,
+                                ui_->treatmentSagittalResetButton, ui_->treatmentCoronalPreviousButton,
+                                ui_->treatmentCoronalNextButton, ui_->treatmentCoronalResetButton,
+                                ui_->treatmentAxialPreviousButton, ui_->treatmentAxialNextButton,
+                                ui_->treatmentAxialResetButton,
                                 ui_->brightnessDownButton, ui_->brightnessUpButton,
                                 ui_->registrationBrightnessDownButton, ui_->registrationBrightnessUpButton,
                                 ui_->resetAllMriViewsButton, ui_->registrationResetAllMriViewsButton})
@@ -777,7 +788,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     acceptCouplingButton_->setMinimumHeight(40);
     acceptCouplingButton_->setEnabled(false);
     acceptCouplingButton_->setStyleSheet(acceptButtonStyle);
-    ui_->placeholderLayout->setAlignment(Qt::AlignTop);
+    // Every stage hosted on the placeholder page packs its widgets at the top;
+    // the trailing stretch added after the last of them takes the slack.  (An
+    // alignment on a top-level layout would be ignored, so do not add one.)
     ui_->placeholderLayout->addWidget(couplingTitleLabel_);
     ui_->placeholderLayout->addWidget(couplingDescriptionLabel_);
     ui_->placeholderLayout->addSpacing(12);
@@ -895,7 +908,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // Designer form, just like Imaging and Registration.  Runtime code only
     // supplies the treatment-specific control row and data connections.
     treatmentMriPage_ = ui_->treatmentMriPage;
-    treatmentMriPage_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    treatmentMriPage_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     auto* treatmentMriLayout = ui_->treatmentMriLayout;
     auto* treatmentMriInstruction = new QLabel(
         QStringLiteral("Select a target row, then click a location in any MRI plane. The selected target is updated in RAS coordinates and shown in all three planes."),
@@ -935,9 +948,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentViewerControls->addWidget(treatmentTransparency);
     treatmentViewerControls->addStretch(1);
     treatmentMriLayout->insertLayout(0, treatmentViewerControls);
-    // The control row was inserted at index 0, so the static MRI row is now
-    // index 1. Give that row the available vertical expansion.
-    treatmentMriLayout->setStretch(1, 1);
     connect(treatmentShowField, &QCheckBox::toggled, ui_->showFieldCheckBox, &QCheckBox::setChecked);
     connect(treatmentShowTarget, &QCheckBox::toggled, ui_->showTargetCheckBox, &QCheckBox::setChecked);
     connect(treatmentShowTransducers, &QCheckBox::toggled, ui_->showTransducersCheckBox, &QCheckBox::setChecked);
@@ -968,28 +978,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentSagittalSlider_ = ui_->treatmentSagittalSlider;
     treatmentCoronalSlider_ = ui_->treatmentCoronalSlider;
     treatmentAxialSlider_ = ui_->treatmentAxialSlider;
-    for (QToolButton* button : {ui_->treatmentSagittalPreviousButton,
-                                ui_->treatmentCoronalPreviousButton,
-                                ui_->treatmentAxialPreviousButton})
-    {
-        button->setText(QString());
-        button->setArrowType(Qt::LeftArrow);
-    }
-    for (QToolButton* button : {ui_->treatmentSagittalNextButton,
-                                ui_->treatmentCoronalNextButton,
-                                ui_->treatmentAxialNextButton})
-    {
-        button->setText(QString());
-        button->setArrowType(Qt::RightArrow);
-    }
-    for (QToolButton* button : {ui_->treatmentSagittalResetButton,
-                                ui_->treatmentCoronalResetButton,
-                                ui_->treatmentAxialResetButton})
-    {
-        button->setText(QString());
-        button->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
-        button->setIconSize(QSize(14, 14));
-    }
+    // The slice buttons themselves are glyphed and styled with the Imaging and
+    // Registration ones above; here they only forward to their Imaging twins,
+    // which own the slider state.
     connect(ui_->treatmentSagittalPreviousButton, &QToolButton::clicked,
             ui_->sagittalPreviousButton, &QToolButton::click);
     connect(ui_->treatmentSagittalNextButton, &QToolButton::clicked,
@@ -1008,10 +999,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             ui_->axialNextButton, &QToolButton::click);
     connect(ui_->treatmentAxialResetButton, &QToolButton::clicked,
             ui_->resetAxialButton, &QToolButton::click);
-    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
+    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_})
         view->setPointPlacementEnabled(true);
-        view->setStyleSheet(QStringLiteral("background: #101820;"));
-    }
     treatmentControlsPanel_ = new QWidget(ui_->placeholderPage);
     auto* treatmentControlsLayout = new QVBoxLayout(treatmentControlsPanel_);
     treatmentControlsLayout->setContentsMargins(4, 4, 4, 4);
@@ -1798,7 +1787,7 @@ void WorkflowWindow::resizeEvent(QResizeEvent* event) {
     // during the resize event can capture an intermediate zero/small height,
     // which makes the registration sliders vanish after repeated maximize /
     // restore cycles.
-    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
+    QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
 
 bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
@@ -1814,19 +1803,50 @@ bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
     return QMainWindow::eventFilter(watched, event);
 }
 
-void WorkflowWindow::syncRegistrationPreviewHeights() {
-    // Viewer geometry remains owned by the Designer form.  Do not alter the
-    // Imaging/Registration panes from resize callbacks. Treatment's upper
-    // pane is deliberately matched to the actual Imaging MRI section so all
-    // three tabs present the same viewer size.
-    if (!ui_ || !treatmentBodySplitter_ || ui_->imagingGroup->height() <= 0) return;
-    auto* splitter = static_cast<QSplitter*>(treatmentBodySplitter_);
-    const int totalHeight = splitter->height();
-    const int imagingHeight = ui_->imagingGroup->height();
-    if (totalHeight > 0 && imagingHeight > 0) {
-        const int treatmentViewerHeight = std::min(imagingHeight, totalHeight);
-        splitter->setSizes({treatmentViewerHeight, totalHeight - treatmentViewerHeight});
+void WorkflowWindow::syncMriViewerHeights() {
+    // The nine viewer columns are vertically Fixed, so they never take a share
+    // of their page's spare height on their own -- that is what kept the three
+    // tabs disagreeing.  Instead the height is chosen here, once, for all of
+    // them: the tallest that still fits on the most crowded page.  Imaging and
+    // Registration set the limit; Treatment plan carries far less below its
+    // viewers, so a height that fits those two always fits it too.
+    if (!ui_) return;
+    const int stackHeight = ui_->pageStack->height();
+    if (stackHeight <= 0) return;
+    // What each page needs for everything except its viewer row.  Taking the
+    // difference of the two hints keeps this independent of the height we are
+    // about to pick, so the calculation has a stable fixed point.
+    const auto reservedFor = [](const QWidget* page, const QLayout* viewerRow) {
+        return page->layout()->sizeHint().height() - viewerRow->sizeHint().height();
+    };
+    const int reserved = std::max(reservedFor(ui_->imagingPage, ui_->mriPreviewLayout),
+                                  reservedFor(ui_->registrationPage, ui_->registrationImages));
+    // A column is taller than its viewer by the slider row, slice label,
+    // margins and group-box title.
+    const int columnChrome = ui_->sagittalGroup->sizeHint().height() - ui_->sagittalPreview->minimumHeight();
+    // Past its own width a viewer only adds letterboxing, so that is the cap.
+    const int widthCap = ui_->sagittalPreview->width() > kMinMriViewerHeight ? ui_->sagittalPreview->width()
+                                                                            : kMaxMriViewerHeight;
+    const int height = std::clamp(stackHeight - reserved - columnChrome, kMinMriViewerHeight,
+                                  std::min(widthCap, kMaxMriViewerHeight));
+    if (height == ui_->sagittalPreview->minimumHeight() &&
+        height == ui_->sagittalPreview->maximumHeight())
+        return;
+    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
+                                  ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
+                                  ui_->registrationAxialPreview, treatmentSagittalPreview_,
+                                  treatmentCoronalPreview_, treatmentAxialPreview_}) {
+        if (!view) continue;
+        view->setMinimumHeight(height);
+        view->setMaximumHeight(height);
     }
+    // The hints above are read before the new geometry has settled, so the
+    // first pass after a resize can work from stale word-wrapped label heights.
+    // Re-run until the answer stops moving; the pass that agrees with the
+    // current height returns above, and the counter bounds a pathological
+    // oscillation.
+    if (++mriHeightSyncPasses_ < 4)
+        QTimer::singleShot(0, this, [this] { syncMriViewerHeights(); });
 }
 
 WorkflowWindow::~WorkflowWindow() { delete ui_; }
@@ -1976,15 +1996,24 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     for (QSlider* slider : {ui_->sagittalSlider, ui_->coronalSlider, ui_->axialSlider,
                             ui_->registrationSagittalSlider, ui_->registrationCoronalSlider, ui_->registrationAxialSlider,
                             treatmentSagittalSlider_, treatmentCoronalSlider_, treatmentAxialSlider_}) slider->setEnabled(true);
-    ui_->resetSagittalButton->setEnabled(true); ui_->resetCoronalButton->setEnabled(true); ui_->resetAxialButton->setEnabled(true);
     for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->sagittalNextButton,
+                                ui_->resetSagittalButton,
                                 ui_->coronalPreviousButton, ui_->coronalNextButton,
+                                ui_->resetCoronalButton,
                                 ui_->axialPreviousButton, ui_->axialNextButton,
+                                ui_->resetAxialButton,
                                 ui_->registrationSagittalPreviousButton, ui_->registrationSagittalNextButton,
+                                ui_->registrationResetSagittalButton,
                                 ui_->registrationCoronalPreviousButton, ui_->registrationCoronalNextButton,
+                                ui_->registrationResetCoronalButton,
                                 ui_->registrationAxialPreviousButton, ui_->registrationAxialNextButton,
-                                ui_->registrationResetSagittalButton, ui_->registrationResetCoronalButton,
-                                ui_->registrationResetAxialButton}) button->setEnabled(true);
+                                ui_->registrationResetAxialButton,
+                                ui_->treatmentSagittalPreviousButton, ui_->treatmentSagittalNextButton,
+                                ui_->treatmentSagittalResetButton,
+                                ui_->treatmentCoronalPreviousButton, ui_->treatmentCoronalNextButton,
+                                ui_->treatmentCoronalResetButton,
+                                ui_->treatmentAxialPreviousButton, ui_->treatmentAxialNextButton,
+                                ui_->treatmentAxialResetButton}) button->setEnabled(true);
     ui_->acceptImagingButton->setEnabled(true);
     ui_->resetInitialSlicesButton->setEnabled(true);
     ui_->registrationResetInitialSlicesButton->setEnabled(true);
@@ -2067,17 +2096,24 @@ void WorkflowWindow::loadMri(const QString& path) {
         treatmentSagittalSlider_->setEnabled(true);
         treatmentCoronalSlider_->setEnabled(true);
         treatmentAxialSlider_->setEnabled(true);
-        ui_->resetSagittalButton->setEnabled(true);
-        ui_->resetCoronalButton->setEnabled(true);
-        ui_->resetAxialButton->setEnabled(true);
         for (QToolButton* button : {ui_->sagittalPreviousButton, ui_->sagittalNextButton,
+                                    ui_->resetSagittalButton,
                                     ui_->coronalPreviousButton, ui_->coronalNextButton,
+                                    ui_->resetCoronalButton,
                                     ui_->axialPreviousButton, ui_->axialNextButton,
+                                    ui_->resetAxialButton,
                                     ui_->registrationSagittalPreviousButton, ui_->registrationSagittalNextButton,
+                                    ui_->registrationResetSagittalButton,
                                     ui_->registrationCoronalPreviousButton, ui_->registrationCoronalNextButton,
+                                    ui_->registrationResetCoronalButton,
                                     ui_->registrationAxialPreviousButton, ui_->registrationAxialNextButton,
-                                    ui_->registrationResetSagittalButton, ui_->registrationResetCoronalButton,
-                                    ui_->registrationResetAxialButton}) button->setEnabled(true);
+                                    ui_->registrationResetAxialButton,
+                                    ui_->treatmentSagittalPreviousButton, ui_->treatmentSagittalNextButton,
+                                    ui_->treatmentSagittalResetButton,
+                                    ui_->treatmentCoronalPreviousButton, ui_->treatmentCoronalNextButton,
+                                    ui_->treatmentCoronalResetButton,
+                                    ui_->treatmentAxialPreviousButton, ui_->treatmentAxialNextButton,
+                                    ui_->treatmentAxialResetButton}) button->setEnabled(true);
         ui_->acceptImagingButton->setEnabled(true);
         ui_->resetInitialSlicesButton->setEnabled(true);
         ui_->registrationResetInitialSlicesButton->setEnabled(true);
@@ -2302,7 +2338,7 @@ void WorkflowWindow::confirmSelectedFiducial() {
                     ? QStringLiteral("Fiducial confirmed.")
                     : QStringLiteral("%1 located fiducials confirmed.").arg(confirmedCount), false);
     refresh();
-    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
+    QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
 
 void WorkflowWindow::updateRegistrationAvailability() {
@@ -2914,7 +2950,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         if (calibrationGroup_) calibrationGroup_->setEnabled(true);
         updateRegistrationAvailability();
     }
-    QTimer::singleShot(0, this, [this] { syncRegistrationPreviewHeights(); });
+    QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
 
 void WorkflowWindow::completeCurrentStage() {
