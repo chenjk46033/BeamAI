@@ -18,6 +18,11 @@ class QProgressBar;
 class QSlider;
 class QComboBox;
 class QTableWidget;
+class QCheckBox;
+class QTabWidget;
+class WorkflowMriView;
+class QWidget;
+class QGroupBox;
 QT_END_NAMESPACE
 
 namespace beam::app {
@@ -32,6 +37,10 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    enum class RegistrationPhase { Locating, FitApplied, LockPositionRegistered, Accepted };
+    bool registrationFitApplied() const;
+    bool registrationLockPositionRegistered() const;
+    void setRegistrationPhase(RegistrationPhase phase);
     void selectStage(beam::gui::WorkflowStage stage);
     void completeCurrentStage();
     void chooseNifti();
@@ -77,9 +86,7 @@ private:
     bool placingFiducial_ = false;
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();
     bool registrationGeometryLoaded_ = false;
-    bool registrationComplete_ = false;
-    bool pendingRegistrationFit_ = false;
-    bool currentPositionRegistrationComplete_ = false;
+    RegistrationPhase registrationPhase_ = RegistrationPhase::Locating;
     bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
     bool focusImageLoaded_ = false;
@@ -118,13 +125,33 @@ private:
     QComboBox* treatmentProtocolCombo_ = nullptr;
     QTableWidget* treatmentTargetTable_ = nullptr;
     QTableWidget* treatmentProtocolTable_ = nullptr;
+    QPushButton* addSonicationButton_ = nullptr;
+    QPushButton* removeSonicationButton_ = nullptr;
+    QTabWidget* treatmentTabs_ = nullptr;
     QPushButton* acceptTreatmentPlanButton_ = nullptr;
+    QWidget* treatmentMriPage_ = nullptr;
+    QWidget* treatmentBodySplitter_ = nullptr;
+    QWidget* treatmentControlsPanel_ = nullptr;
+    QGroupBox* calibrationGroup_ = nullptr;
+    WorkflowMriView* treatmentSagittalPreview_ = nullptr;
+    WorkflowMriView* treatmentCoronalPreview_ = nullptr;
+    WorkflowMriView* treatmentAxialPreview_ = nullptr;
+    QSlider* treatmentSagittalSlider_ = nullptr;
+    QSlider* treatmentCoronalSlider_ = nullptr;
+    QSlider* treatmentAxialSlider_ = nullptr;
     QLabel* treatmentExecutionTitleLabel_ = nullptr;
     QLabel* treatmentExecutionDescriptionLabel_ = nullptr;
     QLabel* treatmentExecutionStatusLabel_ = nullptr;
     QProgressBar* treatmentExecutionProgressBar_ = nullptr;
     QPushButton* startTreatmentButton_ = nullptr;
     QPushButton* abortTreatmentButton_ = nullptr;
+    QLabel* safetyReviewTitleLabel_ = nullptr;
+    QLabel* safetyReviewDescriptionLabel_ = nullptr;
+    QLabel* safetyReviewStatusLabel_ = nullptr;
+    QCheckBox* safetyRegistrationCheckBox_ = nullptr;
+    QCheckBox* safetyCorrectionCheckBox_ = nullptr;
+    QCheckBox* safetyPlanCheckBox_ = nullptr;
+    QPushButton* acceptSafetyReviewButton_ = nullptr;
 };
 
 }  // namespace beam::app
