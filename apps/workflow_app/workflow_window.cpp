@@ -2081,6 +2081,32 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
     updateRegistrationAvailability();
 }
 
+// Writes the six measured fiducials at full double precision so BeamV0 can be
+// driven from exactly the same points -- see matlab_verify/load_beamai_fiducials.m.
+// The registration table rounds to 2 decimals for reading; copying those by hand
+// would feed BeamV0 slightly different input than BeamAI itself registers with,
+// which would show up as a fake ~0.01 mm disagreement in a side-by-side check.
+// Returns the file written, or an empty string if it could not be.
+QString WorkflowWindow::exportFiducialsCsv() const {
+    if (fiducials_.size() < 6) return QString();
+    const QString path = QDir::current().filePath(QStringLiteral("beamai_fiducials.csv"));
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return QString();
+    QTextStream out(&file);
+    out << "# BeamAI measured fiducials, millimetres, RAS (+x right, +y anterior, +z superior)\n";
+    out << "# MRI: " << mriPath_ << "\n";
+    out << "name,x,y,z\n";
+    for (const auto& marker : fiducials_) {
+        const Eigen::Vector3d mm = marker.position * 1000.0;
+        // 17 significant digits round-trips an IEEE double exactly.
+        out << QString::fromStdString(marker.name) << ',' << QString::number(mm.x(), 'g', 17) << ','
+            << QString::number(mm.y(), 'g', 17) << ',' << QString::number(mm.z(), 'g', 17) << '\n';
+    }
+    out.flush();
+    file.close();
+    return path;
+}
+
 void WorkflowWindow::confirmSelectedFiducial() {
     int confirmedCount = 0;
     for (int row = 0; row < 6; ++row) {
@@ -2100,9 +2126,17 @@ void WorkflowWindow::confirmSelectedFiducial() {
                      "Fiducial confirmation changed; registration must be recalculated.");
     updateRegistrationAvailability();
 
+    const QString exported = exportFiducialsCsv();
+
     showMessage(confirmedCount == 1
                     ? QStringLiteral("Fiducial confirmed.")
                     : QStringLiteral("%1 located fiducials confirmed.").arg(confirmedCount), false);
+    if (!exported.isEmpty()) {
+        ui_->registrationResult->setText(
+            QStringLiteral("%1 fiducial%2 confirmed. Positions written to %3")
+                .arg(confirmedCount)
+                .arg(confirmedCount == 1 ? QString() : QStringLiteral("s"), exported));
+    }
     refresh();
     QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
@@ -2184,19 +2218,20 @@ void WorkflowWindow::performFiducialRegistration() {
         showMessage(QStringLiteral("Load the patient MRI and initialize the Beam geometry before registration."), true);
         return;
     }
+    // Both registration steps read the same stored fiducials, as BeamV0 does
+    // (registerArrayToFiducials.m and registerCurrentTransducerPostion.m both
+    // take app.FiducialROIs). Reading the table's displayed text here instead
+    // meant the fit ran on values rounded to the table's 2 decimals while the
+    // lock-position step used the full-precision ones -- the same six points
+    // driving the two steps differently. Typed edits reach fiducials_ through
+    // the cellChanged handler, so manual entry still works.
     std::vector<Eigen::Vector3d> measured;
     measured.reserve(6);
-    for (int row = 0; row < 6; ++row) {
-        Eigen::Vector3d point;
-        for (int axis = 0; axis < 3; ++axis) {
-            const QTableWidgetItem* item = ui_->registrationTable->item(row, axis + 1);
-            bool valid = false;
-            const double value = item ? item->text().toDouble(&valid) : 0.0;
-            if (!valid || !std::isfinite(value)) {
-                showMessage(QStringLiteral("Fiducial row %1 contains an invalid coordinate.").arg(row + 1), true);
-                return;
-            }
-            point(axis) = value;
+    for (const auto& marker : fiducials_) {
+        const Eigen::Vector3d point = marker.position * 1000.0;
+        if (!point.allFinite()) {
+            showMessage(QStringLiteral("A fiducial contains an invalid coordinate."), true);
+            return;
         }
         measured.push_back(point);
     }

@@ -88,6 +88,7 @@ private:
     // 2=IS); it keeps its current value. -1 writes all three.
     void placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis = -1);
     void confirmSelectedFiducial();
+    QString exportFiducialsCsv() const;
     void updateRegistrationAvailability();
     void updateRegistrationStepIndicators();
     void refresh();

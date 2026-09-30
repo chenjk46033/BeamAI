@@ -15,6 +15,7 @@
 #include "array/array_data.hpp"
 #include "array/array_types.hpp"
 #include "registration/affine_registration.hpp"
+#include "registration/array_transform.hpp"
 #include "registration/fiducial_markers.hpp"
 
 using namespace beam::registration;
@@ -142,6 +143,41 @@ int run() {
     const std::vector<FiducialMarker> arrFids = setArrayFiducialMarkers(arrayData);
     r.i("arrFids_count", static_cast<long>(arrFids.size()));
     for (size_t k = 0; k < arrFids.size(); ++k) r.vec("arrFid_" + arrFids[k].name, arrFids[k].position);
+
+    // --- end-to-end registration, the two buttons an operator presses ---
+    // Six measured fiducials in millimetres, taken from a real BeamAI session
+    // on BEAM MRIs/F040/T1_MRI (its beamai_fiducials.csv). verify_registration.m
+    // drives BeamV0's own registerArrayToFiducials.m and the MRI-Based branch
+    // of registerCurrentTransducerPostion.m from the identical six points and
+    // the identical array, so these labels compare the whole chain rather
+    // than its pieces.
+    const std::vector<Eigen::Vector3d> mriFiducialsMm = {
+        {-37.539999999999999, 68.040000000000006, -11.35},
+        {-35.950000000000003, 68.040000000000006, -12.52},
+        {-34.359999999999999, 68.040000000000006, -13.68},
+        {-32.770000000000003, 68.040000000000006, -14.85},
+        {-31.18, 68.040000000000006, -16.010000000000002},
+        {-29.5851233516482, 68.04186, -17.180266254578726},
+    };
+    const auto centreMm = [](const beam::array::ArrayData& d) {
+        return Eigen::Vector3d(d.arrayTotal.rect.block(beam::array::kRectCenterStartRow, 0, 3,
+                                                        d.arrayTotal.rect.cols())
+                                   .rowwise()
+                                   .mean() *
+                               1000.0);
+    };
+
+    const AffineArrayResult fitted = registerArrayToFiducials(arrayData, mriFiducialsMm);
+    r.vec("e2e_centreAfterFitMm", centreMm(fitted.arrayData));
+    for (const FiducialMarker& m : fitted.fiducialMarkers)
+        r.vec("e2e_fittedFid_" + m.name, m.position);
+
+    // Same lock-position readings on both sides (BeamV0's sliders are 1-based,
+    // so 1,1 is "no offset").
+    constexpr double kH = 2.0;
+    constexpr double kV = 3.0;
+    const AffineArrayResult locked = registerCurrentTransducerPosition(arrayData, mriFiducialsMm, kH, kV);
+    r.vec("e2e_centreAfterLockMm", centreMm(locked.arrayData));
 
     return 0;
 }

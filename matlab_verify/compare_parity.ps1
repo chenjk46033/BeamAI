@@ -20,13 +20,32 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not $ParityExe) { $ParityExe = "$PSScriptRoot\..\build-msvc\apps\Debug\parity_$Phase.exe" }
-if (-not $WorkDir)   { $WorkDir   = "$PSScriptRoot\..\build-msvc\parity_$Phase" }
+# Default to whichever build tree actually holds the parity binaries: this
+# repo configures into build-ai, older instructions and the sibling Beam
+# checkout use build-msvc.
+if (-not $ParityExe) {
+    foreach ($tree in @("build-ai", "build-msvc")) {
+        $candidate = "$PSScriptRoot\..\$tree\apps\Debug\parity_$Phase.exe"
+        if (Test-Path $candidate) { $ParityExe = $candidate; $defaultTree = $tree; break }
+    }
+    if (-not $ParityExe) {
+        Write-Error "no parity_$Phase.exe under build-ai or build-msvc -- build the target first"; exit 2
+    }
+}
+if (-not $WorkDir) {
+    if (-not $defaultTree) { $defaultTree = "build-ai" }
+    $WorkDir = "$PSScriptRoot\..\$defaultTree\parity_$Phase"
+}
 
 foreach ($p in @($ParityExe, $MatlabExe)) {
     if (-not (Test-Path $p)) { Write-Error "not found: $p"; exit 2 }
 }
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+# Make both absolute before Push-Location: a relative -ParityExe would
+# otherwise be resolved against the work directory (and PowerShell treats a
+# bare relative path as a command name, reporting it as a missing module).
+$ParityExe = (Resolve-Path -LiteralPath $ParityExe).Path
+$WorkDir   = (Resolve-Path -LiteralPath $WorkDir).Path
 $verifyDir = $PSScriptRoot
 $cppOut    = Join-Path $WorkDir "parity_${Phase}_cpp.csv"
 $matlabOut = Join-Path $WorkDir "parity_${Phase}_matlab.csv"

@@ -81,6 +81,65 @@ for i = 1:numel(arrayData.fiducialMarkers)
         arrayData.fiducialMarkers(i).position);
 end
 
+% --- end-to-end registration: the two buttons an operator presses ---
+% Same six measured fiducials (mm) and same array as apps/parity_registration,
+% taken from a real BeamAI session on BEAM MRIs/F040/T1_MRI. This reproduces
+% registerArrayToFiducials.m and the MRI-Based branch of
+% registerCurrentTransducerPostion.m inline, because both take the live `app`
+% object; every line below is the source's own, with app.* reads replaced by
+% the locals they would have returned.
+mriFiducials = [ -37.539999999999999,  68.040000000000006, -11.35;
+                 -35.950000000000003,  68.040000000000006, -12.52;
+                 -34.359999999999999,  68.040000000000006, -13.68;
+                 -32.770000000000003,  68.040000000000006, -14.85;
+                 -31.180000000000000,  68.040000000000006, -16.010000000000002;
+                 -29.585123351648200,  68.041860000000000, -17.180266254578726 ]';
+
+originArrayData = defineArrayData(buildRect(90));
+originArrayData = setArrayFiducialMarkers(originArrayData);
+
+% registerArrayToFiducials.m
+N = numel(originArrayData.fiducialMarkers);
+arrayFiducials = zeros(3, N);
+for i = 1:N
+    arrayFiducials(:,i) = reshape(originArrayData.fiducialMarkers(i).position, [], 1) * 1000;
+end
+affineMatrix = getAffineMatrixFromRegistration(arrayFiducials, mriFiducials, 1);
+fittedArrayData = applyAffineToArrayData(affineMatrix, originArrayData);
+writeVec(fid, 'e2e_centreAfterFitMm', ...
+    mean(fittedArrayData.arrayTotal.rect(17:19,:), 2)' * 1000);
+for i = 1:numel(fittedArrayData.fiducialMarkers)
+    writeVec(fid, ['e2e_fittedFid_' char(fittedArrayData.fiducialMarkers(i).name)], ...
+        fittedArrayData.fiducialMarkers(i).position);
+end
+
+% registerCurrentTransducerPostion.m, MRIFiducialsButton branch.
+% Its basis comes from app.FiducialROIs -- the measured points -- so build
+% that list here from the same millimetre values.
+measuredROIs = struct('name', {}, 'position', {});
+for i = 1:N
+    measuredROIs(i).name = originArrayData.fiducialMarkers(i).name;
+    measuredROIs(i).position = mriFiducials(:,i)';
+end
+[~, Xvector, Yvector, Zvector] = getTranslationMatrixFromTransducerFiducials([], measuredROIs);
+if Zvector(3) < 0
+    Zvector = -1 * Zvector;
+end
+Mbasis = [reshape(Xvector,[],1)'; reshape(Yvector,[],1)'; reshape(Zvector,[],1)']';
+
+verticalDelta = 10;
+horizontalDelta = 7.5;
+dH = 2 - 1;   % slider readings, matching apps/parity_registration
+dV = 3 - 1;
+dY = -dH * horizontalDelta / 1000;
+dZ =  dV * verticalDelta / 1000;
+regdXYZ = Mbasis * reshape([0, dY, dZ], [], 1);
+translationMat = eye(4);
+translationMat(1:3,4) = reshape(regdXYZ, [], 1);
+lockedArrayData = applyAffineToArrayData(translationMat, fittedArrayData);
+writeVec(fid, 'e2e_centreAfterLockMm', ...
+    mean(lockedArrayData.arrayTotal.rect(17:19,:), 2)' * 1000);
+
 end
 
 function R = rotX(a)
