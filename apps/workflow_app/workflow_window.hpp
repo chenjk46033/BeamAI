@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QHash>
 #include <QSize>
 #include <array>
 #include <memory>
@@ -10,6 +11,9 @@
 #include "mri/slice.hpp"
 #include "mri/ras_transform.hpp"
 #include "registration/array_transform.hpp"
+// Needed complete, not forward-declared: targetSonications_ stores vectors of
+// StimParamRow by value.
+#include "gui_qt/stim_param_table_model.hpp"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class WorkflowShell; }
@@ -28,6 +32,7 @@ class QTableWidget;
 class QCheckBox;
 class QTabWidget;
 class QTimer;
+class QToolButton;
 class WorkflowMriView;
 class QWidget;
 class QGroupBox;
@@ -79,21 +84,38 @@ private:
     void performCurrentPositionRegistration();
     void acceptFiducialRegistration();
     void applyRegistrationResult(beam::registration::AffineArrayResult result);
-    void beginFiducialPlacement();
-    void placeSelectedFiducial(const Eigen::Vector3d& positionMm);
+    // heldAxis is the axis the clicked plane cannot measure (0=LR, 1=AP,
+    // 2=IS); it keeps its current value. -1 writes all three.
+    void placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis = -1);
     void confirmSelectedFiducial();
-    void setPlacementMode(bool enabled);
     void updateRegistrationAvailability();
     void updateRegistrationStepIndicators();
     void refresh();
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
 
+    // "Open viewer in a new window" -- detached_viewer.cpp. One window per
+    // pane, driving that pane's own slice controls rather than holding state.
+    struct DetachedViewer {
+        QWidget* window = nullptr;
+        WorkflowMriView* view = nullptr;
+        WorkflowMriView* source = nullptr;
+        QLabel* label = nullptr;        // this window's slice readout
+        QLabel* sourceLabel = nullptr;  // the pane's, which it copies
+    };
+    void openDetachedViewer(WorkflowMriView* source, const QString& title, QSlider* slider,
+                            QToolButton* previous, QToolButton* next, QToolButton* reset,
+                            QLabel* sliceLabel);
+    void refreshDetachedViewers();
+    void wireDetachedViewerMenus();
+
     // Treatment plan stage (BeamV0's Sonicate tab) -- treatment_plan_body.cpp.
     void buildTreatmentPlanBody(const QString& acceptButtonStyle);
     void wireTreatmentPlanBody();
     void addTargetListRow(const QString& name, int atRow = -1);
-    void loadSelectedTargetPosition();
+    void switchToSelectedTarget();
+    void saveCurrentTargetSonications();
+    void applyArrayCentreToAllTargets(const Eigen::Vector3d& centreMm);
     void updateStimGridHeight();
     void loadTreatmentProtocol(const QString& protocolName);
     void selectSonicationRow(int row);
@@ -140,7 +162,6 @@ private:
     std::array<bool, 6> sourceFiducialConfirmed_{};
     std::array<bool, 6> fiducialLocated_{};
     std::array<bool, 6> sourceFiducialLocated_{};
-    bool placingFiducial_ = false;
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();
     bool registrationGeometryLoaded_ = false;
     RegistrationPhase registrationPhase_ = RegistrationPhase::Locating;
@@ -182,8 +203,14 @@ private:
     QPushButton* acceptTreatmentPlanButton_ = nullptr;
     QWidget* treatmentMriPage_ = nullptr;
     int mriHeightSyncPasses_ = 0;
+    // app.sys.protocolTables: each target's own stimParamTable data, keyed by
+    // the target row's stable id so a rename or insert cannot orphan it.
+    QHash<int, std::vector<beam::gui_qt::StimParamRow>> targetSonications_;
+    int currentTargetId_ = -1;
+    int nextTargetId_ = 0;
     QSize lastMriSyncWindowSize_;
     QSpacerItem* placeholderTailSpacer_ = nullptr;
+    std::vector<DetachedViewer> detachedViewers_;
     QGroupBox* calibrationGroup_ = nullptr;
     // Treatment plan body: BeamV0's Sonicate-tab planning half.
     QWidget* treatmentPlanBody_ = nullptr;

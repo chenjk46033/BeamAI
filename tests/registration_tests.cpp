@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 
+#include <Eigen/Geometry>
+
 #include <gtest/gtest.h>
 
 #include "array/array_data.hpp"
@@ -341,6 +343,48 @@ TEST(RegisterCurrentTransducerPosition, VerticalSliderShiftsByExactDeltaMagnitud
     const Eigen::Vector3d delta =
         shifted.arrayData.arrayTotal.element[10].position - base.arrayData.arrayTotal.element[10].position;
     EXPECT_NEAR(delta.norm(), 0.010, 1e-9);  // 10mm verticalDelta / 1000
+}
+
+// registerCurrentTransducerPostion.m forces the basis's vertical axis to
+// point superior before assembling M:
+//
+//     if Zvector(3)<0
+//         Zvector = -1*Zvector;
+//     end
+//
+// so raising the vertical lock-position slider always moves the array
+// superior, whatever pose the measured fiducials describe. Without the flip a
+// pose that yields a downward Z inverts the vertical offset. The magnitude
+// tests above cannot catch that -- they only check ||delta||.
+TEST(RegisterCurrentTransducerPosition, VerticalSliderMovesSuperiorEvenWhenTheFiducialBasisPointsDown) {
+    const beam::array::ArrayData data = beam::array::defineArrayData(buildRect(100));
+    const std::vector<FiducialMarker> originFiducials = setArrayFiducialMarkers(data);
+
+    // Pose the measured fiducials so their basis's vertical axis points
+    // squarely inferior -- the case the source's sign flip exists for. (The
+    // nominal fixture's basis has no world-Z component at all, so it cannot
+    // exercise this either way.)
+    const TransducerBasis nominalBasis = getTranslationMatrixFromTransducerFiducials(originFiducials);
+    const Eigen::Matrix3d toDownward =
+        Eigen::Quaterniond::FromTwoVectors(nominalBasis.zVector, Eigen::Vector3d(0.0, 0.0, -1.0))
+            .toRotationMatrix();
+
+    std::vector<Eigen::Vector3d> mriFiducialsMm;
+    for (const FiducialMarker& m : originFiducials)
+        mriFiducialsMm.push_back(toDownward * (m.position * 1000.0));
+
+    std::vector<FiducialMarker> measured = originFiducials;
+    for (std::size_t i = 0; i < measured.size(); ++i) measured[i].position = mriFiducialsMm[i] / 1000.0;
+    ASSERT_LT(getTranslationMatrixFromTransducerFiducials(measured).zVector.z(), 0.0)
+        << "the pose under test must actually produce a downward basis";
+
+    const AffineArrayResult base = registerCurrentTransducerPosition(data, mriFiducialsMm, 1.0, 1.0);
+    const AffineArrayResult raised = registerCurrentTransducerPosition(data, mriFiducialsMm, 1.0, 2.0);
+    const Eigen::Vector3d delta =
+        raised.arrayData.arrayTotal.element[10].position - base.arrayData.arrayTotal.element[10].position;
+
+    EXPECT_NEAR(delta.norm(), 0.010, 1e-9);
+    EXPECT_GT(delta.z(), 0.0) << "raising the vertical lock position moved the array inferior";
 }
 
 TEST(RegisterCurrentTransducerPosition, HorizontalSliderShiftsByExactDeltaMagnitude) {

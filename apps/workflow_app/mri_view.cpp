@@ -164,6 +164,55 @@ void WorkflowMriView::setPointPickedHandler(std::function<void(const Eigen::Vect
     pointPickedHandler_ = std::move(handler);
 }
 
+void WorkflowMriView::setPointMovedHandler(std::function<void(const Eigen::Vector3d&)> handler) {
+    pointMovedHandler_ = std::move(handler);
+}
+
+void WorkflowMriView::setOpenViewerHandler(std::function<void()> handler) {
+    openViewerHandler_ = std::move(handler);
+}
+
+void WorkflowMriView::mirrorFrom(const WorkflowMriView& source) {
+    slice_ = source.slice_;
+    image_ = source.image_;
+    maskImage_ = source.maskImage_;
+    secondaryMaskImage_ = source.secondaryMaskImage_;
+    markers_ = source.markers_;
+    flipHorizontal_ = source.flipHorizontal_;
+    dataMin_ = source.dataMin_;
+    dataMax_ = source.dataMax_;
+    brightness_ = source.brightness_;
+    contrast_ = source.contrast_;
+    crosshair_ = source.crosshair_;
+    navigationCrosshairVisible_ = source.navigationCrosshairVisible_;
+    plane_ = source.plane_;
+    fixedCoordinateMm_ = source.fixedCoordinateMm_;
+    horizontalMinMm_ = source.horizontalMinMm_;
+    horizontalMaxMm_ = source.horizontalMaxMm_;
+    verticalMinMm_ = source.verticalMinMm_;
+    verticalMaxMm_ = source.verticalMaxMm_;
+    reverseHorizontal_ = source.reverseHorizontal_;
+    reverseVertical_ = source.reverseVertical_;
+
+    // The interaction wiring comes across too, so a detached viewer is a full
+    // peer of its pane rather than a picture of it: fiducials can be dragged
+    // in it, and its context menu offers the same "Move fiducial ... to mouse
+    // point". These are copied on every mirror, not once at creation, because
+    // coordinatePasteOptions_ is refilled with the current marker names each
+    // time showMriPreviews runs.
+    pointPlacementEnabled_ = source.pointPlacementEnabled_;
+    pointPickedHandler_ = source.pointPickedHandler_;
+    pointMovedHandler_ = source.pointMovedHandler_;
+    markerPickedHandler_ = source.markerPickedHandler_;
+    coordinatePasteOptions_ = source.coordinatePasteOptions_;
+    // openViewerHandler_ is deliberately not copied: a detached viewer should
+    // not offer to open another copy of itself.
+
+    // Zoom and pan stay the detached window's own: it exists to show the
+    // slice larger, so inheriting the pane's framing would defeat that.
+    update();
+}
+
 void WorkflowMriView::rebuildImage() {
     if (slice_.size() == 0) {
         image_ = {};
@@ -392,10 +441,23 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
             connect(moveButton, &QPushButton::clicked, this, [this, targetCombo, coordinateAtContext, &menu] {
                 if (!coordinateAtContext || !pointPickedHandler_) return;
                 if (markerPickedHandler_) markerPickedHandler_(targetCombo->currentIndex());
-                pointPickedHandler_(*coordinateAtContext);
+                // Explicit relocation: the operator pointed at a place and
+                // named a fiducial, so it belongs at that place -- including
+                // on this view's own slice. Routing it through the drag
+                // handler instead kept the fiducial's old out-of-plane value
+                // and dropped it on a different slice than the one clicked.
+                if (pointMovedHandler_)
+                    pointMovedHandler_(*coordinateAtContext);
+                else
+                    pointPickedHandler_(*coordinateAtContext);
                 menu.close();
             });
         }
+    }
+    if (openViewerHandler_) {
+        menu.addSeparator();
+        QAction* openViewer = menu.addAction(QStringLiteral("Open viewer in a new window"));
+        connect(openViewer, &QAction::triggered, this, [this] { openViewerHandler_(); });
     }
     menu.addSeparator();
     auto* container = new QWidget(&menu);

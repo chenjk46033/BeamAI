@@ -290,9 +290,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                        "border: 1px solid #b7d1d9; border-radius: 4px; "
                        "padding: 8px; }"));
     ui_->registrationInstructions->setText(QStringLiteral(
-        "Select a fiducial row to navigate and zoom. Drag the selected red ring onto the grayscale donut, "
-        "verify it in all three MRI views, and repeat for all six. To enter a point directly, right-click the "
-        "MRI point, choose marker 1-6 from the menu, and paste it into that marker-table row."));
+        "Select a fiducial in the triangle diagram to navigate the three planes to it. Drag its red ring onto "
+        "the centre of the grayscale donut, verify it in all three views, and repeat for all six. Each drag "
+        "sets only the two coordinates lying in that plane, so refining one view never moves the fiducial in "
+        "the third. To place a fiducial somewhere far from where it sits, right-click the point and use "
+        "\"Move fiducial … to mouse point\"."));
     ui_->registrationInstructions->hide();
     // Use the original deep slate-blue work surface.  Inputs/tables retain
     // their own light surfaces for readability, while the workflow canvas is
@@ -385,8 +387,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QSplitter::handle:horizontal { background: #8aa1aa; border-left: 1px solid #5e7882; "
         "border-right: 1px solid #5e7882; margin: 0; }"
         "QSplitter::handle:horizontal:hover { background: #2b91ad; }"));
-    ui_->registrationActions->removeWidget(ui_->placeFiducialButton);
-    ui_->placeFiducialButton->hide();
     ui_->registrationActions->removeWidget(ui_->resetRegistrationButton);
     ui_->resetRegistrationButton->setText(QStringLiteral("Restore fiducials"));
     ui_->resetRegistrationButton->setMinimumHeight(30);
@@ -942,6 +942,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_})
         view->setPointPlacementEnabled(true);
 
+    wireDetachedViewerMenus();
+
     // The Treatment plan and Treatment stage bodies are BeamV0's Sonicate tab,
     // split across the two workflow stages it spans. See treatment_plan_body.cpp.
     buildTreatmentPlanBody(acceptButtonStyle);
@@ -1316,7 +1318,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         refresh();
         updateRegistrationAvailability();
     });
-    connect(ui_->placeFiducialButton, &QPushButton::clicked, this, [this] { beginFiducialPlacement(); });
     connect(ui_->confirmFiducialButton, &QPushButton::clicked, this, [this] { confirmSelectedFiducial(); });
     connect(ui_->registerFiducialsButton, &QPushButton::clicked, this, [this] { performFiducialRegistration(); });
     connect(ui_->acceptRegistrationButton, &QPushButton::clicked, this, [this] { acceptFiducialRegistration(); });
@@ -1405,7 +1406,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         ui_->registrationTable->blockSignals(false);
         updateRegistrationAvailability();
     });
-    const auto picked = [this](const Eigen::Vector3d& point) { placeSelectedFiducial(point); };
+    // Each plane reports which axis it cannot measure: a click in the
+    // sagittal view says nothing about LR beyond the slice you happen to be
+    // on, so that axis is held rather than overwritten. See
+    // placeSelectedFiducial and allFiducialEvents.m.
+    const auto pickedIn = [this](int heldAxis) {
+        return [this, heldAxis](const Eigen::Vector3d& point) { placeSelectedFiducial(point, heldAxis); };
+    };
     const auto pickedMarker = [this](int markerIndex) {
         if (markerIndex < 0 || markerIndex >= 6) return;
         suppressRegistrationNavigation_ = true;
@@ -1422,9 +1429,16 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         }
         ui_->registrationFiducialLayout->setSelectedIndex(markerIndex);
     };
-    ui_->registrationSagittalPreview->setPointPickedHandler(picked);
-    ui_->registrationCoronalPreview->setPointPickedHandler(picked);
-    ui_->registrationAxialPreview->setPointPickedHandler(picked);
+    ui_->registrationSagittalPreview->setPointPickedHandler(pickedIn(0));  // holds LR
+    ui_->registrationCoronalPreview->setPointPickedHandler(pickedIn(1));   // holds AP
+    ui_->registrationAxialPreview->setPointPickedHandler(pickedIn(2));     // holds IS
+    // "Move fiducial ... to mouse point" writes all three: the operator is
+    // relocating the fiducial to the place they are pointing at, on the slice
+    // they are looking at, not refining two of its coordinates.
+    const auto moved = [this](const Eigen::Vector3d& point) { placeSelectedFiducial(point, -1); };
+    ui_->registrationSagittalPreview->setPointMovedHandler(moved);
+    ui_->registrationCoronalPreview->setPointMovedHandler(moved);
+    ui_->registrationAxialPreview->setPointMovedHandler(moved);
     ui_->registrationSagittalPreview->setMarkerPickedHandler(pickedMarker);
     ui_->registrationCoronalPreview->setMarkerPickedHandler(pickedMarker);
     ui_->registrationAxialPreview->setMarkerPickedHandler(pickedMarker);
@@ -1884,7 +1898,6 @@ void WorkflowWindow::loadMri(const QString& path) {
 }
 
 void WorkflowWindow::resetMriViews() {
-    setPlacementMode(false);
     for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
                                   ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
                                   ui_->registrationAxialPreview, treatmentSagittalPreview_,
@@ -1959,7 +1972,6 @@ void WorkflowWindow::initializeRegistrationGeometry() {
                                                        mriVolume_.ny, mriVolume_.nz);
     registrationGeometryLoaded_ = true;
     populateRegistrationTable();
-    ui_->placeFiducialButton->setEnabled(true);
     ui_->resetRegistrationButton->setEnabled(true);
     ui_->registrationResult->setText(QStringLiteral("Ready: review all six MRI fiducial coordinates."));
 }
@@ -2039,39 +2051,27 @@ void WorkflowWindow::navigateToRegistrationFiducial(int row) {
                     .arg(QString::fromStdString(fiducials_[static_cast<std::size_t>(row)].name)), false);
 }
 
-void WorkflowWindow::setPlacementMode(bool enabled) {
-    placingFiducial_ = enabled;
-    ui_->registrationSagittalPreview->setPointPlacementEnabled(enabled);
-    ui_->registrationCoronalPreview->setPointPlacementEnabled(enabled);
-    ui_->registrationAxialPreview->setPointPlacementEnabled(enabled);
-    ui_->placeFiducialButton->setText(enabled ? QStringLiteral("Cancel placement")
-                                               : QStringLiteral("Place selected fiducial…"));
-}
-
-void WorkflowWindow::beginFiducialPlacement() {
-    if (placingFiducial_) { setPlacementMode(false); return; }
-    const int row = ui_->registrationTable->currentRow();
-    if (row < 0 || row >= 6) {
-        showMessage(QStringLiteral("Select one fiducial row before entering placement mode."), true);
-        return;
-    }
-    setPlacementMode(true);
-    showMessage(QStringLiteral("Click the center of %1 in any MRI plane. The current slice supplies the third coordinate.")
-                    .arg(ui_->registrationTable->item(row, 0)->text()), false);
-}
-
-void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm) {
+void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis) {
     const int row = ui_->registrationTable->currentRow();
     if (selectedStage_ != beam::gui::WorkflowStage::Registration || row < 0 || row >= 6) return;
+    // A click measures only the two axes lying in the plane clicked. The
+    // third is whichever slice happens to be displayed, which is not a
+    // measurement of anything -- so it keeps the value the fiducial already
+    // had. This is allFiducialEvents.m's ROIMoved branch: dragging in
+    // sagittal writes position(2)/(3) and leaves position(1) alone, and so on
+    // per plane. Writing all three let a scroll-then-click quietly drag the
+    // fiducial along the axis the operator was not looking at.
+    Eigen::Vector3d placed = positionMm;
+    if (heldAxis >= 0 && heldAxis < 3)
+        placed(heldAxis) = fiducials_[static_cast<std::size_t>(row)].position(heldAxis) * 1000.0;
     ui_->registrationTable->blockSignals(true);
     for (int axis = 0; axis < 3; ++axis)
-        ui_->registrationTable->item(row, axis + 1)->setText(QString::number(positionMm(axis), 'f', 2));
+        ui_->registrationTable->item(row, axis + 1)->setText(QString::number(placed(axis), 'f', 2));
     ui_->registrationTable->blockSignals(false);
     fiducialLocated_[static_cast<std::size_t>(row)] = true;
     fiducialConfirmed_[static_cast<std::size_t>(row)] = false;
-    fiducials_[static_cast<std::size_t>(row)].position = positionMm / 1000.0;
+    fiducials_[static_cast<std::size_t>(row)].position = placed / 1000.0;
     setRegistrationPhase(RegistrationPhase::Locating);
-    if (placingFiducial_) setPlacementMode(false);
     ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Located"));
     showMriPreviews();
     workflow_.change(beam::gui::WorkflowStage::Registration,
@@ -2273,6 +2273,17 @@ void WorkflowWindow::performCurrentPositionRegistration() {
             registrationOriginArrayData_, measured,
             leftHorizontalPositionSlider_->value(), leftVerticalPositionSlider_->value());
         applyRegistrationResult(std::move(result));
+        // registerCurrentTransducerPostion.m ends by stamping the registered
+        // array centre into every protocol table's stimParamTableData and
+        // into the live grid:
+        //
+        //     centerArrayMM = mean(arrayData.arrayTotal.rect(17:19,:),2)'*1000;
+        //     for i = 1:length(app.sys.protocolTables)
+        //         app.sys.protocolTables(i).stimParamTableData.X = centerArrayMM(1); ...
+        //     app.stimParamTable.Data.X = centerArrayMM(1); ...
+        //
+        // targetMm_ is that centre, recomputed by applyRegistrationResult above.
+        applyArrayCentreToAllTargets(targetMm_);
         setRegistrationPhase(RegistrationPhase::LockPositionRegistered);
         updateRegistrationStepIndicators();
         ui_->acceptRegistrationButton->setFocus(Qt::OtherFocusReason);
@@ -2557,6 +2568,7 @@ void WorkflowWindow::showMriPreviews() {
                                       .arg(ap, 0, 'f', 1).arg(ap - apCenter, 0, 'f', 1));
     ui_->axialSlider->setToolTip(QStringLiteral("IS %1 mm · %2 mm from initial center")
                                     .arg(is, 0, 'f', 1).arg(is - isCenter, 0, 'f', 1));
+    refreshDetachedViewers();
 }
 
 void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
@@ -2635,8 +2647,8 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     if (treatmentPlanPage) {
         // Entering the stage refreshes X/Y/Z: an unplaced target reads the
         // array centre that registration produced (see
-        // loadSelectedTargetPosition), so the grid never opens on zeros.
-        loadSelectedTargetPosition();
+        // switchToSelectedTarget), so the grid never opens on zeros.
+        switchToSelectedTarget();
         updateTreatmentPlanSummary();
         acceptTreatmentPlanButton_->setEnabled(
             workflow_.state(beam::gui::WorkflowStage::Correction).status == beam::gui::WorkflowStatus::Complete);

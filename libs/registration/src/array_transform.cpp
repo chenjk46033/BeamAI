@@ -72,11 +72,36 @@ AffineArrayResult registerCurrentTransducerPosition(const beam::array::ArrayData
 
     const AffineArrayResult fiducialFit = registerArrayToFiducials(originArrayData, mriFiducialsMm);
 
-    TransducerBasis basis = getTranslationMatrixFromTransducerFiducials(fiducialFit.fiducialMarkers);
+    // The source builds the basis from `app.FiducialROIs` -- the operator's
+    // measured MRI fiducials -- not from the fitted array's own markers:
+    //
+    //     registerArrayToFiducials(app);
+    //     FiducialROIs = app.FiducialROIs;
+    //     [M, Xvector,Yvector,Zvector] = getTranslationMatrixFromTransducerFiducials(app,FiducialROIs);
+    //
+    // The two differ by the fit residual. Rebuild the measured set here,
+    // borrowing the marker names (and their order) from the nominal array so
+    // getFiducialPositionFromName can still resolve them.
+    std::vector<FiducialMarker> measuredFiducials = setArrayFiducialMarkers(originArrayData);
+    for (std::size_t i = 0; i < measuredFiducials.size(); ++i) {
+        measuredFiducials[i].position = mriFiducialsMm[i] / 1000.0;  // mm -> m
+    }
+
+    TransducerBasis basis = getTranslationMatrixFromTransducerFiducials(measuredFiducials);
+    // `if Zvector(3)<0, Zvector = -1*Zvector; end` -- the basis comes from
+    // differences between fiducials, so its vertical axis can come out
+    // pointing inferior depending on the array's pose. The source forces it
+    // superior before assembling M; without this the vertical lock-position
+    // offset is applied in the wrong direction whenever that happens.
+    Eigen::Vector3d zVector = basis.zVector;
+    if (zVector.z() < 0.0) zVector = -zVector;
+
+    // M's columns are the basis vectors (the source's trailing transpose),
+    // mapping transducer-frame displacement into world RAS.
     Eigen::Matrix3d m;
     m.col(0) = basis.xVector;
     m.col(1) = basis.yVector;
-    m.col(2) = basis.zVector;
+    m.col(2) = zVector;
 
     const double dH = horizontalSliderValue - 1.0;
     const double dV = verticalSliderValue - 1.0;

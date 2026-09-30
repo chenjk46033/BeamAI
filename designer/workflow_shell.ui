@@ -1028,7 +1028,7 @@
                           <item>
                             <widget class="QLabel" name="registrationInstructions">
                               <property name="text">
-                                <string>Select each fiducial row to navigate and zoom to it. Drag the selected red ring onto the center of the grayscale donut in any MRI view (or use Place selected fiducial), verify it in all three planes, and repeat for all six.</string>
+                                <string>Select each fiducial to navigate and zoom to it. Drag its red ring onto the centre of the grayscale donut, verify it in all three planes, and repeat for all six. To move a fiducial a long way, right-click the point and use "Move fiducial … to mouse point".</string>
                               </property>
                               <property name="wordWrap">
                                 <bool>true</bool>
@@ -1502,19 +1502,6 @@
                           </item>
                           <item>
                             <layout class="QHBoxLayout" name="registrationActions">
-                              <item>
-                                <widget class="QPushButton" name="placeFiducialButton">
-                                  <property name="text">
-                                    <string>Place selected fiducial…</string>
-                                  </property>
-                                  <property name="toolTip">
-                                    <string>Select a table row, then click the fiducial center in any MRI plane</string>
-                                  </property>
-                                  <property name="enabled">
-                                    <bool>false</bool>
-                                  </property>
-                                </widget>
-                              </item>
                               <item>
                                 <widget class="QPushButton" name="confirmFiducialButton">
                                   <property name="text">

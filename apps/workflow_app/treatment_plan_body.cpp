@@ -118,9 +118,16 @@ const char* const kSectionLabelStyle = "QLabel { color: #f2f7f8; font-weight: 60
 // Where a Target List row keeps its name: see addTargetListRow for why it
 // cannot be the item's own text.
 constexpr int kTargetNameRole = Qt::UserRole + 1;
+// A stable key for the target's own sonications, so renaming a target or
+// inserting one above it does not lose them.
+constexpr int kTargetIdRole = Qt::UserRole + 2;
 
 QString targetListName(const QListWidgetItem* item) {
     return item ? item->data(kTargetNameRole).toString() : QString();
+}
+
+int targetListId(const QListWidgetItem* item) {
+    return item ? item->data(kTargetIdRole).toInt() : -1;
 }
 
 // The per-row Target List icons. Sized and drawn like the MRI slice buttons
@@ -165,6 +172,7 @@ void WorkflowWindow::addTargetListRow(const QString& name, int atRow) {
     // widget's margin ("SCC2" reading as "SCCC2"). The name lives in a role
     // instead, which targetListName() reads.
     item->setData(kTargetNameRole, name);
+    item->setData(kTargetIdRole, nextTargetId_++);
     if (atRow < 0)
         targetListWidget_->addItem(item);
     else
@@ -485,8 +493,11 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     });
     connect(stimParamModel_, &beam::gui_qt::StimParamTableModel::showFlagsChanged, this,
             [this] { updateSonicationPlots(); });
-    connect(stimParamModel_, &QAbstractItemModel::dataChanged, this,
-            [this] { updateSonicationPlots(); updateTreatmentPlanSummary(); });
+    connect(stimParamModel_, &QAbstractItemModel::dataChanged, this, [this] {
+        saveCurrentTargetSonications();
+        updateSonicationPlots();
+        updateTreatmentPlanSummary();
+    });
     connect(stimParamView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
             [this](const QModelIndex& current) {
                 if (current.isValid()) updateTreatmentPlanSummary();
@@ -513,7 +524,7 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     // target loads that target's placed coordinates into X/Y/Z (zeros if it
     // has never been placed) and re-centres the planes on it.
     connect(targetListWidget_, &QListWidget::currentRowChanged, this, [this](int) {
-        loadSelectedTargetPosition();
+        switchToSelectedTarget();
         const QListWidgetItem* item = targetListWidget_->currentItem();
         if (!item || !item->data(Qt::UserRole).isValid()) return;
         const QList<QVariant> ras = item->data(Qt::UserRole).toList();
@@ -664,6 +675,11 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
     stimRow.endTime = defaultDuration;
     stimParamModel_->setRows({stimRow});
 
+    // A different protocol is a different set of sonications, so the
+    // per-target records start over rather than carrying the last one across.
+    targetSonications_.clear();
+    currentTargetId_ = -1;
+
     // The Target List keeps BeamV0's own fixed names; a protocol that names
     // a target this build does not know about is appended rather than
     // replacing the list, so the operator can still place it.
@@ -676,7 +692,7 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
     currentSonicationNumberEdit_->setRange(1, std::max<int>(1, static_cast<int>(stimParamModel_->rows().size())));
 
     selectSonicationRow(0);
-    loadSelectedTargetPosition();
+    switchToSelectedTarget();
     updateBestTargets();
 }
 
@@ -712,29 +728,105 @@ void WorkflowWindow::updateStimGridHeight() {
 // Copies the selected target's placed position into the grid row's X/Y/Z,
 // so the grid always shows the coordinates of the target being worked on.
 // An unplaced target reads as zeros, which is what BeamV0's grid starts at.
-void WorkflowWindow::loadSelectedTargetPosition() {
-    if (!stimParamModel_ || stimParamModel_->rows().empty()) return;
+// Port of app.sys.protocolTables: every target owns its own stimParamTable
+// data, and selecting a target swaps the grid to it
+// (setProtocolTableWithStimParamTable.m saves the grid back into the selected
+// target's slot, setProtocolListBox.m rebuilds the list from those records).
+// Beam's C++ port left this model out -- known_gaps_gui.md calls it out, and
+// it is why its own Move To Target has no per-target position to move to.
+// Without it every target showed the same row, so switching target appeared
+// to do nothing.
+void WorkflowWindow::switchToSelectedTarget() {
+    if (!stimParamModel_ || !targetListWidget_) return;
+    saveCurrentTargetSonications();
+
     const QListWidgetItem* item = targetListWidget_->currentItem();
-    // A target the operator has not placed yet sits at the array's own centre,
-    // not at the origin. That is what BeamV0 shows: drawROIs.m computes
-    // `centerArrayMM = mean(arrayData.arrayTotal.rect(17:19,:),2)*1000` and
-    // assigns it as every shown target's position, and Beam's C++ port carries
-    // the same value through setArrayCenterMm/refreshTargetCrosshairs.
-    // targetMm_ is this application's copy of that centre.
-    Eigen::Vector3d placed = targetMm_;
-    if (item && item->data(Qt::UserRole).isValid()) {
-        const QList<QVariant> ras = item->data(Qt::UserRole).toList();
-        if (ras.size() == 3)
-            placed = Eigen::Vector3d(ras.at(0).toDouble(), ras.at(1).toDouble(), ras.at(2).toDouble());
+    currentTargetId_ = targetListId(item);
+    if (currentTargetId_ < 0) return;
+
+    const auto stored = targetSonications_.constFind(currentTargetId_);
+    if (stored != targetSonications_.constEnd() && !stored.value().empty()) {
+        stimParamModel_->setRows(stored.value());
+    } else {
+        // First visit to this target: one sonication, carrying the protocol's
+        // own amplitude and duration for that target where it names one, and
+        // sitting at the array centre until the operator places it. That
+        // centre is drawROIs.m's `centerArrayMM =
+        // mean(arrayData.arrayTotal.rect(17:19,:),2)*1000`, which targetMm_ is
+        // this application's copy of.
+        beam::gui_qt::StimParamRow row;
+        row.order = 1;
+        row.show = true;
+        row.amplitude = 0.75;
+        row.endTime = 30.0;
+        const QString name = targetListName(item);
+        for (const beam::gui_qt::TreatmentProtocolRow& protocolRow : protocolModel_->rows()) {
+            if (protocolRow.target == name) {
+                row.amplitude = protocolRow.amplitude;
+                row.endTime = protocolRow.duration;
+                break;
+            }
+        }
+        row.x = targetMm_.x();
+        row.y = targetMm_.y();
+        row.z = targetMm_.z();
+        stimParamModel_->setRows({row});
     }
-    const int row = std::max(selectedSonicationRow(), 0);
-    std::vector<beam::gui_qt::StimParamRow> rows = stimParamModel_->rows();
-    rows[static_cast<std::size_t>(row)].x = placed.x();
-    rows[static_cast<std::size_t>(row)].y = placed.y();
-    rows[static_cast<std::size_t>(row)].z = placed.z();
-    stimParamModel_->setRows(std::move(rows));
-    stimParamView_->selectRow(row);
+    // A target the operator has never placed follows the array centre, which
+    // moves as registration and targeting proceed -- including from zero, when
+    // the record was first created before any MRI was loaded. Placed targets
+    // (those carrying a position on their list item) keep their own.
+    if (item && !item->data(Qt::UserRole).isValid() && !targetMm_.isZero()) {
+        std::vector<beam::gui_qt::StimParamRow> rows = stimParamModel_->rows();
+        rows.front().x = targetMm_.x();
+        rows.front().y = targetMm_.y();
+        rows.front().z = targetMm_.z();
+        stimParamModel_->setRows(std::move(rows));
+    }
+    stimParamView_->selectRow(0);
+    currentSonicationNumberEdit_->setRange(1, std::max<int>(1, static_cast<int>(stimParamModel_->rows().size())));
+    saveCurrentTargetSonications();
+    updateSonicationPlots();
     updateTreatmentPlanSummary();
+}
+
+// Port of registerCurrentTransducerPostion.m's tail: once the array is
+// registered to the current lock position, every target's sonication -- not
+// just the selected one, and not just the unplaced ones -- takes the
+// registered array centre as its X/Y/Z. The operator can then move individual
+// targets off it; until they do, the plan reflects where the array actually
+// points.
+void WorkflowWindow::applyArrayCentreToAllTargets(const Eigen::Vector3d& centreMm) {
+    if (!stimParamModel_ || !targetListWidget_) return;
+    for (auto it = targetSonications_.begin(); it != targetSonications_.end(); ++it) {
+        for (beam::gui_qt::StimParamRow& row : it.value()) {
+            row.x = centreMm.x();
+            row.y = centreMm.y();
+            row.z = centreMm.z();
+        }
+    }
+    // The list items carry the same position for Move To Target.
+    for (int i = 0; i < targetListWidget_->count(); ++i) {
+        targetListWidget_->item(i)->setData(
+            Qt::UserRole, QList<QVariant>{centreMm.x(), centreMm.y(), centreMm.z()});
+    }
+    // And the grid currently on screen, which may not have been saved yet.
+    if (!stimParamModel_->rows().empty()) {
+        std::vector<beam::gui_qt::StimParamRow> rows = stimParamModel_->rows();
+        for (beam::gui_qt::StimParamRow& row : rows) {
+            row.x = centreMm.x();
+            row.y = centreMm.y();
+            row.z = centreMm.z();
+        }
+        stimParamModel_->setRows(std::move(rows));
+        saveCurrentTargetSonications();
+        updateTreatmentPlanSummary();
+    }
+}
+
+void WorkflowWindow::saveCurrentTargetSonications() {
+    if (currentTargetId_ >= 0 && stimParamModel_ && !stimParamModel_->rows().empty())
+        targetSonications_.insert(currentTargetId_, stimParamModel_->rows());
 }
 
 // Writes an MRI click into the selected sonication. This is the piece
@@ -750,10 +842,12 @@ void WorkflowWindow::setSonicationTargetFromMri(const Eigen::Vector3d& positionM
     stimParamModel_->setRows(std::move(rows));
     stimParamView_->selectRow(row);
 
-    // The placed position also belongs to whichever target is selected, so
-    // Move To Target can come back to it later.
+    // The placed position also belongs to whichever target is selected: the
+    // grid row goes into that target's own record, and the position onto the
+    // list item for Move To Target.
     if (QListWidgetItem* item = targetListWidget_->currentItem())
         item->setData(Qt::UserRole, QList<QVariant>{positionMm.x(), positionMm.y(), positionMm.z()});
+    saveCurrentTargetSonications();
     updateTreatmentPlanSummary();
 }
 

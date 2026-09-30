@@ -63,6 +63,9 @@ if(Qt6_FOUND AND TARGET gui_qt)
         # so the shell's constructor does not grow another several hundred
         # lines.
         workflow_app/treatment_plan_body.cpp
+        # "Open viewer in a new window": a larger, Escape-closable window for
+        # one MRI plane, driving that pane's own slice controls.
+        workflow_app/detached_viewer.cpp
         workflow_app/resources/workflow_resources.qrc
         ../designer/workflow_shell.ui
         # AUTORCC compiles this into the Targeting Examples sub-tab's
@@ -78,6 +81,12 @@ if(Qt6_FOUND AND TARGET gui_qt)
 else()
     message(STATUS "Qt6 not found -- skipping beam_app.")
 endif()
+
+
+
+
+
+
 
 
 

@@ -43,8 +43,23 @@ public:
     void focusOn(QPointF normalizedPosition, double zoom = 3.0);
     void setPointPlacementEnabled(bool enabled);
     void setPointPickedHandler(std::function<void(const Eigen::Vector3d&)> handler);
+    // The context menu's "Move fiducial ... to mouse point" is an explicit
+    // relocation, not an in-plane refinement, so it goes through its own
+    // handler: the caller may want to write all three coordinates here while
+    // treating a drag as a measurement of only the two in-plane ones. Falls
+    // back to the picked handler when unset.
+    void setPointMovedHandler(std::function<void(const Eigen::Vector3d&)> handler);
     void setMarkerPickedHandler(std::function<void(int)> handler);
     void setCoordinatePasteOptions(QStringList options);
+    // Adds "Open viewer in a new window" to the context menu. The window
+    // itself is the caller's to build -- this view knows nothing about the
+    // slider row that drives it.
+    void setOpenViewerHandler(std::function<void()> handler);
+    // Copies everything this view renders from another instance: the slice,
+    // overlays, markers, RAS mapping and brightness. Used to keep a detached
+    // viewer showing exactly what its source pane shows, without duplicating
+    // the per-plane assembly in showMriPreviews.
+    void mirrorFrom(const WorkflowMriView& source);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -92,6 +107,8 @@ private:
     QPointF mouseWidgetPosition_;
     bool pointPlacementEnabled_ = false;
     std::function<void(const Eigen::Vector3d&)> pointPickedHandler_;
+    std::function<void(const Eigen::Vector3d&)> pointMovedHandler_;
     std::function<void(int)> markerPickedHandler_;
     QStringList coordinatePasteOptions_;
+    std::function<void()> openViewerHandler_;
 };

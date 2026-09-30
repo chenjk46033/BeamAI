@@ -62,10 +62,14 @@ AffineArrayResult registerArrayToFiducials(const beam::array::ArrayData& originA
 // fiducials onto `mriFiducialsMm`, same as the "Register To MRI
 // Fiducials" button), then converts the horizontal/vertical physical
 // slider position into a world-frame translation via the already-ported
-// getTranslationMatrixFromTransducerFiducials basis (with the source's
-// own Z-vector sign-flip-if-negative reapplied here, since that ported
-// function doesn't do it internally), and applies that translation on
-// top. `horizontalSliderValue`/`verticalSliderValue`: the physical lock-
+// getTranslationMatrixFromTransducerFiducials basis, and applies that
+// translation on top.
+//
+// The basis is built from `mriFiducialsMm` -- the operator's measured
+// points, which is what the source passes (`app.FiducialROIs`) -- not
+// from the fitted array's own markers; the two differ by the fit
+// residual. The source's `if Zvector(3)<0` sign flip is applied here,
+// since the ported basis function does not do it internally. `horizontalSliderValue`/`verticalSliderValue`: the physical lock-
 // position slider readings (both Left/Right sides must agree in the
 // source, checked by the GUI itself, not here -- see the same doc for
 // why the source's own alignment-mismatch warning isn't reproduced).
