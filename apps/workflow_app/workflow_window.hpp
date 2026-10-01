@@ -88,7 +88,10 @@ private:
     // 2=IS); it keeps its current value. -1 writes all three.
     void placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis = -1);
     void confirmSelectedFiducial();
-    QString exportFiducialsCsv() const;
+    QString currentMriGeometry() const;
+    QString fiducialDirectory() const;
+    QString writeFiducialsCsv(const QString& path) const;
+    void saveFiducialsCsv();
     void importFiducialsCsv();
     void updateArrayPositionReadout();
     void updateRegistrationAvailability();
@@ -184,6 +187,7 @@ private:
     QLabel* registrationStep1Label_ = nullptr;
     QLabel* registrationStep2Label_ = nullptr;
     QPushButton* importFiducialsButton_ = nullptr;
+    QPushButton* saveFiducialsButton_ = nullptr;
     QLabel* registrationStep3Label_ = nullptr;
     QLabel* arrayPositionLabel_ = nullptr;
     QLabel* registrationStep4Label_ = nullptr;

@@ -218,3 +218,23 @@ right.
 slice display, the array mask overlay, and therefore where an operator
 clicks. Worth settling against a scan with known left/right asymmetry (or a
 vendor phantom) before relying on either path for laterality.
+
+### Update: the app's axis normalisation is the correct pairing (AP/IS)
+
+`WorkflowWindow::installMri` reverses any descending axis so `mriAxes_` is
+always ascending, without reordering `mriVolume_`. Sampling the scan under the
+160 registered element centres settles whether that pairing is right
+(`make_mri_fixture --axischeck <dicom-dir> <rect.csv>`):
+
+| volume paired with | ratio to volume mean |
+|---|---|
+| the loader's axes as returned | 0.082 (array in air) |
+| ascending axes, as `installMri` produces | 2.983 (array on the transducer blocks) |
+
+So the normalisation is correct and necessary for AP and IS, and the geometry
+fingerprint written into a fiducial CSV records that normalised frame.
+
+This does not settle **LR**. Flipping AP/IS moves the array off the blocks
+entirely, which is why the test separates those cases so sharply; a left/right
+flip would instead land the array on the opposite block and score well either
+way. Laterality still needs a scan with known asymmetry.

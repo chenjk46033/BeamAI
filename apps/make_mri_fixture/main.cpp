@@ -18,6 +18,8 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <exception>
 #include <string>
 #include <vector>
@@ -60,7 +62,77 @@ int verify(const char* dicomPath, const char* niiPath) {
                            : "MISMATCH -- fiducials will not line up");
     return ok ? 0 : 1;
 }
+
+Eigen::MatrixXd readRectCsv(const std::string& path) {
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("cannot open " + path);
+    std::vector<std::vector<double>> rows;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        std::stringstream stream(line);
+        std::string cell;
+        std::vector<double> row;
+        while (std::getline(stream, cell, ',')) row.push_back(std::stod(cell));
+        rows.push_back(std::move(row));
+    }
+    if (rows.size() != 19) throw std::runtime_error("expected a 19-row rect CSV: " + path);
+    Eigen::MatrixXd rect(19, static_cast<Eigen::Index>(rows.front().size()));
+    for (Eigen::Index i = 0; i < 19; ++i)
+        for (Eigen::Index j = 0; j < rect.cols(); ++j)
+            rect(i, j) = rows[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
+    return rect;
+}
+
+// --axischeck: do the registered elements land on the bright transducer blocks
+// with the loader.s axes, and with the ascending axes installMri normalises to?
+int axisCheck(const char* dicomPath, const char* rectPath) {
+    const beam::mri::MriVolumeRas mri = beam::infra::dicom::loadMriRas(dicomPath);
+    const Eigen::MatrixXd rect = readRectCsv(rectPath);
+
+    const beam::mri::Volume3D volume = beam::mri::reorientedVolumeToVolume3D(mri.volume);
+    double volumeMean = 0.0;
+    for (Eigen::Index k = 0; k < volume.nz; ++k) volumeMean += volume.kSlices[static_cast<std::size_t>(k)].mean();
+    volumeMean /= static_cast<double>(volume.nz);
+
+    const auto ascending = [](Eigen::VectorXd a) {
+        if (a.size() > 1 && a(a.size() - 1) < a(0)) a.reverseInPlace();
+        return a;
+    };
+    const auto nearest = [](const Eigen::VectorXd& axis, double mm) {
+        Eigen::Index best = 0;
+        (axis.array() - mm).abs().minCoeff(&best);
+        return best;
+    };
+    const auto ratio = [&](const char* label, const Eigen::VectorXd& lr, const Eigen::VectorXd& ap,
+                           const Eigen::VectorXd& is) {
+        double total = 0.0;
+        for (Eigen::Index c = 0; c < rect.cols(); ++c) {
+            const Eigen::Index i = nearest(lr, rect(16, c) * 1000.0);
+            const Eigen::Index j = nearest(ap, rect(17, c) * 1000.0);
+            const Eigen::Index k = nearest(is, rect(18, c) * 1000.0);
+            total += volume(i, j, k);
+        }
+        const double mean = total / static_cast<double>(rect.cols());
+        std::printf("  %-34s mean %8.2f   ratio %.3f\n", label, mean, mean / volumeMean);
+    };
+
+    std::printf("volume mean %.2f over %lld elements\n", volumeMean,
+                static_cast<long long>(rect.cols()));
+    ratio("loader axes (as returned)", mri.axes.dimLR, mri.axes.dimAP, mri.axes.dimIS);
+    ratio("ascending axes (installMri)", ascending(mri.axes.dimLR), ascending(mri.axes.dimAP),
+          ascending(mri.axes.dimIS));
+    return 0;
+}
 int main(int argc, char** argv) {
+    if (argc == 4 && std::string(argv[1]) == "--axischeck") {
+        try {
+            return axisCheck(argv[2], argv[3]);
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "make_mri_fixture: %s\n", error.what());
+            return 1;
+        }
+    }
     if (argc == 4 && std::string(argv[1]) == "--verify") {
         try {
             return verify(argv[2], argv[3]);

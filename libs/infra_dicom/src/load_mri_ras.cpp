@@ -1,6 +1,8 @@
 #include "infra_dicom/load_mri_ras.hpp"
 
 #include <algorithm>
+#include <cstring>
+#include <fstream>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -21,18 +23,31 @@ bool looksLikeNifti(const std::filesystem::path& p) {
     return p.filename().string().find(".nii") != std::string::npos;
 }
 
-// A real patient folder (e.g. this port's own BeamExampleDataDICOMandMatFiles)
-// mixes actual DICOM slice files (often extensionless, PACS-style) several
-// directories deep with things that are never DICOM: a companion .mat
-// export, a DICOMDIR index file, macOS's .DS_Store, an already-converted
-// .nii*. readDicomSlice has no per-file recovery -- it throws on the
-// first file that fails to parse -- so these need filtering out before
-// assembleDicomSeriesRas ever sees them, not caught after the fact.
+// Identify slices by the Part 10 preamble rather than blocklisting companion
+// extensions: a patient folder accumulates sidecars, and a blocklist is always
+// one file type behind. DICOMDIR has the magic but indexes rather than holds a slice.
+bool hasDicomMagic(const std::filesystem::path& p) {
+    std::ifstream file(p, std::ios::binary);
+    if (!file) return false;
+    char magic[4] = {};
+    file.seekg(128);
+    return file.read(magic, 4) && std::memcmp(magic, "DICM", 4) == 0;
+}
+
+bool looksLikeDicomSlice(const std::filesystem::path& p) {
+    const std::string name = p.filename().string();
+    if (name == "DICOMDIR" || name == ".DS_Store") return false;
+    return hasDicomMagic(p);
+}
+
+// Pre-Part-10 exports have no preamble, so fall back to rejecting what is
+// recognisably not a slice.
 bool looksLikeNonDicomCompanion(const std::filesystem::path& p) {
     const std::string name = p.filename().string();
     if (name == "DICOMDIR" || name == ".DS_Store") return true;
     const std::string ext = p.extension().string();
-    return ext == ".mat" || ext == ".zip" || ext == ".txt" || looksLikeNifti(p);
+    return ext == ".mat" || ext == ".zip" || ext == ".txt" || ext == ".csv" || ext == ".json" ||
+           ext == ".log" || ext == ".png" || ext == ".pdf" || looksLikeNifti(p);
 }
 
 // Recursive: a real acquisition's DICOM files typically sit several
@@ -57,8 +72,11 @@ beam::mri::MriVolumeRas loadMriRas(const std::string& path) {
 
     std::vector<std::string> dicomCandidates;
     if (isDir) {
-        dicomCandidates =
-            findFilesRecursive(path, [](const fs::path& p) { return !looksLikeNonDicomCompanion(p); });
+        dicomCandidates = findFilesRecursive(path, looksLikeDicomSlice);
+        if (dicomCandidates.empty()) {
+            dicomCandidates = findFilesRecursive(
+                path, [](const fs::path& p) { return !looksLikeNonDicomCompanion(p); });
+        }
     } else {
         dicomCandidates.push_back(path);
     }

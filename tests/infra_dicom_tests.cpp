@@ -215,6 +215,35 @@ TEST(LoadMriRas, DirectoryOfDicomFilesUsesAssembler) {
     for (size_t i = 0; i < 6; ++i) EXPECT_NEAR(mri.volume.voxels[i], expectedK0[i], 1e-9);
 }
 
+// Saving fiducials beside the scan used to make the series unreadable: the
+// filter rejected a list of known companion extensions, and .csv was not on
+// it, so the parser was handed a text file and threw.
+TEST(LoadMriRas, SidecarFilesBesideTheSeriesAreIgnored) {
+    const std::string dir = "test_fixture_mriras_sidecar_dir";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    for (int k = 0; k < 3; ++k) {
+        std::vector<Uint16> px(6);
+        for (int j = 0; j < 2; ++j)
+            for (int i = 0; i < 3; ++i)
+                px[static_cast<size_t>(j * 3 + i)] = static_cast<Uint16>(100 * k + 10 * j + i);
+        writeDicomSliceForTesting(dir + "/slice" + std::to_string(k) + ".dcm", 2, 3,
+                                   Eigen::Vector3d(-10, -20, 2.0 * k), px,
+                                   ("1.2.3.4.5.6.7.8.9." + std::to_string(k + 40)).c_str());
+    }
+    for (const char* sidecar : {"beamai_fiducials_T1_MRI.csv", "notes.rtf", "export.bak",
+                                "Thumbs.db", "scanner.report"}) {
+        std::ofstream(dir + "/" + sidecar) << "not a dicom file\n";
+    }
+
+    const auto mri = loadMriRas(dir);
+    ASSERT_EQ(mri.volume.dims[0], 3);
+    ASSERT_EQ(mri.volume.dims[1], 2);
+    ASSERT_EQ(mri.volume.dims[2], 3);
+    const std::vector<double> expectedK0 = {12, 11, 10, 2, 1, 0};
+    for (size_t i = 0; i < 6; ++i) EXPECT_NEAR(mri.volume.voxels[i], expectedK0[i], 1e-9);
+}
+
 TEST(LoadMriRas, DirectoryWithOnlyNiftiFallsBackAndLoadsIt) {
     const std::string dir = "test_fixture_mriras_nifti_dir";
     std::filesystem::create_directories(dir);

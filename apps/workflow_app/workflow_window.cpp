@@ -15,6 +15,8 @@
 #include <QListWidgetItem>
 #include <QFileDialog>
 #include <QHash>
+#include <QRegularExpression>
+#include <QStandardPaths>
 #include <QFile>
 #include <QTextStream>
 #include <QSet>
@@ -453,25 +455,47 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registerFiducialsButton->setStyleSheet(QStringLiteral(
         "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
         "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
-    // Replays a previously exported measurement session. Deliberately quiet
-    // (no accent fill) -- it is a verification/setup aid, not a step in the
-    // operator's normal path through the stage.
-    importFiducialsButton_ = new QPushButton(QStringLiteral("Import..."), this);
+    // File operations, not workflow steps: kept out of the numbered action row
+    // below and attached to the table whose contents they read and write.
+    const QString fiducialFileButtonStyle = QStringLiteral(
+        "QPushButton { background: transparent; color: #9fb4bd; border: 1px solid #3c4d55; "
+        "border-radius: 3px; padding: 1px 8px; font-size: 11px; } "
+        "QPushButton:hover { background: #2f3b41; color: #d7e3e7; } "
+        "QPushButton:disabled { color: #5d6c73; border-color: #333c41; }");
+    importFiducialsButton_ = new QPushButton(QStringLiteral("Import..."), markerTablePanel);
     importFiducialsButton_->setObjectName(QStringLiteral("importFiducialsButton"));
-    importFiducialsButton_->setToolTip(QStringLiteral(
-        "Load six measured fiducials from a beamai_fiducials.csv written by Confirm"));
-    importFiducialsButton_->setMinimumHeight(30);
+    importFiducialsButton_->setToolTip(
+        QStringLiteral("Load six measured fiducials from a CSV saved earlier"));
+    importFiducialsButton_->setFixedHeight(20);
     importFiducialsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    importFiducialsButton_->setStyleSheet(QStringLiteral(
-        "QPushButton { background: #2f3b41; color: #d7e3e7; border: 1px solid #44555c; border-radius: 4px; padding: 5px 10px; } "
-        "QPushButton:hover { background: #3b4950; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
+    importFiducialsButton_->setStyleSheet(fiducialFileButtonStyle);
     connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
+    saveFiducialsButton_ = new QPushButton(QStringLiteral("Save..."), markerTablePanel);
+    saveFiducialsButton_->setObjectName(QStringLiteral("saveFiducialsButton"));
+    saveFiducialsButton_->setToolTip(
+        QStringLiteral("Save the six measured fiducials beside the MRI, for Import... to read back"));
+    saveFiducialsButton_->setFixedHeight(20);
+    saveFiducialsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    saveFiducialsButton_->setStyleSheet(fiducialFileButtonStyle);
+    connect(saveFiducialsButton_, &QPushButton::clicked, this, [this] { saveFiducialsCsv(); });
+
+    auto* fiducialFileRow = new QHBoxLayout;
+    fiducialFileRow->setContentsMargins(0, 0, 0, 2);
+    fiducialFileRow->setSpacing(4);
+    auto* fiducialFileLabel = new QLabel(QStringLiteral("Measured fiducials"), markerTablePanel);
+    fiducialFileLabel->setStyleSheet(
+        QStringLiteral("QLabel { color: #7f949d; font-size: 11px; font-weight: 600; }"));
+    fiducialFileRow->addWidget(fiducialFileLabel);
+    fiducialFileRow->addStretch(1);
+    fiducialFileRow->addWidget(importFiducialsButton_);
+    fiducialFileRow->addWidget(saveFiducialsButton_);
+
     auto* markerActions = new QHBoxLayout;
     markerActions->setContentsMargins(0, 0, 0, 0);
     markerActions->setSpacing(4);
     markerActions->addWidget(ui_->confirmFiducialButton, 1);
     markerActions->addWidget(ui_->registerFiducialsButton, 1);
-    markerActions->addWidget(importFiducialsButton_, 0);
+    markerTableLayout->addLayout(fiducialFileRow);
     markerTableLayout->addWidget(ui_->registrationTable, 0);
     markerTableLayout->addLayout(markerActions);
     markerTableLayout->setAlignment(ui_->registrationTable, Qt::AlignTop);
@@ -575,7 +599,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         panelLayout->setVerticalSpacing(2);
         panelLayout->setColumnMinimumWidth(1, 22);
         vertical = makePositionSlider(panel, Qt::Vertical);
-        // Named so tests and probes can address them without guessing layout order.
         vertical->setObjectName(title.startsWith(QStringLiteral("Subject Left"))
                                     ? QStringLiteral("leftVerticalPositionSlider")
                                     : QStringLiteral("rightVerticalPositionSlider"));
@@ -2092,20 +2115,74 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
     updateRegistrationAvailability();
 }
 
-// Writes the six measured fiducials at full double precision so BeamV0 can be
-// driven from exactly the same points -- see matlab_verify/load_beamai_fiducials.m.
-// The registration table rounds to 2 decimals for reading; copying those by hand
-// would feed BeamV0 slightly different input than BeamAI itself registers with,
-// which would show up as a fake ~0.01 mm disagreement in a side-by-side check.
-// Returns the file written, or an empty string if it could not be.
-QString WorkflowWindow::exportFiducialsCsv() const {
+void WorkflowWindow::saveFiducialsCsv() {
+    if (fiducials_.size() < 6) {
+        showMessage(QStringLiteral("Load an MRI before saving fiducials."), true);
+        return;
+    }
+    QString stem = QFileInfo(mriPath_).completeBaseName();
+    if (stem.isEmpty()) stem = QFileInfo(mriPath_).fileName();
+    if (stem.isEmpty()) stem = QStringLiteral("session");
+    const QString suggested =
+        QDir(fiducialDirectory()).filePath(QStringLiteral("beamai_fiducials_%1.csv").arg(stem));
+
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Save measured fiducials"), suggested,
+        QStringLiteral("Fiducial CSV (*.csv);;All files (*)"));
+    if (path.isEmpty()) return;
+
+    const QString written = writeFiducialsCsv(path);
+    if (written.isEmpty()) {
+        showMessage(QStringLiteral("Could not write %1").arg(path), true);
+        return;
+    }
+    ui_->registrationResult->setText(QStringLiteral("Six fiducials saved to %1").arg(written));
+    showMessage(QStringLiteral("Fiducials saved."), false);
+}
+
+// Identifies the scan rather than the path to it: stable when the same series
+// is reached by another spelling, different for another subject.
+// Beside the MRI the points were measured on, so a subject's scan and its
+// fiducials stay together. Imaging is often on read-only or archival storage,
+// so fall back to Documents rather than offering a folder that cannot be
+// written.
+QString WorkflowWindow::fiducialDirectory() const {
+    const QFileInfo mri(mriPath_);
+    if (!mriPath_.isEmpty()) {
+        const QString beside = mri.isDir() ? mri.absoluteFilePath() : mri.absolutePath();
+        if (!beside.isEmpty() && QFileInfo(beside).isWritable()) return beside;
+    }
+    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString fallback = QDir(documents).filePath(QStringLiteral("BeamAI/fiducials"));
+    QDir().mkpath(fallback);
+    return QDir(fallback).exists() ? fallback : QDir::currentPath();
+}
+
+QString WorkflowWindow::currentMriGeometry() const {
+    if (mriVolume_.nx <= 0 || mriAxes_.dimLR.size() == 0) return QString();
+    const auto ends = [](const Eigen::VectorXd& axis) {
+        return QStringLiteral("%1,%2").arg(QString::number(axis(0), 'g', 10),
+                                           QString::number(axis(axis.size() - 1), 'g', 10));
+    };
+    return QStringLiteral("%1,%2,%3,%4,%5,%6")
+        .arg(mriVolume_.nx)
+        .arg(mriVolume_.ny)
+        .arg(mriVolume_.nz)
+        .arg(ends(mriAxes_.dimLR), ends(mriAxes_.dimAP), ends(mriAxes_.dimIS));
+}
+
+QString WorkflowWindow::writeFiducialsCsv(const QString& path) const {
     if (fiducials_.size() < 6) return QString();
-    const QString path = QDir::current().filePath(QStringLiteral("beamai_fiducials.csv"));
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return QString();
     QTextStream out(&file);
     out << "# BeamAI measured fiducials, millimetres, RAS (+x right, +y anterior, +z superior)\n";
     out << "# MRI: " << mriPath_ << "\n";
+    out << "# geometry: " << currentMriGeometry() << "\n";
+    out << "# lock left: horizontal=" << leftHorizontalPositionSlider_->value()
+        << ", vertical=" << leftVerticalPositionSlider_->value() << "\n";
+    out << "# lock right: horizontal=" << rightHorizontalPositionSlider_->value()
+        << ", vertical=" << rightVerticalPositionSlider_->value() << "\n";
     out << "name,x,y,z\n";
     for (const auto& marker : fiducials_) {
         const Eigen::Vector3d mm = marker.position * 1000.0;
@@ -2137,31 +2214,19 @@ void WorkflowWindow::confirmSelectedFiducial() {
                      "Fiducial confirmation changed; registration must be recalculated.");
     updateRegistrationAvailability();
 
-    const QString exported = exportFiducialsCsv();
-
     showMessage(confirmedCount == 1
                     ? QStringLiteral("Fiducial confirmed.")
                     : QStringLiteral("%1 located fiducials confirmed.").arg(confirmedCount), false);
-    if (!exported.isEmpty()) {
-        ui_->registrationResult->setText(
-            QStringLiteral("%1 fiducial%2 confirmed. Positions written to %3")
-                .arg(confirmedCount)
-                .arg(confirmedCount == 1 ? QString() : QStringLiteral("s"), exported));
-    }
+    ui_->registrationResult->setText(
+        QStringLiteral("%1 fiducial%2 confirmed. Save... keeps them beside the MRI.")
+            .arg(confirmedCount)
+            .arg(confirmedCount == 1 ? QString() : QStringLiteral("s")));
     refresh();
     QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
 
 
-// The read half of exportFiducialsCsv: loads a previously confirmed set of
-// six fiducials back in, so a measurement session can be replayed without
-// re-placing every marker by hand. That matters for side-by-side checks
-// against BeamV0 -- matlab_verify/load_beamai_fiducials.m reads this same
-// file into app.FiducialROIs, so both applications register from input that
-// is identical bit for bit rather than retyped from the table's 2 decimals.
-//
-// Matches by marker NAME, not row order, and refuses a file that is missing
-// any of the six rather than silently registering from a partial set.
+// Matches by marker name, not row order; refuses a file missing any of the six.
 void WorkflowWindow::importFiducialsCsv() {
     if (!registrationGeometryLoaded_ || fiducials_.size() < 6) {
         showMessage(QStringLiteral("Load an MRI before importing fiducials."), true);
@@ -2169,8 +2234,7 @@ void WorkflowWindow::importFiducialsCsv() {
     }
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("Import measured fiducials"),
-        QDir::current().filePath(QStringLiteral("beamai_fiducials.csv")),
-        QStringLiteral("Fiducial CSV (*.csv);;All files (*)"));
+        fiducialDirectory(), QStringLiteral("Fiducial CSV (*.csv);;All files (*)"));
     if (path.isEmpty()) return;
 
     QFile file(path);
@@ -2179,11 +2243,48 @@ void WorkflowWindow::importFiducialsCsv() {
         return;
     }
     QHash<QString, Eigen::Vector3d> byName;
+    QString sourceMri;
+    QString sourceGeometry;
+    int lockLeftHorizontal = -1;
+    int lockLeftVertical = -1;
+    int lockRightHorizontal = -1;
+    int lockRightVertical = -1;
     QTextStream in(&file);
     int lineNumber = 0;
     while (!in.atEnd()) {
         const QString line = in.readLine().trimmed();
         ++lineNumber;
+        // Measured against a different scan registers silently against the wrong
+        // anatomy; warn, do not block -- relocated images change the path legitimately.
+        if (line.startsWith(QStringLiteral("# MRI:"))) {
+            sourceMri = line.mid(6).trimmed();
+            continue;
+        }
+        if (line.startsWith(QStringLiteral("# geometry:"))) {
+            sourceGeometry = line.mid(11).trimmed();
+            continue;
+        }
+        if (line.startsWith(QStringLiteral("# lock"))) {
+            static const QRegularExpression pattern(
+                QStringLiteral("^# lock(?: (left|right))?: *horizontal=(\\d+), *vertical=(\\d+)"));
+            const QRegularExpressionMatch found = pattern.match(line);
+            if (found.hasMatch()) {
+                const QString side = found.captured(1);
+                const int horizontal = found.captured(2).toInt();
+                const int vertical = found.captured(3).toInt();
+                // A pre-two-sided file records one pair; it was written only
+                // when both sides matched, so it applies to both.
+                if (side != QStringLiteral("right")) {
+                    lockLeftHorizontal = horizontal;
+                    lockLeftVertical = vertical;
+                }
+                if (side != QStringLiteral("left")) {
+                    lockRightHorizontal = horizontal;
+                    lockRightVertical = vertical;
+                }
+            }
+            continue;
+        }
         if (line.isEmpty() || line.startsWith(QLatin1Char('#')) ||
             line.startsWith(QStringLiteral("name,")))
             continue;
@@ -2220,23 +2321,40 @@ void WorkflowWindow::importFiducialsCsv() {
         fiducials_[index].position = mm / 1000.0;
         for (int axis = 0; axis < 3; ++axis)
             ui_->registrationTable->item(row, axis + 1)->setText(QString::number(mm(axis), 'f', 2));
-        // Imported points are measurements that were already confirmed once,
-        // so they arrive confirmed -- Step 2 is immediately available, which
-        // is the whole point of replaying a session.
+        // Already confirmed once, so Step 2 is available immediately.
         fiducialLocated_[index] = true;
         fiducialConfirmed_[index] = true;
         ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Confirmed"));
     }
     ui_->registrationTable->blockSignals(false);
 
+    const std::array<std::pair<QSlider*, int>, 4> restored{{
+        {leftHorizontalPositionSlider_, lockLeftHorizontal},
+        {leftVerticalPositionSlider_, lockLeftVertical},
+        {rightHorizontalPositionSlider_, lockRightHorizontal},
+        {rightVerticalPositionSlider_, lockRightVertical},
+    }};
+    for (const auto& [slider, value] : restored)
+        if (value > 0) slider->setValue(value);
+
     setRegistrationPhase(RegistrationPhase::Locating);
     workflow_.change(beam::gui::WorkflowStage::Registration,
                      "Fiducials imported; registration must be recalculated.");
     showMriPreviews();
     updateRegistrationAvailability();
-    ui_->registrationResult->setText(
-        QStringLiteral("Imported 6 fiducials from %1. Run Register to MRI fiducials.").arg(path));
-    showMessage(QStringLiteral("Imported 6 fiducials."), false);
+    const bool mriMatches = sourceGeometry.isEmpty() || sourceGeometry == currentMriGeometry();
+    if (mriMatches) {
+        ui_->registrationResult->setText(
+            QStringLiteral("Imported 6 fiducials from %1. Run Register to MRI fiducials.").arg(path));
+        showMessage(QStringLiteral("Imported 6 fiducials."), false);
+    } else {
+        ui_->registrationResult->setText(
+            QStringLiteral("Imported 6 fiducials from %1, but they were measured on a different "
+                           "MRI (%2) from the one now loaded. Check the subject before registering.")
+                .arg(path, sourceMri));
+        showMessage(QStringLiteral("Imported 6 fiducials measured on a DIFFERENT MRI (%1). Verify the "
+                                   "subject before registering.").arg(sourceMri), true);
+    }
     refresh();
     QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
