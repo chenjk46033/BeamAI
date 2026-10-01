@@ -187,3 +187,34 @@ The DICOM-assembly path (`assembleDicomSeriesRas`, `dicom_coords`) is not
 in the parity set: it replaces vendored `dicm2nii` code and has no MATLAB
 counterpart to diff against. Diadem's real-file NIfTI parity fixture
 (`matlab_parity_nifti_mri`) was also not brought over.
+
+## DICOM axis directions disagree with BeamV0 (unresolved)
+
+For `BEAM MRIs/F040/T1_MRI`, the two DICOM->RAS paths report **opposite
+directions on all three axes**:
+
+| | LR | AP | IS |
+|---|---|---|---|
+| `beam::infra::dicom::loadMriRas` | ascending | descending | descending |
+| BeamV0 `loadMRIRAS.m` (dicm2nii) | descending | ascending | ascending |
+
+Negating all three axes is a point reflection, not a rotation, so the two
+cannot both describe the subject correctly -- one has the anatomy mirrored.
+
+Sampling the MRI under the 160 registered element centres gives 2.98x the
+volume mean for BeamAI's orientation and 1.93x for BeamV0's (both above 1
+because the transducer blocks are roughly symmetric about the head, so a
+reflection still lands the array on the *other* block). That favours BeamAI's
+orientation, but the test is not independent: the fiducials were placed in
+BeamAI's viewer, so they are consistent with BeamAI's frame by construction.
+
+**Registration results are unaffected.** Fiducial positions, the array rect
+and the registered centre are all millimetres in the patient frame; they
+never pass through voxel storage order. The 1098-value BeamV0/BeamAI parity
+check and the GUI-to-GUI comparison both hold regardless of which loader is
+right.
+
+**What is affected** is anything that maps millimetres back onto voxels --
+slice display, the array mask overlay, and therefore where an operator
+clicks. Worth settling against a scan with known left/right asymmetry (or a
+vendor phantom) before relying on either path for laterality.

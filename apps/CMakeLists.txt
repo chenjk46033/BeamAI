@@ -12,6 +12,11 @@ target_link_libraries(parity_stimulation PRIVATE stimulation array util)
 add_executable(parity_mri parity_mri/main.cpp)
 target_link_libraries(parity_mri PRIVATE mri)
 
+# One-shot: regenerates testdata/..._T1_MRI.nii from the original DICOM series.
+# The result is committed; a normal build never needs this.
+add_executable(make_mri_fixture make_mri_fixture/main.cpp)
+target_link_libraries(make_mri_fixture PRIVATE infra_dicom mri)
+
 add_executable(parity_registration parity_registration/main.cpp)
 # The six measured fiducials both sides of the check register from. A compile
 # definition rather than a relative path: the parity binary runs from its own

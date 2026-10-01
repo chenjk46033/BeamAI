@@ -1,4 +1,4 @@
-function render_registration_overlay(workDir, dicomDir, outDir)
+function render_registration_overlay(workDir, mriPath, outDir)
 % render_registration_overlay - draw BeamV0's and BeamAI's registered array
 % on the same MRI, from the rect CSVs the parity run writes.
 %
@@ -6,8 +6,15 @@ function render_registration_overlay(workDir, dicomDir, outDir)
 % the same six measured fiducials, so if the ports agree the two overlays
 % coincide exactly: every red BeamAI cross sits inside a green BeamV0 circle.
 %
-%   render_registration_overlay('..\build-ai\parity_registration', ...
-%       'C:\...\BEAM MRIs\F040\T1_MRI', '..\build-ai\parity_registration')
+% mriPath defaults to the checked-in fixture
+% testdata/beamai_F040_T1_MRI.nii, so the figures reproduce from a clean
+% checkout with no access to the original series. Pass the original DICOM
+% folder instead to render from that directly -- both give the same geometry
+% (the fixture was written from it, and its axes round-trip to 8e-6 mm, the
+% float32 floor of the NIfTI-1 header format).
+%
+%   render_registration_overlay('..\build-ai\parity_registration')
+%   render_registration_overlay(workDir, 'C:\...\BEAM MRIs\F040\T1_MRI', outDir)
 
 thisDir = fileparts(mfilename('fullpath'));
 beam = fullfile(thisDir, '..', '..', 'BeamV0', 'GUIMatlab', 'BEAM');
@@ -15,6 +22,23 @@ addpath(genpath(fullfile(beam, 'MRI')));
 addpath(genpath(fullfile(beam, '..', 'nifti_utils')));
 addpath(fullfile(beam, 'Util'));
 
+% Default to the ORIGINAL DICOM series, not testdata/beamai_F040_T1_MRI.nii.
+% That fixture is oriented for BeamAI's reader, which pairs the header's axes
+% with its own volume reordering; BeamV0's loadMRIRAS reports the opposite
+% direction on all three axes for the same file, so rendering the fixture here
+% would mirror the backdrop underneath correctly-placed array markers. See
+% docs/known_gaps_mri.md -- the disagreement is real and unresolved, so this
+% tool errors rather than guessing.
+if nargin < 2 || isempty(mriPath)
+    mriPath = ['C:\Users\jkche\dev\spire.us\BeamExampleDataDICOMandMatFiles\' ...
+               'BEAM MRIs\F040\T1_MRI\DICOM\26060824\27380000'];
+end
+if ~isfolder(mriPath) && ~isfile(mriPath)
+    error('render_registration_overlay:noMri', ...
+          ['MRI not found: %s\nPass the F040 DICOM series folder explicitly. The ' ...
+           'checked-in testdata/*.nii is oriented for BeamAI''s reader and would ' ...
+           'render mirrored here (docs/known_gaps_mri.md).'], mriPath);
+end
 if nargin < 3 || isempty(outDir), outDir = workDir; end
 
 % The six measured fiducials, read from the same checked-in fixture the parity
@@ -30,8 +54,8 @@ isDataRow = cellfun(@(v) ischar(v) || isstring(v), fixture(:,1)) & ...
             ~strcmp(string(fixture(:,1)), "name");
 mriFiducials = cell2mat(fixture(isDataRow, 2:4));
 
-fprintf('loading DICOM: %s\n', dicomDir);
-[img, ~, dimLR, dimAP, dimIS] = loadMRIRAS(dicomDir);
+fprintf('loading MRI: %s\n', mriPath);
+[img, ~, dimLR, dimAP, dimIS] = loadMRIRAS(mriPath);
 close all force;
 fprintf('volume %dx%dx%d  LR[%.1f %.1f] AP[%.1f %.1f] IS[%.1f %.1f] mm\n', ...
     size(img,1), size(img,2), size(img,3), ...
