@@ -37,3 +37,7 @@
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# The export the app writes on Confirm, overwritten every session.
+# The stable parity input is testdata/beamai_fiducials_F040_T1_MRI.csv.
+/beamai_fiducials.csv

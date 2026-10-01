@@ -3,16 +3,20 @@
 // matlab_verify/verify_registration.m. See matlab_verify/README.md.
 
 #include <cmath>
+#include <array>
 #include <cstdio>
 #include <exception>
 #include <fstream>
 #include <iomanip>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include <Eigen/Core>
 
 #include "array/array_data.hpp"
+#include "array/array_struct.hpp"
 #include "array/array_types.hpp"
 #include "registration/affine_registration.hpp"
 #include "registration/array_transform.hpp"
@@ -58,6 +62,86 @@ struct Results {
         for (Eigen::Index r = 0; r < x.size(); ++r) v(k + "_" + std::to_string(r), x(r));
     }
 };
+
+// The 160-element array both apps load. Resolved relative to the parity
+// work directory (build-ai/parity_registration) or the repo root.
+std::string findGeometryCsv() {
+    const char* candidates[] = {
+        "../../../DefaultSubjectV0/defaultSubjectArrayRect.csv",
+        "../../DefaultSubjectV0/defaultSubjectArrayRect.csv",
+        "../DefaultSubjectV0/defaultSubjectArrayRect.csv",
+    };
+    for (const char* c : candidates) {
+        std::ifstream probe(c);
+        if (probe) return c;
+    }
+    throw std::runtime_error("defaultSubjectArrayRect.csv not found from the parity work directory");
+}
+
+Eigen::MatrixXd readRectCsv(const std::string& path) {
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("cannot open " + path);
+    std::vector<std::vector<double>> rows;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        std::stringstream stream(line);
+        std::string cell;
+        std::vector<double> row;
+        while (std::getline(stream, cell, ',')) row.push_back(std::stod(cell));
+        rows.push_back(std::move(row));
+    }
+    if (rows.size() != 19 || rows.front().empty()) throw std::runtime_error("invalid rect CSV: " + path);
+    Eigen::MatrixXd result(19, static_cast<Eigen::Index>(rows.front().size()));
+    for (Eigen::Index i = 0; i < 19; ++i)
+        for (Eigen::Index j = 0; j < result.cols(); ++j)
+            result(i, j) = rows[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
+    return result;
+}
+
+// Reads the six measured fiducials (mm, RAS) from the checked-in fixture,
+// ordered to match `order` by NAME rather than by row position, so the file
+// stays correct even if the two sides ever build their marker lists
+// differently. Throws rather than falling back: a parity check that silently
+// registers from a partial or missing input is worse than one that stops.
+std::vector<Eigen::Vector3d> readFiducialFixture(const std::string& path,
+                                                 const std::vector<FiducialMarker>& order) {
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("cannot open fiducial fixture: " + path);
+
+    std::map<std::string, Eigen::Vector3d> byName;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line.front() == '#' || line.rfind("name,", 0) == 0) continue;
+        std::stringstream stream(line);
+        std::string name, x, y, z, extra;
+        if (!std::getline(stream, name, ',') || !std::getline(stream, x, ',') ||
+            !std::getline(stream, y, ',') || !std::getline(stream, z, ',') ||
+            std::getline(stream, extra, ','))
+            throw std::runtime_error("expected name,x,y,z in " + path + ": " + line);
+        byName.emplace(name, Eigen::Vector3d(std::stod(x), std::stod(y), std::stod(z)));
+    }
+
+    std::vector<Eigen::Vector3d> result;
+    result.reserve(order.size());
+    for (const FiducialMarker& marker : order) {
+        const auto found = byName.find(marker.name);
+        if (found == byName.end())
+            throw std::runtime_error(path + " has no row for fiducial " + marker.name);
+        result.push_back(found->second);
+    }
+    return result;
+}
+
+void writeRect(const std::string& path, const Eigen::MatrixXd& rect) {
+    std::ofstream out(path);
+    out << std::setprecision(17);
+    for (Eigen::Index i = 0; i < rect.rows(); ++i) {
+        for (Eigen::Index j = 0; j < rect.cols(); ++j) out << (j ? "," : "") << rect(i, j);
+        out << "\n";
+    }
+}
 
 Eigen::Matrix<double, 3, 6> sourcePoints() {
     Eigen::Matrix<double, 3, 6> a;
@@ -145,20 +229,21 @@ int run() {
     for (size_t k = 0; k < arrFids.size(); ++k) r.vec("arrFid_" + arrFids[k].name, arrFids[k].position);
 
     // --- end-to-end registration, the two buttons an operator presses ---
-    // Six measured fiducials in millimetres, taken from a real BeamAI session
-    // on BEAM MRIs/F040/T1_MRI (its beamai_fiducials.csv). verify_registration.m
-    // drives BeamV0's own registerArrayToFiducials.m and the MRI-Based branch
-    // of registerCurrentTransducerPostion.m from the identical six points and
-    // the identical array, so these labels compare the whole chain rather
-    // than its pieces.
-    const std::vector<Eigen::Vector3d> mriFiducialsMm = {
-        {-37.539999999999999, 68.040000000000006, -11.35},
-        {-35.950000000000003, 68.040000000000006, -12.52},
-        {-34.359999999999999, 68.040000000000006, -13.68},
-        {-32.770000000000003, 68.040000000000006, -14.85},
-        {-31.18, 68.040000000000006, -16.010000000000002},
-        {-29.5851233516482, 68.04186, -17.180266254578726},
-    };
+    // Six measured fiducials in millimetres, read from the checked-in fixture
+    // testdata/beamai_fiducials_F040_T1_MRI.csv -- a real BeamAI session on
+    // BEAM MRIs/F040/T1_MRI. verify_registration.m reads the SAME file, so the
+    // comparison has one source of truth for its input and no literals on
+    // either side to drift apart. (The app also writes beamai_fiducials.csv
+    // into its working directory on every Confirm; that one is deliberately
+    // not used here, because it changes meaning whenever someone measures a
+    // different subject.)
+    //
+    // It drives BeamV0's own registerArrayToFiducials.m and the MRI-Based
+    // branch of registerCurrentTransducerPostion.m from the identical six
+    // points and the identical array, so these labels compare the whole chain
+    // rather than its pieces.
+    const std::vector<Eigen::Vector3d> mriFiducialsMm =
+        readFiducialFixture(BEAM_FIDUCIAL_FIXTURE_CSV, arrFids);
     const auto centreMm = [](const beam::array::ArrayData& d) {
         return Eigen::Vector3d(d.arrayTotal.rect.block(beam::array::kRectCenterStartRow, 0, 3,
                                                         d.arrayTotal.rect.cols())
@@ -174,10 +259,51 @@ int run() {
 
     // Same lock-position readings on both sides (BeamV0's sliders are 1-based,
     // so 1,1 is "no offset").
-    constexpr double kH = 2.0;
+    constexpr double kH = 3.0;
     constexpr double kV = 3.0;
     const AffineArrayResult locked = registerCurrentTransducerPosition(arrayData, mriFiducialsMm, kH, kV);
     r.vec("e2e_centreAfterLockMm", centreMm(locked.arrayData));
+
+
+    // --- end-to-end on the REAL transducer geometry ---------------------
+    // Everything above uses the synthetic buildRect(90). This block repeats
+    // the two registration steps on DefaultSubjectV0/defaultSubjectArrayRect.csv
+    // -- the 160-element array the apps actually load -- so the comparison
+    // covers the geometry an operator really registers. The fit is rigid and
+    // maps the array's own fiducials onto the measured ones, so the array's
+    // initial placement in the MRI cancels out and is not needed here.
+    const std::string geometryPath = findGeometryCsv();
+    const Eigen::MatrixXd realRect = readRectCsv(geometryPath);
+    beam::array::ArrayData realArray = beam::array::defineArrayData(realRect);
+    beam::array::reconstructPhysicalArrayHalves(realArray);
+    const Eigen::Index nElements = realArray.arrayTotal.rect.cols();
+    r.i("real_nElements", static_cast<long>(nElements));
+
+    const AffineArrayResult realFit = registerArrayToFiducials(realArray, mriFiducialsMm);
+    r.vec("real_centreAfterFitMm", centreMm(realFit.arrayData));
+    for (const FiducialMarker& m : realFit.fiducialMarkers)
+        r.vec("real_fittedFid_" + m.name, m.position);
+
+    const AffineArrayResult realLock =
+        registerCurrentTransducerPosition(realArray, mriFiducialsMm, kH, kV);
+    r.vec("real_centreAfterLockMm", centreMm(realLock.arrayData));
+
+    // Every element centre, both stages -- the whole registered geometry,
+    // not just its mean.
+    for (Eigen::Index c = 0; c < nElements; ++c) {
+        const std::string tag = std::to_string(c);
+        for (int k = 0; k < 3; ++k) {
+            r.v("real_fitElem_" + tag + "_" + std::to_string(k),
+                realFit.arrayData.arrayTotal.rect(beam::array::kRectCenterStartRow + k, c));
+            r.v("real_lockElem_" + tag + "_" + std::to_string(k),
+                realLock.arrayData.arrayTotal.rect(beam::array::kRectCenterStartRow + k, c));
+        }
+    }
+
+    // Full 19xN rects for the overlay renderer (corners included, so the
+    // panels can be drawn rather than scattered).
+    writeRect("beamai_rect_fit.csv", realFit.arrayData.arrayTotal.rect);
+    writeRect("beamai_rect_lock.csv", realLock.arrayData.arrayTotal.rect);
 
     return 0;
 }

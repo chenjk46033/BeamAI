@@ -1,5 +1,6 @@
 #include "array/array_data.hpp"
 
+#include <array>
 #include <numeric>
 #include <stdexcept>
 
@@ -17,6 +18,31 @@ ArrayData defineArrayData(const Eigen::MatrixXd& rect) {
     arrayData.array[0].elementMapping = 1;
     arrayData.array[1].elementMapping = 2;
     return arrayData;
+}
+
+void reconstructPhysicalArrayHalves(ArrayData& data) {
+    const Eigen::MatrixXd& total = data.arrayTotal.rect;
+    const double midline = total.row(kRectCenterStartRow).mean();
+
+    std::array<std::vector<Eigen::Index>, 2> columns;
+    for (Eigen::Index c = 0; c < total.cols(); ++c) {
+        // MATLAB designation 1 is subject-Right, designation 2 is subject-Left.
+        columns[total(kRectCenterStartRow, c) >= midline ? 0 : 1].push_back(c);
+    }
+    if (columns[0].empty() || columns[1].empty()) {
+        throw std::runtime_error(
+            "reconstructPhysicalArrayHalves: geometry does not contain two distinguishable panels");
+    }
+
+    for (std::size_t half = 0; half < 2; ++half) {
+        Eigen::MatrixXd rect(total.rows(), static_cast<Eigen::Index>(columns[half].size()));
+        for (Eigen::Index c = 0; c < rect.cols(); ++c) {
+            rect.col(c) = total.col(columns[half][static_cast<std::size_t>(c)]);
+        }
+        data.array[half] = defineArrayStruct(rect, data.arrayTotal.frequency,
+                                             data.arrayTotal.elementDimensions);
+        data.array[half].elementMapping = static_cast<int>(half) + 1;
+    }
 }
 
 namespace {

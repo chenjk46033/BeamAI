@@ -1,4 +1,4 @@
-function verify_registration(workDir, outPath) %#ok<INUSD>
+function verify_registration(workDir, outPath)
 % Runs the real BeamV0 Registration/ functions on the same synthetic point
 % sets / fiducials / array as apps/parity_registration, matching the labels
 % in parity_registration_cpp.csv. Driven by matlab_verify/compare_parity.ps1.
@@ -88,12 +88,13 @@ end
 % registerCurrentTransducerPostion.m inline, because both take the live `app`
 % object; every line below is the source's own, with app.* reads replaced by
 % the locals they would have returned.
-mriFiducials = [ -37.539999999999999,  68.040000000000006, -11.35;
-                 -35.950000000000003,  68.040000000000006, -12.52;
-                 -34.359999999999999,  68.040000000000006, -13.68;
-                 -32.770000000000003,  68.040000000000006, -14.85;
-                 -31.180000000000000,  68.040000000000006, -16.010000000000002;
-                 -29.585123351648200,  68.041860000000000, -17.180266254578726 ]';
+% Read from the same checked-in fixture apps/parity_registration reads, so the
+% comparison has one source of truth for its input rather than two sets of
+% literals that can drift apart. Ordered by NAME against the array's own
+% marker list, not by row position.
+fixturePath = fullfile(thisDir, '..', 'testdata', 'beamai_fiducials_F040_T1_MRI.csv');
+nominalArray = setArrayFiducialMarkers(defineArrayData(buildRect(90)));
+mriFiducials = readFiducialFixture(fixturePath, {nominalArray.fiducialMarkers.name});
 
 originArrayData = defineArrayData(buildRect(90));
 originArrayData = setArrayFiducialMarkers(originArrayData);
@@ -129,7 +130,7 @@ Mbasis = [reshape(Xvector,[],1)'; reshape(Yvector,[],1)'; reshape(Zvector,[],1)'
 
 verticalDelta = 10;
 horizontalDelta = 7.5;
-dH = 2 - 1;   % slider readings, matching apps/parity_registration
+dH = 3 - 1;   % slider readings, matching apps/parity_registration
 dV = 3 - 1;
 dY = -dH * horizontalDelta / 1000;
 dZ =  dV * verticalDelta / 1000;
@@ -139,6 +140,67 @@ translationMat(1:3,4) = reshape(regdXYZ, [], 1);
 lockedArrayData = applyAffineToArrayData(translationMat, fittedArrayData);
 writeVec(fid, 'e2e_centreAfterLockMm', ...
     mean(lockedArrayData.arrayTotal.rect(17:19,:), 2)' * 1000);
+
+% --- end-to-end on the REAL transducer geometry ----------------------
+% Same 160-element array apps/parity_registration loads, run through
+% BeamV0's own registerArrayToFiducials.m / registerCurrentTransducerPostion.m.
+geomPath = fullfile(thisDir, '..', '..', 'DefaultSubjectV0', 'defaultSubjectArrayRect.csv');
+realRect = readmatrix(geomPath);
+realArray = defineArrayData(realRect);
+% defineArrayData.m sets BOTH halves to the whole array; setArrayFiducialMarkers.m
+% centres each marker on array(designation).rect, so the halves must be real or the
+% six nominal fiducials come out ~90 mm off in LR. BeamV0's sys .mat ships the
+% halves; rebuild them here from the midline (verified identical to the .mat).
+midlineX = mean(realRect(17,:));
+isRight = realRect(17,:) >= midlineX;
+halfR = defineArrayStruct(realRect(:, isRight), realArray.arrayTotal.frequency, realArray.arrayTotal.elementDimensions);
+halfL = defineArrayStruct(realRect(:,~isRight), realArray.arrayTotal.frequency, realArray.arrayTotal.elementDimensions);
+halfR.elementMapping = 1; halfL.elementMapping = 2;
+realArray = struct('arrayTotal', realArray.arrayTotal, 'array', [halfR, halfL]);
+realArray = setArrayFiducialMarkers(realArray);
+nElements = size(realArray.arrayTotal.rect, 2);
+fprintf(fid, 'real_nElements,%d\n', nElements);
+
+% registerArrayToFiducials.m
+Nr = numel(realArray.fiducialMarkers);
+realArrayFiducials = zeros(3, Nr);
+for i = 1:Nr
+    realArrayFiducials(:,i) = reshape(realArray.fiducialMarkers(i).position, [], 1) * 1000;
+end
+realAffine = getAffineMatrixFromRegistration(realArrayFiducials, mriFiducials, 1);
+realFit = applyAffineToArrayData(realAffine, realArray);
+writeVec(fid, 'real_centreAfterFitMm', mean(realFit.arrayTotal.rect(17:19,:), 2)' * 1000);
+for i = 1:numel(realFit.fiducialMarkers)
+    writeVec(fid, ['real_fittedFid_' char(realFit.fiducialMarkers(i).name)], ...
+        realFit.fiducialMarkers(i).position);
+end
+
+% registerCurrentTransducerPostion.m, MRIFiducialsButton branch
+realMeasured = struct('name', {}, 'position', {});
+for i = 1:Nr
+    realMeasured(i).name = realArray.fiducialMarkers(i).name;
+    realMeasured(i).position = mriFiducials(:,i)';
+end
+[~, rXv, rYv, rZv] = getTranslationMatrixFromTransducerFiducials([], realMeasured);
+if rZv(3) < 0
+    rZv = -1 * rZv;
+end
+rM = [reshape(rXv,[],1)'; reshape(rYv,[],1)'; reshape(rZv,[],1)']';
+rRegdXYZ = rM * reshape([0, dY, dZ], [], 1);
+rTranslation = eye(4);
+rTranslation(1:3,4) = reshape(rRegdXYZ, [], 1);
+realLock = applyAffineToArrayData(rTranslation, realFit);
+writeVec(fid, 'real_centreAfterLockMm', mean(realLock.arrayTotal.rect(17:19,:), 2)' * 1000);
+
+for c = 0:nElements-1
+    for k = 0:2
+        fprintf(fid, 'real_fitElem_%d_%d,%.17g\n',  c, k, realFit.arrayTotal.rect(17+k,  c+1));
+        fprintf(fid, 'real_lockElem_%d_%d,%.17g\n', c, k, realLock.arrayTotal.rect(17+k, c+1));
+    end
+end
+
+writeRectCsv(fullfile(workDir, 'beamv0_rect_fit.csv'),  realFit.arrayTotal.rect);
+writeRectCsv(fullfile(workDir, 'beamv0_rect_lock.csv'), realLock.arrayTotal.rect);
 
 end
 
@@ -178,5 +240,48 @@ function writeVec(fid, prefix, x)
 x = reshape(x, [], 1);
 for r = 0:numel(x)-1
     fprintf(fid, '%s_%d,%.17g\n', prefix, r, x(r+1));
+end
+end
+function writeRectCsv(path, m)
+f = fopen(path, 'w');
+if f < 0, error('cannot open %s', path); end
+c = onCleanup(@() fclose(f)); %#ok<NASGU>
+fmt = [repmat('%.17g,', 1, size(m,2)-1) '%.17g\n'];
+fprintf(f, fmt, m');
+end
+
+function fiducials = readFiducialFixture(path, orderNames)
+% Reads testdata/beamai_fiducials_F040_T1_MRI.csv into a 3xN matrix (mm),
+% ordered to match orderNames by name. Errors rather than falling back: a
+% parity check that silently registers from a partial input is worse than one
+% that stops.
+if ~isfile(path)
+    error('verify_registration:missingFixture', 'cannot open fiducial fixture: %s', path);
+end
+names = strings(0,1);
+coords = zeros(0,3);
+f = fopen(path, 'r');
+c = onCleanup(@() fclose(f)); %#ok<NASGU>
+while true
+    line = fgetl(f);
+    if ~ischar(line), break; end
+    line = strtrim(line);
+    if isempty(line) || startsWith(line, '#') || startsWith(line, 'name,')
+        continue;
+    end
+    parts = strsplit(line, ',');
+    if numel(parts) ~= 4
+        error('verify_registration:badRow', 'expected name,x,y,z in %s: %s', path, line);
+    end
+    names(end+1,1) = string(strtrim(parts{1})); %#ok<AGROW>
+    coords(end+1,:) = [str2double(parts{2}), str2double(parts{3}), str2double(parts{4})]; %#ok<AGROW>
+end
+fiducials = zeros(3, numel(orderNames));
+for i = 1:numel(orderNames)
+    match = find(names == string(orderNames{i}), 1);
+    if isempty(match)
+        error('verify_registration:noMatch', '%s has no row for fiducial %s', path, orderNames{i});
+    end
+    fiducials(:,i) = coords(match,:)';
 end
 end

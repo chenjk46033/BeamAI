@@ -13,6 +13,11 @@ add_executable(parity_mri parity_mri/main.cpp)
 target_link_libraries(parity_mri PRIVATE mri)
 
 add_executable(parity_registration parity_registration/main.cpp)
+# The six measured fiducials both sides of the check register from. A compile
+# definition rather than a relative path: the parity binary runs from its own
+# work directory under the build tree.
+target_compile_definitions(parity_registration PRIVATE
+    BEAM_FIDUCIAL_FIXTURE_CSV="${CMAKE_SOURCE_DIR}/testdata/beamai_fiducials_F040_T1_MRI.csv")
 target_link_libraries(parity_registration PRIVATE registration array util)
 
 add_executable(parity_safety parity_safety/main.cpp)

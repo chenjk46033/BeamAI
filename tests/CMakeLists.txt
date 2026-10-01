@@ -38,3 +38,10 @@ target_link_libraries(unit_tests PRIVATE
 # Application Control policy intermittently blocks fresh binaries (see
 # project memory), which otherwise fails the build at the discovery step.
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST)
+
+# BeamV0's shipped transducer geometry, used by the nominal-fiducial
+# regression test. Lives in a sibling checkout, so the test skips (loudly)
+# rather than failing when it is not present.
+target_compile_definitions(unit_tests PRIVATE
+    BEAM_DEFAULT_SUBJECT_RECT_CSV="${CMAKE_SOURCE_DIR}/../DefaultSubjectV0/defaultSubjectArrayRect.csv"
+)

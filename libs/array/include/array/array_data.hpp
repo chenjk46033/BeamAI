@@ -21,6 +21,23 @@ namespace beam::array {
 // real split was intended but not implemented -- ported as-is, not fixed.
 ArrayData defineArrayData(const Eigen::MatrixXd& rect);
 
+// Splits arrayTotal into the two physical panels defineArrayData.m leaves
+// as placeholders, so array[0] is the subject-Right half and array[1] the
+// subject-Left half (MATLAB designations 1 and 2).
+//
+// Not a port of any single .m file -- BeamV0 never needs it because its
+// sys .mat ships the halves already split. It is required all the same:
+// setArrayFiducialMarkers.m centres each marker on
+// array(designation).rect, so running it on a bare defineArrayData result
+// places all six fiducials around one shared centre, ~90 mm off in LR.
+// The midline split below was verified against BeamV0's shipped geometry
+// (DefaultSubjectV0/defaultSubjectMNIV1.mat): 80 elements per side and all
+// six nominal fiducials identical to the .mat.
+//
+// Throws std::runtime_error if every element falls on one side of the
+// midline, i.e. the geometry has no two distinguishable panels.
+void reconstructPhysicalArrayHalves(ArrayData& data);
+
 // Port of BeamV0/GUIMatlab/BEAM/Arrays/defineArrayTxElements.m.
 // mode must be one of "first", "second", "firstThenSecond", "both"
 // (matching the MATLAB source's strcmp branches exactly); throws

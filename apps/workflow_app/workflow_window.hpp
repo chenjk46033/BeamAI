@@ -89,6 +89,8 @@ private:
     void placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis = -1);
     void confirmSelectedFiducial();
     QString exportFiducialsCsv() const;
+    void importFiducialsCsv();
+    void updateArrayPositionReadout();
     void updateRegistrationAvailability();
     void updateRegistrationStepIndicators();
     void refresh();
@@ -181,7 +183,9 @@ private:
     QPushButton* registerCurrentPositionButton_ = nullptr;
     QLabel* registrationStep1Label_ = nullptr;
     QLabel* registrationStep2Label_ = nullptr;
+    QPushButton* importFiducialsButton_ = nullptr;
     QLabel* registrationStep3Label_ = nullptr;
+    QLabel* arrayPositionLabel_ = nullptr;
     QLabel* registrationStep4Label_ = nullptr;
     QLabel* couplingStatusLabel_ = nullptr;
     QLabel* couplingTitleLabel_ = nullptr;

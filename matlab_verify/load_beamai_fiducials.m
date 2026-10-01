@@ -24,7 +24,9 @@ function positions = load_beamai_fiducials(app, csvPath)
 % Errors if any of BeamV0's fiducials is missing from the file.
 
     if nargin < 2 || isempty(csvPath)
-        csvPath = 'beamai_fiducials.csv';
+        % The tracked fixture, not the app's volatile working-directory export.
+        csvPath = fullfile(fileparts(mfilename('fullpath')), '..', 'testdata', ...
+                           'beamai_fiducials_F040_T1_MRI.csv');
     end
     if ~isfile(csvPath)
         error('load_beamai_fiducials:missingFile', 'No such file: %s', csvPath);

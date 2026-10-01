@@ -1,6 +1,11 @@
+#include <cmath>
+#include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <numbers>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <Eigen/LU>  // for Matrix3d::determinant()
@@ -10,6 +15,7 @@
 #include "array/array_data.hpp"
 #include "array/array_struct.hpp"
 #include "array/geometry.hpp"
+#include "registration/fiducial_markers.hpp"
 
 using namespace beam::array;
 
@@ -181,4 +187,123 @@ TEST(ArrayData, DefineArrayDataUsesBeamsRealConstants) {
         EXPECT_LE(el.opposingElement, 60);
         EXPECT_NEAR(el.normalVector.norm(), 1.0, 1e-9);
     }
+}
+
+// --- reconstructPhysicalArrayHalves ------------------------------------
+//
+// defineArrayData.m leaves array(1) and array(2) as copies of the whole
+// array. setArrayFiducialMarkers.m centres each marker on
+// array(designation).rect, so the halves must be split first or all six
+// fiducials collapse around one shared centre. BeamV0 never hits this --
+// its sys .mat ships the halves -- which is exactly why nothing in the
+// MATLAB source performs the split and why it is easy to omit here.
+
+namespace {
+
+// BeamV0's own nominal fiducial positions, read out of a running BeamV0
+// (app.sys.originArrayData.fiducialMarkers, loaded from
+// DefaultSubjectV0/defaultSubjectMNIV1.mat) and converted to millimetres.
+// These are the reference BeamAI's reconstructed halves must reproduce.
+struct NamedPointMm {
+    const char* name;
+    double x, y, z;
+};
+constexpr NamedPointMm kBeamV0NominalFiducialsMm[] = {
+    {"LeftY1Z3", -108.73400115966791, 33.995002746582031, 13.499999999999984},
+    {"LeftY1Z1", -108.73400115966791, 33.995002746582031, -6.5000000000000169},
+    {"LeftY4Z1", -108.73400115966791, 11.495002746582029, -6.500000000000008},
+    {"RightY1Z3", 109.26599884033189, 33.995002746582031, 13.499999999999995},
+    {"RightY1Z1", 109.26599884033189, 33.995002746582031, -6.5000000000000053},
+    {"RightY4Z1", 109.26599884033189, 11.495002746582029, -6.4999999999999973},
+};
+
+// Reads the 19-row rect CSV, or returns an empty matrix when the sibling
+// DefaultSubjectV0 checkout is not present.
+Eigen::MatrixXd readDefaultSubjectRect() {
+    std::ifstream file(BEAM_DEFAULT_SUBJECT_RECT_CSV);
+    if (!file) return {};
+    std::vector<std::vector<double>> rows;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        std::stringstream stream(line);
+        std::string cell;
+        std::vector<double> row;
+        while (std::getline(stream, cell, ',')) row.push_back(std::stod(cell));
+        rows.push_back(std::move(row));
+    }
+    if (rows.size() != 19 || rows.front().empty()) return {};
+    Eigen::MatrixXd rect(19, static_cast<Eigen::Index>(rows.front().size()));
+    for (Eigen::Index r = 0; r < 19; ++r)
+        for (Eigen::Index c = 0; c < rect.cols(); ++c)
+            rect(r, c) = rows[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)];
+    return rect;
+}
+
+}  // namespace
+
+TEST(ReconstructPhysicalArrayHalves, SplitsTheRealGeometryIntoTwoEqualPanels) {
+    const Eigen::MatrixXd rect = readDefaultSubjectRect();
+    if (rect.size() == 0) GTEST_SKIP() << "DefaultSubjectV0 geometry not available";
+
+    ArrayData data = defineArrayData(rect);
+    // defineArrayData alone duplicates the whole array into both slots.
+    ASSERT_EQ(data.array[0].rect.cols(), rect.cols());
+    ASSERT_EQ(data.array[1].rect.cols(), rect.cols());
+
+    reconstructPhysicalArrayHalves(data);
+    EXPECT_EQ(data.array[0].rect.cols() + data.array[1].rect.cols(), rect.cols());
+    EXPECT_EQ(data.array[0].rect.cols(), data.array[1].rect.cols());
+    EXPECT_EQ(data.array[0].elementMapping, 1);
+    EXPECT_EQ(data.array[1].elementMapping, 2);
+
+    // Designation 1 is subject-Right, so its panel centre must sit at the
+    // greater LR coordinate.
+    const double rightX = data.array[0].rect.row(kRectCenterStartRow).mean();
+    const double leftX = data.array[1].rect.row(kRectCenterStartRow).mean();
+    EXPECT_GT(rightX, leftX);
+}
+
+TEST(ReconstructPhysicalArrayHalves, ReproducesBeamV0sNominalFiducialsFromTheRectCsv) {
+    const Eigen::MatrixXd rect = readDefaultSubjectRect();
+    if (rect.size() == 0) GTEST_SKIP() << "DefaultSubjectV0 geometry not available";
+
+    ArrayData data = defineArrayData(rect);
+    reconstructPhysicalArrayHalves(data);
+    const std::vector<beam::registration::FiducialMarker> markers =
+        beam::registration::setArrayFiducialMarkers(data);
+
+    ASSERT_EQ(markers.size(), std::size(kBeamV0NominalFiducialsMm));
+    for (std::size_t i = 0; i < markers.size(); ++i) {
+        const NamedPointMm& expected = kBeamV0NominalFiducialsMm[i];
+        EXPECT_EQ(markers[i].name, expected.name);
+        const Eigen::Vector3d actualMm = markers[i].position * 1000.0;
+        // 1e-9 mm = 1 picometre; the two paths should agree to rounding.
+        EXPECT_NEAR(actualMm.x(), expected.x, 1e-9) << "marker " << expected.name;
+        EXPECT_NEAR(actualMm.y(), expected.y, 1e-9) << "marker " << expected.name;
+        EXPECT_NEAR(actualMm.z(), expected.z, 1e-9) << "marker " << expected.name;
+    }
+}
+
+TEST(ReconstructPhysicalArrayHalves, OmittingItCollapsesTheTwoPanelsOntoOneCentre) {
+    // Guards the reason the split exists: skipping it is not a cosmetic
+    // difference, it moves every fiducial by ~90 mm in LR.
+    const Eigen::MatrixXd rect = readDefaultSubjectRect();
+    if (rect.size() == 0) GTEST_SKIP() << "DefaultSubjectV0 geometry not available";
+
+    const ArrayData unsplit = defineArrayData(rect);
+    const std::vector<beam::registration::FiducialMarker> wrong =
+        beam::registration::setArrayFiducialMarkers(unsplit);
+
+    ArrayData split = defineArrayData(rect);
+    reconstructPhysicalArrayHalves(split);
+    const std::vector<beam::registration::FiducialMarker> right =
+        beam::registration::setArrayFiducialMarkers(split);
+
+    const auto spanLr = [](const std::vector<beam::registration::FiducialMarker>& m) {
+        return std::abs(m[3].position.x() - m[0].position.x()) * 1000.0;  // RightY1Z3 - LeftY1Z3
+    };
+    EXPECT_NEAR(spanLr(wrong), 38.0, 0.5);    // ~2 * absX, both panels on one centre
+    EXPECT_NEAR(spanLr(right), 218.0, 0.5);   // the real panel separation
+    EXPECT_GT(spanLr(right) - spanLr(wrong), 150.0);
 }

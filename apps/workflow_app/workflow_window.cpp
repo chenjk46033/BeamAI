@@ -14,6 +14,7 @@
 
 #include <QListWidgetItem>
 #include <QFileDialog>
+#include <QHash>
 #include <QFile>
 #include <QTextStream>
 #include <QSet>
@@ -195,30 +196,6 @@ Eigen::MatrixXd readArrayRectCsv(const QString& path) {
     return result;
 }
 
-// defaultSubjectArrayRect.csv contains both physical panels in one matrix.
-// BeamV0's saved MAT structure has separate left/right ArrayStruct entries,
-// but defineArrayData(rect) alone duplicates the combined matrix into both.
-// Reconstruct those two entries from the panel separation before computing
-// fiducials; otherwise both panel centres collapse to the midline.
-void reconstructPhysicalArrayHalves(beam::array::ArrayData& data) {
-    const Eigen::MatrixXd& total = data.arrayTotal.rect;
-    const double midline = total.row(16).mean();
-    std::array<std::vector<Eigen::Index>, 2> columns;
-    for (Eigen::Index c = 0; c < total.cols(); ++c) {
-        // MATLAB designation 1 is Right, designation 2 is Left.
-        columns[total(16, c) >= midline ? 0 : 1].push_back(c);
-    }
-    if (columns[0].empty() || columns[1].empty())
-        throw std::runtime_error("Default transducer geometry does not contain distinct left/right panels");
-    for (std::size_t half = 0; half < 2; ++half) {
-        Eigen::MatrixXd rect(total.rows(), static_cast<Eigen::Index>(columns[half].size()));
-        for (Eigen::Index c = 0; c < rect.cols(); ++c)
-            rect.col(c) = total.col(columns[half][static_cast<std::size_t>(c)]);
-        data.array[half] = beam::array::defineArrayStruct(rect, data.arrayTotal.frequency,
-                                                          data.arrayTotal.elementDimensions);
-        data.array[half].elementMapping = static_cast<int>(half) + 1;
-    }
-}
 
 double normalizedAxisPosition(const Eigen::VectorXd& axis, double mm) {
     if (axis.size() < 2 || axis(axis.size() - 1) == axis(0)) return 0.5;
@@ -476,11 +453,25 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registerFiducialsButton->setStyleSheet(QStringLiteral(
         "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
         "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
+    // Replays a previously exported measurement session. Deliberately quiet
+    // (no accent fill) -- it is a verification/setup aid, not a step in the
+    // operator's normal path through the stage.
+    importFiducialsButton_ = new QPushButton(QStringLiteral("Import..."), this);
+    importFiducialsButton_->setObjectName(QStringLiteral("importFiducialsButton"));
+    importFiducialsButton_->setToolTip(QStringLiteral(
+        "Load six measured fiducials from a beamai_fiducials.csv written by Confirm"));
+    importFiducialsButton_->setMinimumHeight(30);
+    importFiducialsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    importFiducialsButton_->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #2f3b41; color: #d7e3e7; border: 1px solid #44555c; border-radius: 4px; padding: 5px 10px; } "
+        "QPushButton:hover { background: #3b4950; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
+    connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
     auto* markerActions = new QHBoxLayout;
     markerActions->setContentsMargins(0, 0, 0, 0);
     markerActions->setSpacing(4);
     markerActions->addWidget(ui_->confirmFiducialButton, 1);
     markerActions->addWidget(ui_->registerFiducialsButton, 1);
+    markerActions->addWidget(importFiducialsButton_, 0);
     markerTableLayout->addWidget(ui_->registrationTable, 0);
     markerTableLayout->addLayout(markerActions);
     markerTableLayout->setAlignment(ui_->registrationTable, Qt::AlignTop);
@@ -584,7 +575,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         panelLayout->setVerticalSpacing(2);
         panelLayout->setColumnMinimumWidth(1, 22);
         vertical = makePositionSlider(panel, Qt::Vertical);
+        // Named so tests and probes can address them without guessing layout order.
+        vertical->setObjectName(title.startsWith(QStringLiteral("Subject Left"))
+                                    ? QStringLiteral("leftVerticalPositionSlider")
+                                    : QStringLiteral("rightVerticalPositionSlider"));
         horizontal = makePositionSlider(panel, Qt::Horizontal);
+        horizontal->setObjectName(title.startsWith(QStringLiteral("Subject Left"))
+                                      ? QStringLiteral("leftHorizontalPositionSlider")
+                                      : QStringLiteral("rightHorizontalPositionSlider"));
         vertical->setFixedHeight(88);
         vertical->setFixedWidth(50);
         vertical->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
@@ -631,6 +629,19 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // acceptance action, rather than in the global footer line.
     ui_->registrationResult->show();
     markerTableLayout->addWidget(ui_->registrationResult);
+    // BeamV0's drawROIs.m keeps a running readout of where the array actually
+    // is:  app.TargetPosXYZLabel.Text = ['Array Pos X: ', ...]. Without it
+    // there is nothing numeric on this page to check a registration against,
+    // which makes a successful Step 3 look identical to one that silently did
+    // nothing. Shown at 3 decimals rather than the source's %4.1f so a
+    // side-by-side against BeamV0 can be read straight off the screen.
+    arrayPositionLabel_ = new QLabel(this);
+    arrayPositionLabel_->setObjectName(QStringLiteral("arrayPositionLabel"));
+    arrayPositionLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    arrayPositionLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { font-family: 'Consolas','Courier New',monospace; font-size: 12px; color: #d7e3e7; "
+        "background: #24323a; border: 1px solid #3c5059; border-radius: 4px; padding: 5px 8px; }"));
+    markerTableLayout->addWidget(arrayPositionLabel_);
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
         connect(slider, &QSlider::valueChanged, this, [this] {
@@ -1942,7 +1953,7 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     if (geometryPath.isEmpty()) throw std::runtime_error("Default transducer geometry was not found");
 
     beam::array::ArrayData nominal = beam::array::defineArrayData(readArrayRectCsv(geometryPath));
-    reconstructPhysicalArrayHalves(nominal);
+    beam::array::reconstructPhysicalArrayHalves(nominal);
     const Eigen::Vector3d rectCenter = nominal.arrayTotal.rect.block(16, 0, 3, nominal.arrayTotal.rect.cols()).rowwise().mean();
     // BeamV0/initTransducers.m: centerArray = mean(rect center) - [0,50,-25] mm.
     const Eigen::Vector3d placementReference = rectCenter - Eigen::Vector3d(0.0, 0.050, -0.025);
@@ -2137,6 +2148,95 @@ void WorkflowWindow::confirmSelectedFiducial() {
                 .arg(confirmedCount)
                 .arg(confirmedCount == 1 ? QString() : QStringLiteral("s"), exported));
     }
+    refresh();
+    QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
+}
+
+
+// The read half of exportFiducialsCsv: loads a previously confirmed set of
+// six fiducials back in, so a measurement session can be replayed without
+// re-placing every marker by hand. That matters for side-by-side checks
+// against BeamV0 -- matlab_verify/load_beamai_fiducials.m reads this same
+// file into app.FiducialROIs, so both applications register from input that
+// is identical bit for bit rather than retyped from the table's 2 decimals.
+//
+// Matches by marker NAME, not row order, and refuses a file that is missing
+// any of the six rather than silently registering from a partial set.
+void WorkflowWindow::importFiducialsCsv() {
+    if (!registrationGeometryLoaded_ || fiducials_.size() < 6) {
+        showMessage(QStringLiteral("Load an MRI before importing fiducials."), true);
+        return;
+    }
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Import measured fiducials"),
+        QDir::current().filePath(QStringLiteral("beamai_fiducials.csv")),
+        QStringLiteral("Fiducial CSV (*.csv);;All files (*)"));
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        showMessage(QStringLiteral("Could not open %1").arg(path), true);
+        return;
+    }
+    QHash<QString, Eigen::Vector3d> byName;
+    QTextStream in(&file);
+    int lineNumber = 0;
+    while (!in.atEnd()) {
+        const QString line = in.readLine().trimmed();
+        ++lineNumber;
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')) ||
+            line.startsWith(QStringLiteral("name,")))
+            continue;
+        const QStringList parts = line.split(QLatin1Char(','));
+        if (parts.size() != 4) {
+            showMessage(QStringLiteral("%1 line %2: expected name,x,y,z").arg(path).arg(lineNumber), true);
+            return;
+        }
+        bool okX = false, okY = false, okZ = false;
+        const Eigen::Vector3d mm(parts[1].trimmed().toDouble(&okX),
+                                 parts[2].trimmed().toDouble(&okY),
+                                 parts[3].trimmed().toDouble(&okZ));
+        if (!okX || !okY || !okZ || !mm.allFinite()) {
+            showMessage(QStringLiteral("%1 line %2: coordinate is not a finite number")
+                            .arg(path).arg(lineNumber), true);
+            return;
+        }
+        byName.insert(parts[0].trimmed(), mm);
+    }
+
+    for (const auto& marker : fiducials_) {
+        const QString name = QString::fromStdString(marker.name);
+        if (!byName.contains(name)) {
+            showMessage(QStringLiteral("%1 has no row for fiducial \"%2\"; nothing imported.")
+                            .arg(path, name), true);
+            return;
+        }
+    }
+
+    ui_->registrationTable->blockSignals(true);
+    for (int row = 0; row < 6; ++row) {
+        const std::size_t index = static_cast<std::size_t>(row);
+        const Eigen::Vector3d mm = byName.value(QString::fromStdString(fiducials_[index].name));
+        fiducials_[index].position = mm / 1000.0;
+        for (int axis = 0; axis < 3; ++axis)
+            ui_->registrationTable->item(row, axis + 1)->setText(QString::number(mm(axis), 'f', 2));
+        // Imported points are measurements that were already confirmed once,
+        // so they arrive confirmed -- Step 2 is immediately available, which
+        // is the whole point of replaying a session.
+        fiducialLocated_[index] = true;
+        fiducialConfirmed_[index] = true;
+        ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Confirmed"));
+    }
+    ui_->registrationTable->blockSignals(false);
+
+    setRegistrationPhase(RegistrationPhase::Locating);
+    workflow_.change(beam::gui::WorkflowStage::Registration,
+                     "Fiducials imported; registration must be recalculated.");
+    showMriPreviews();
+    updateRegistrationAvailability();
+    ui_->registrationResult->setText(
+        QStringLiteral("Imported 6 fiducials from %1. Run Register to MRI fiducials.").arg(path));
+    showMessage(QStringLiteral("Imported 6 fiducials."), false);
     refresh();
     QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
@@ -2776,7 +2876,35 @@ void WorkflowWindow::completeCurrentStage() {
     refresh();
 }
 
+
+// Port of the array-position line BeamV0's drawROIs.m maintains:
+//
+//     centerArrayMM = mean(arrayData.arrayTotal.rect(17:19,:),2)'*1000;
+//     app.TargetPosXYZLabel.Text = ['Array Pos X: ', ...];
+//
+// Computed from arrayData_ the same way the source does, rather than from
+// targetMm_ -- that member doubles as the treatment target point, so it does
+// not always hold the array centre.
+void WorkflowWindow::updateArrayPositionReadout() {
+    if (!arrayPositionLabel_) return;
+    const Eigen::Index columns = arrayData_.arrayTotal.rect.cols();
+    if (!registrationGeometryLoaded_ || columns == 0) {
+        arrayPositionLabel_->setText(QStringLiteral("Array position    not placed"));
+        return;
+    }
+    const Eigen::Vector3d centreMm =
+        arrayData_.arrayTotal.rect.block(beam::array::kRectCenterStartRow, 0, 3, columns)
+            .rowwise()
+            .mean() *
+        1000.0;
+    arrayPositionLabel_->setText(QStringLiteral("Array position    X %1    Y %2    Z %3  mm")
+                                     .arg(centreMm.x(), 10, 'f', 3)
+                                     .arg(centreMm.y(), 10, 'f', 3)
+                                     .arg(centreMm.z(), 10, 'f', 3));
+}
+
 void WorkflowWindow::refresh() {
+    updateArrayPositionReadout();
     for (std::size_t i = 0; i < stageCount; ++i) {
         const auto stage = static_cast<beam::gui::WorkflowStage>(i);
         const auto& state = workflow_.state(stage);
