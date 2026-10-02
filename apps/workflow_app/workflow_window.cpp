@@ -19,6 +19,7 @@
 #include <QStandardPaths>
 #include <QMouseEvent>
 #include <QStyle>
+#include <QProxyStyle>
 #include <QStyleOptionSlider>
 #include <QToolTip>
 #include <QFile>
@@ -74,6 +75,23 @@
 #include "serialcom/serial_port.hpp"
 
 namespace {
+
+// Qt steps a slider by one page when the groove is clicked. These are
+// four-notch lock positions an operator reads off the frame and dials in
+// directly, so a click should land on the notch under the cursor. Letting Qt
+// answer its own SH_Slider_AbsoluteSetButtons keeps its geometry maths rather
+// than duplicating it against a stylesheet-driven style.
+class ClickToPositionStyle final : public QProxyStyle {
+public:
+    using QProxyStyle::QProxyStyle;
+
+    int styleHint(StyleHint hint, const QStyleOption* option, const QWidget* widget,
+                  QStyleHintReturn* returnData) const override {
+        if (hint == SH_Slider_AbsoluteSetButtons) return Qt::LeftButton;
+        if (hint == SH_Slider_PageSetButtons) return Qt::MiddleButton;
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
 
 class NumberedSlider final : public QSlider {
 public:
@@ -364,7 +382,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerSplitter->setChildrenCollapsible(false);
     markerSplitter->setHandleWidth(12);
     markerSplitter->setMinimumHeight(196);
-    markerSplitter->setCursor(Qt::SizeHorCursor);
     markerSplitter->setToolTip(QStringLiteral("Drag the divider left or right to resize the fiducial diagram and marker table"));
     markerSplitter->setStyleSheet(QStringLiteral(
         "QSplitter::handle:horizontal { background: #8aa1aa; border-left: 1px solid #5e7882; "
@@ -459,47 +476,40 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registerFiducialsButton->setStyleSheet(QStringLiteral(
         "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
         "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
-    // File operations, not workflow steps: kept out of the numbered action row
-    // below and attached to the table whose contents they read and write.
-    const QString fiducialFileButtonStyle = QStringLiteral(
-        "QPushButton { background: transparent; color: #9fb4bd; border: 1px solid #3c4d55; "
-        "border-radius: 3px; padding: 1px 8px; font-size: 11px; } "
-        "QPushButton:hover { background: #2f3b41; color: #d7e3e7; } "
-        "QPushButton:disabled { color: #5d6c73; border-color: #333c41; }");
-    importFiducialsButton_ = new QPushButton(QStringLiteral("Import..."), markerTablePanel);
+    importFiducialsButton_ = new QPushButton(QStringLiteral("Import fiducials..."), this);
     importFiducialsButton_->setObjectName(QStringLiteral("importFiducialsButton"));
     importFiducialsButton_->setToolTip(
         QStringLiteral("Load six measured fiducials from a CSV saved earlier"));
-    importFiducialsButton_->setFixedHeight(20);
+    importFiducialsButton_->setMinimumHeight(26);
     importFiducialsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    importFiducialsButton_->setStyleSheet(fiducialFileButtonStyle);
+    importFiducialsButton_->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #2f3b41; color: #d7e3e7; border: 1px solid #44555c; "
+        "border-radius: 4px; padding: 4px 12px; } "
+        "QPushButton:hover { background: #3b4950; } "
+        "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
-    saveFiducialsButton_ = new QPushButton(QStringLiteral("Save..."), markerTablePanel);
+    saveFiducialsButton_ = new QPushButton(QStringLiteral("Save fiducials..."), this);
     saveFiducialsButton_->setObjectName(QStringLiteral("saveFiducialsButton"));
     saveFiducialsButton_->setToolTip(
         QStringLiteral("Save the six measured fiducials beside the MRI, for Import... to read back"));
-    saveFiducialsButton_->setFixedHeight(20);
-    saveFiducialsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    saveFiducialsButton_->setStyleSheet(fiducialFileButtonStyle);
+    // A peer of the step-4 button, so take its metrics rather than guessing.
+    saveFiducialsButton_->setMinimumHeight(
+        std::max(ui_->acceptRegistrationButton->minimumHeight(),
+                 ui_->acceptRegistrationButton->sizeHint().height()));
+    saveFiducialsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    saveFiducialsButton_->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; "
+        "border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
+        "QPushButton:hover { background: #2083a3; } "
+        "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     connect(saveFiducialsButton_, &QPushButton::clicked, this, [this] { saveFiducialsCsv(); });
 
-    auto* fiducialFileRow = new QHBoxLayout;
-    fiducialFileRow->setContentsMargins(0, 0, 0, 2);
-    fiducialFileRow->setSpacing(4);
-    auto* fiducialFileLabel = new QLabel(QStringLiteral("Measured fiducials"), markerTablePanel);
-    fiducialFileLabel->setStyleSheet(
-        QStringLiteral("QLabel { color: #7f949d; font-size: 11px; font-weight: 600; }"));
-    fiducialFileRow->addWidget(fiducialFileLabel);
-    fiducialFileRow->addStretch(1);
-    fiducialFileRow->addWidget(importFiducialsButton_);
-    fiducialFileRow->addWidget(saveFiducialsButton_);
 
     auto* markerActions = new QHBoxLayout;
     markerActions->setContentsMargins(0, 0, 0, 0);
     markerActions->setSpacing(4);
     markerActions->addWidget(ui_->confirmFiducialButton, 1);
     markerActions->addWidget(ui_->registerFiducialsButton, 1);
-    markerTableLayout->addLayout(fiducialFileRow);
     markerTableLayout->addWidget(ui_->registrationTable, 0);
     markerTableLayout->addLayout(markerActions);
     markerTableLayout->setAlignment(ui_->registrationTable, Qt::AlignTop);
@@ -525,7 +535,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             registrationStep4Label_->raise();
         }
     });
-    markerTableLayout->addWidget(ui_->acceptRegistrationButton);
+    // Import is where the stage starts, Save where it ends: nothing is worth
+    // saving until the fiducials have been measured and registered.
+    auto* acceptRow = new QHBoxLayout;
+    acceptRow->setContentsMargins(0, 0, 0, 0);
+    acceptRow->setSpacing(4);
+    acceptRow->addWidget(ui_->acceptRegistrationButton, 1);
+    acceptRow->addWidget(saveFiducialsButton_, 1);
+    markerTableLayout->addLayout(acceptRow);
     markerSplitter->addWidget(markerTablePanel);
     markerSplitter->setStretchFactor(0, 1);
     markerSplitter->setStretchFactor(1, 1);
@@ -537,6 +554,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationLayout->removeItem(ui_->registrationActions);
     ui_->registrationLayout->removeWidget(ui_->registrationResult);
     ui_->registrationLayout->setSpacing(0);
+    // Import opens the stage: it stands in for locating the fiducials by hand,
+    // so it belongs above the numbered steps rather than inside one.
+    auto* importRow = new QHBoxLayout;
+    importRow->setContentsMargins(0, 0, 0, 4);
+    importRow->setSpacing(6);
+    importRow->addWidget(importFiducialsButton_, 0);
+    importRow->addStretch(1);
+    ui_->registrationLayout->insertLayout(0, importRow);
     ui_->registrationResult->setMaximumHeight(28);
     ui_->registrationResult->hide();
     ui_->registrationDetailsLayout->removeWidget(ui_->registrationResult);
@@ -584,11 +609,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         slider->setToolTip(QStringLiteral("Array lock position; each step is 7.5 mm horizontal or 10 mm vertical"));
         slider->setStyleSheet(QStringLiteral(
             "QSlider::groove:horizontal { height: 7px; background: #24495a; border: 1px solid #39758e; border-radius: 3px; } "
-            "QSlider::handle:horizontal { width: 16px; margin: -5px 0; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 8px; } "
+            "QSlider::handle:horizontal { width: 11px; margin: -6px 0; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 2px; } "
             "QSlider::sub-page:horizontal { background: #1686a8; border-radius: 3px; } "
             "QSlider::groove:vertical { width: 7px; background: #24495a; border: 1px solid #39758e; border-radius: 3px; } "
-            "QSlider::handle:vertical { height: 16px; margin: 0 -5px; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 8px; } "
+            "QSlider::handle:vertical { height: 11px; margin: 0 -6px; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 2px; } "
             "QSlider::add-page:vertical { background: #1686a8; border-radius: 3px; }"));
+        // After setStyleSheet: a stylesheet installs QStyleSheetStyle and would
+        // otherwise discard this proxy.
+        slider->setStyle(new ClickToPositionStyle(slider->style()));
         return slider;
     };
     auto makeLockPanel = [&](const QString& title, QSlider*& horizontal, QSlider*& vertical) {
@@ -636,6 +664,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     registerCurrentPositionButton_->setToolTip(QStringLiteral(
         "Apply the BeamV0 lock-position offset after registering the array to MRI fiducials"));
     calibrationLayout->addWidget(registerCurrentPositionButton_);
+    // Without this the spare height lands between the panels and the button,
+    // pushing it off the bottom of a non-maximised window.
+    calibrationLayout->addStretch(1);
     calibrationGroup->setMinimumHeight(0);
     calibrationGroup->setMaximumHeight(QWIDGETSIZE_MAX);
     calibrationGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -1267,7 +1298,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // A tooltip alone only appears on hover, after a delay, and disappears the
     // moment the handle moves -- so the slice position was invisible exactly
     // while it was being changed. Pin it beside the handle for the drag.
-    for (const auto& [slider, axis] : sliceSliders()) installSliceReadout(slider, axis);
+    for (const auto& [slider, axis] : sliceSliders()) {
+        installSliceReadout(slider, axis);
+        if (slider) slider->setStyle(new ClickToPositionStyle(slider->style()));
+    }
 
     // Treatment uses its own three-plane viewer, while sharing the loaded
     // volume and slice positions with Imaging/Registration.
@@ -1761,6 +1795,9 @@ void WorkflowWindow::chooseDicomDirectory() {
     if (!path.isEmpty()) loadMri(path);
 }
 
+// Imports the MRI and six fiducials from a BeamV0 session. NOT session
+// restore: a session carries 38 fields and this reads two. Kept as the
+// reminder that the real thing is unbuilt -- see docs/known_gaps_session.md.
 void WorkflowWindow::chooseBeamSession() {
     const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Load legacy Beam MRI session"), QString(),
                                                        QStringLiteral("MATLAB Beam sessions (*.mat)"));
@@ -1823,6 +1860,7 @@ void WorkflowWindow::chooseBeamSession() {
     connect(worker, &QThread::finished, worker, &QObject::deleteLater);
     worker->start();
 }
+
 
 void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes,
                                 const QString& path) {
@@ -2239,6 +2277,27 @@ QString WorkflowWindow::fiducialDirectory() const {
     return QDir(fallback).exists() ? fallback : QDir::currentPath();
 }
 
+// Compared as numbers, not text: the same scan reached through different
+// readers lands on extents that differ in the last decimals (a BeamV0 session
+// and the DICOM series it came from disagree by ~1e-4 mm). Voxel counts must
+// match exactly; extents only have to agree far more closely than two
+// different subjects ever would.
+bool WorkflowWindow::sameMriGeometry(const QString& recorded, const QString& current) {
+    if (recorded.isEmpty()) return true;
+    const QStringList left = recorded.split(QLatin1Char(','));
+    const QStringList right = current.split(QLatin1Char(','));
+    if (left.size() != 9 || right.size() != 9) return recorded == current;
+    for (int i = 0; i < 3; ++i)
+        if (left[i].trimmed() != right[i].trimmed()) return false;
+    for (int i = 3; i < 9; ++i) {
+        bool okLeft = false, okRight = false;
+        const double a = left[i].toDouble(&okLeft);
+        const double b = right[i].toDouble(&okRight);
+        if (!okLeft || !okRight || std::abs(a - b) > 0.05) return false;
+    }
+    return true;
+}
+
 QString WorkflowWindow::currentMriGeometry() const {
     if (mriVolume_.nx <= 0 || mriAxes_.dimLR.size() == 0) return QString();
     const auto ends = [](const Eigen::VectorXd& axis) {
@@ -2423,7 +2482,7 @@ void WorkflowWindow::importFiducialsCsv() {
                      "Fiducials imported; registration must be recalculated.");
     showMriPreviews();
     updateRegistrationAvailability();
-    const bool mriMatches = sourceGeometry.isEmpty() || sourceGeometry == currentMriGeometry();
+    const bool mriMatches = sameMriGeometry(sourceGeometry, currentMriGeometry());
     if (mriMatches) {
         ui_->registrationResult->setText(
             QStringLiteral("Imported 6 fiducials from %1. Run Register to MRI fiducials.").arg(path));

@@ -89,6 +89,7 @@ private:
     void placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis = -1);
     void confirmSelectedFiducial();
     QString currentMriGeometry() const;
+    static bool sameMriGeometry(const QString& recorded, const QString& current);
     std::vector<std::pair<QSlider*, QString>> sliceSliders() const;
     void installSliceReadout(QSlider* slider, const QString& axis);
     QString sliceReadoutText(const QString& axis, int slice) const;

@@ -106,6 +106,7 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
         connect(slider, &QSlider::rangeChanged, windowSlider, &QSlider::setRange);
         windowSlider->setToolTip(slider->toolTip());
         installSliceReadout(windowSlider, slider->property("sliceAxis").toString());
+        windowSlider->setStyle(slider->style());
     }
 
     auto* label = new QLabel(sliceLabel ? sliceLabel->text() : QString(), window);
@@ -129,11 +130,10 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
     // Escape closes, matching Beam's viewer.
     auto* closeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), window);
     connect(closeShortcut, &QShortcut::activated, window, [window, view] {
-        // Escape already closed this window; now it also clears a measurement.
-        // Clearing has to win, or there is no way to drop a line without
-        // losing the window it was drawn in.
-        if (view->hasMeasurement()) {
-            view->clearMeasurement();
+        // Same rule as the panes: abandon a half-drawn shape, otherwise close.
+        // Finished measurements go only through "Clear measurements".
+        if (view->measurementInProgress()) {
+            view->cancelMeasurementInProgress();
             return;
         }
         window->close();

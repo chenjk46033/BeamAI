@@ -68,6 +68,8 @@ public:
     void setMeasurementPeer(WorkflowMriView* peer);
     void clearMeasurement();
     bool hasMeasurement() const;
+    bool measurementInProgress() const;
+    void cancelMeasurementInProgress();
     // Rendered on the image; also readable so callers and tests can check it.
     QString measurementSummary() const;
     QStringList measurementSummaries() const;
@@ -105,8 +107,6 @@ private:
     };
     static std::size_t pointsNeededFor(MeasureMode mode);
     bool measurementShownHere(const Measurement& measurement) const;
-    bool measurementInProgress() const;
-    void cancelMeasurementInProgress();
     bool grabMeasurementVertex(const QPointF& widgetPosition);
     void moveGrabbedVertex(const QPointF& widgetPosition);
     bool draggingMeasurementVertex() const;
