@@ -89,6 +89,11 @@ private:
     void placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis = -1);
     void confirmSelectedFiducial();
     QString currentMriGeometry() const;
+    std::vector<std::pair<QSlider*, QString>> sliceSliders() const;
+    void installSliceReadout(QSlider* slider, const QString& axis);
+    QString sliceReadoutText(const QString& axis, int slice) const;
+    int sliceAtSliderPosition(const QSlider* slider, QPoint position) const;
+    double sliceCoordinateMm(const QString& axis, int index) const;
     QString fiducialDirectory() const;
     QString writeFiducialsCsv(const QString& path) const;
     void saveFiducialsCsv();
@@ -179,6 +184,7 @@ private:
     bool correctionCheckPassed_ = false;
     int registrationStartFiducialRow_ = -1;
     QString mriPath_;
+    QHash<QString, QString> sliceSliderTips_;
     QSlider* leftHorizontalPositionSlider_ = nullptr;
     QSlider* leftVerticalPositionSlider_ = nullptr;
     QSlider* rightHorizontalPositionSlider_ = nullptr;

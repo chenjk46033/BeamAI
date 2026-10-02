@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QColor>
 #include <QPoint>
+#include <QPointer>
 #include <QString>
 #include <QStringList>
 #include <QWidget>
@@ -55,6 +56,21 @@ public:
     // itself is the caller's to build -- this view knows nothing about the
     // slider row that drives it.
     void setOpenViewerHandler(std::function<void()> handler);
+
+    // On-image measurement. Line takes two clicks; Contour collects vertices
+    // until a double-click, Enter, or a click back on the first one. Escape
+    // abandons one in progress, or clears a finished one. A measurement
+    // belongs to the slice it was drawn on and is not shown on any other.
+    enum class MeasureMode { None, Line, Angle, Contour };
+    void beginMeasurement(MeasureMode mode);
+    // Makes this view share another view.s measurement instead of owning one,
+    // so a detached viewer and its pane are the same canvas.
+    void setMeasurementPeer(WorkflowMriView* peer);
+    void clearMeasurement();
+    bool hasMeasurement() const;
+    // Rendered on the image; also readable so callers and tests can check it.
+    QString measurementSummary() const;
+    QStringList measurementSummaries() const;
     // Copies everything this view renders from another instance: the slice,
     // overlays, markers, RAS mapping and brightness. Used to keep a detached
     // viewer showing exactly what its source pane shows, without duplicating
@@ -70,6 +86,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     void rebuildImage();
@@ -77,6 +94,31 @@ private:
     void clampPan();
     void updateMouseCoordinate(const QPointF& widgetPosition);
     std::optional<Eigen::Vector3d> rasAtWidgetPosition(const QPointF& widgetPosition) const;
+    QPointF normalizedAtWidgetPosition(const QPointF& widgetPosition) const;
+    struct Measurement {
+        MeasureMode mode = MeasureMode::None;
+        QString plane;
+        double sliceMm = 0.0;
+        std::vector<QPointF> normalized;
+        std::vector<Eigen::Vector3d> rasMm;
+        bool finished = false;
+    };
+    static std::size_t pointsNeededFor(MeasureMode mode);
+    bool measurementShownHere(const Measurement& measurement) const;
+    bool measurementInProgress() const;
+    void cancelMeasurementInProgress();
+    bool grabMeasurementVertex(const QPointF& widgetPosition);
+    void moveGrabbedVertex(const QPointF& widgetPosition);
+    bool draggingMeasurementVertex() const;
+    void releaseMeasurementVertex();
+    void setMeasurementHover(const QPointF& widgetPosition);
+    std::vector<Eigen::Vector3d> pointsForSummary(const Measurement& measurement) const;
+    QString summaryFor(const Measurement& measurement) const;
+    WorkflowMriView* measurementOwner();
+    const WorkflowMriView* measurementOwner() const;
+    bool addMeasurementPoint(const QPointF& widgetPosition);
+    void finishMeasurement();
+    void paintMeasurement(QPainter& painter, const QRectF& displayed) const;
 
     Eigen::MatrixXd slice_;
     QImage image_;
@@ -110,5 +152,12 @@ private:
     std::function<void(const Eigen::Vector3d&)> pointMovedHandler_;
     std::function<void(int)> markerPickedHandler_;
     QStringList coordinatePasteOptions_;
+    std::vector<Measurement> measurements_;
+    int activeMeasurement_ = -1;
+    int dragMeasurement_ = -1;
+    int dragVertex_ = -1;
+    std::optional<QPointF> hoverNormalized_;
+    std::optional<Eigen::Vector3d> hoverRasMm_;
+    QPointer<WorkflowMriView> measurementPeer_;
     std::function<void()> openViewerHandler_;
 };

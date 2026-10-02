@@ -17,6 +17,10 @@
 #include <QHash>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QMouseEvent>
+#include <QStyle>
+#include <QStyleOptionSlider>
+#include <QToolTip>
 #include <QFile>
 #include <QTextStream>
 #include <QSet>
@@ -360,7 +364,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerSplitter->setChildrenCollapsible(false);
     markerSplitter->setHandleWidth(12);
     markerSplitter->setMinimumHeight(196);
-    markerSplitter->setCursor(Qt::SplitHCursor);
+    markerSplitter->setCursor(Qt::SizeHorCursor);
     markerSplitter->setToolTip(QStringLiteral("Drag the divider left or right to resize the fiducial diagram and marker table"));
     markerSplitter->setStyleSheet(QStringLiteral(
         "QSplitter::handle:horizontal { background: #8aa1aa; border-left: 1px solid #5e7882; "
@@ -1260,6 +1264,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->sagittalSlider, &QSlider::valueChanged, ui_->registrationSagittalSlider, &QSlider::setValue);
     connect(ui_->coronalSlider, &QSlider::valueChanged, ui_->registrationCoronalSlider, &QSlider::setValue);
     connect(ui_->axialSlider, &QSlider::valueChanged, ui_->registrationAxialSlider, &QSlider::setValue);
+    // A tooltip alone only appears on hover, after a delay, and disappears the
+    // moment the handle moves -- so the slice position was invisible exactly
+    // while it was being changed. Pin it beside the handle for the drag.
+    for (const auto& [slider, axis] : sliceSliders()) installSliceReadout(slider, axis);
+
     // Treatment uses its own three-plane viewer, while sharing the loaded
     // volume and slice positions with Imaging/Registration.
     for (auto pair : {std::pair<QSlider*, QSlider*>{ui_->sagittalSlider, treatmentSagittalSlider_},
@@ -1549,7 +1558,79 @@ void WorkflowWindow::resizeEvent(QResizeEvent* event) {
     QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
 }
 
+// Tagging the slider with its axis rather than keeping a list lets any slider
+// carry the readout, including the ones a detached viewer window builds.
+void WorkflowWindow::installSliceReadout(QSlider* slider, const QString& axis) {
+    if (!slider || axis.isEmpty()) return;
+    slider->setProperty("sliceAxis", axis);
+    slider->setMouseTracking(true);
+    slider->installEventFilter(this);
+    connect(slider, &QSlider::sliderMoved, this, [this, slider, axis](int value) {
+        QToolTip::showText(slider->mapToGlobal(QPoint(slider->width() / 2, -2)),
+                           sliceReadoutText(axis, value), slider);
+    });
+    connect(slider, &QSlider::sliderReleased, this, [] { QToolTip::hideText(); });
+}
+
+QString WorkflowWindow::sliceReadoutText(const QString& axis, int slice) const {
+    return QStringLiteral("%1 %2 mm").arg(axis).arg(sliceCoordinateMm(axis, slice), 0, 'f', 1);
+}
+
+// The slice under a point on the groove, without moving the slider. QSlider
+// keeps initStyleOption protected, so the option is filled in here from the
+// same public properties it would use.
+int WorkflowWindow::sliceAtSliderPosition(const QSlider* slider, QPoint position) const {
+    QStyleOptionSlider option;
+    option.initFrom(slider);
+    option.minimum = slider->minimum();
+    option.maximum = slider->maximum();
+    option.sliderPosition = slider->sliderPosition();
+    option.sliderValue = slider->value();
+    option.singleStep = slider->singleStep();
+    option.pageStep = slider->pageStep();
+    option.orientation = slider->orientation();
+    option.upsideDown = slider->orientation() == Qt::Horizontal
+                            ? slider->invertedAppearance()
+                            : !slider->invertedAppearance();
+    option.subControls = QStyle::SC_All;
+
+    const QRect groove =
+        slider->style()->subControlRect(QStyle::CC_Slider, &option, QStyle::SC_SliderGroove, slider);
+    const QRect handle =
+        slider->style()->subControlRect(QStyle::CC_Slider, &option, QStyle::SC_SliderHandle, slider);
+    const bool horizontal = slider->orientation() == Qt::Horizontal;
+    const int span = horizontal ? groove.width() - handle.width() : groove.height() - handle.height();
+    const int offset = horizontal ? position.x() - groove.x() - handle.width() / 2
+                                  : position.y() - groove.y() - handle.height() / 2;
+    if (span <= 0) return slider->value();
+    return QStyle::sliderValueFromPosition(slider->minimum(), slider->maximum(), offset, span,
+                                           option.upsideDown);
+}
+
+double WorkflowWindow::sliceCoordinateMm(const QString& axis, int index) const {
+    const Eigen::VectorXd& vector = axis == QStringLiteral("LR")   ? mriAxes_.dimLR
+                                    : axis == QStringLiteral("AP") ? mriAxes_.dimAP
+                                                                   : mriAxes_.dimIS;
+    if (vector.size() == 0) return 0.0;
+    return vector(std::clamp<Eigen::Index>(index, 0, vector.size() - 1));
+}
+
 bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (mriLoaded_ && (event->type() == QEvent::MouseMove || event->type() == QEvent::Leave)) {
+        if (auto* slider = qobject_cast<QSlider*>(watched)) {
+            const QString axis = slider->property("sliceAxis").toString();
+            if (!axis.isEmpty()) {
+                if (event->type() == QEvent::Leave) {
+                    QToolTip::hideText();
+                } else {
+                    const QPoint local = static_cast<QMouseEvent*>(event)->position().toPoint();
+                    QToolTip::showText(slider->mapToGlobal(local),
+                                       sliceReadoutText(axis, sliceAtSliderPosition(slider, local)),
+                                       slider);
+                }
+            }
+        }
+    }
     // A Target List row is a widget laid over its item, so the list never sees
     // clicks on it. Select the row here instead, and let the event continue so
     // the row's own icons still act on it. See addTargetListRow.
@@ -2551,6 +2632,23 @@ void WorkflowWindow::performCurrentPositionRegistration() {
     }
 }
 
+// Every slice slider, paired with the axis it moves along. Treatment's are
+// built in code and may not exist yet.
+std::vector<std::pair<QSlider*, QString>> WorkflowWindow::sliceSliders() const {
+    const QString lr = QStringLiteral("LR");
+    const QString ap = QStringLiteral("AP");
+    const QString is = QStringLiteral("IS");
+    return {{ui_->sagittalSlider, lr},
+            {ui_->coronalSlider, ap},
+            {ui_->axialSlider, is},
+            {ui_->registrationSagittalSlider, lr},
+            {ui_->registrationCoronalSlider, ap},
+            {ui_->registrationAxialSlider, is},
+            {treatmentSagittalSlider_, lr},
+            {treatmentCoronalSlider_, ap},
+            {treatmentAxialSlider_, is}};
+}
+
 void WorkflowWindow::showMriPreviews() {
     QStringList markerNames;
     for (std::size_t index = 0; index < 6; ++index) {
@@ -2815,12 +2913,17 @@ void WorkflowWindow::showMriPreviews() {
     ui_->treatmentSagittalSliceLabel->setText(QStringLiteral("LR %1 mm").arg(lr, 0, 'f', 1));
     ui_->treatmentCoronalSliceLabel->setText(QStringLiteral("AP %1 mm").arg(ap, 0, 'f', 1));
     ui_->treatmentAxialSliceLabel->setText(QStringLiteral("IS %1 mm").arg(is, 0, 'f', 1));
-    ui_->sagittalSlider->setToolTip(QStringLiteral("LR %1 mm · %2 mm from initial center")
-                                        .arg(lr, 0, 'f', 1).arg(lr - lrCenter, 0, 'f', 1));
-    ui_->coronalSlider->setToolTip(QStringLiteral("AP %1 mm · %2 mm from initial center")
-                                      .arg(ap, 0, 'f', 1).arg(ap - apCenter, 0, 'f', 1));
-    ui_->axialSlider->setToolTip(QStringLiteral("IS %1 mm · %2 mm from initial center")
-                                    .arg(is, 0, 'f', 1).arg(is - isCenter, 0, 'f', 1));
+    const auto sliceTip = [](const QString& axis, double mm, double centre) {
+        return QStringLiteral("%1 %2 mm · %3 mm from initial center")
+            .arg(axis)
+            .arg(mm, 0, 'f', 1)
+            .arg(mm - centre, 0, 'f', 1);
+    };
+    sliceSliderTips_[QStringLiteral("LR")] = sliceTip(QStringLiteral("LR"), lr, lrCenter);
+    sliceSliderTips_[QStringLiteral("AP")] = sliceTip(QStringLiteral("AP"), ap, apCenter);
+    sliceSliderTips_[QStringLiteral("IS")] = sliceTip(QStringLiteral("IS"), is, isCenter);
+    for (const auto& [slider, axis] : sliceSliders())
+        if (slider) slider->setToolTip(sliceSliderTips_.value(axis));
     refreshDetachedViewers();
 }
 

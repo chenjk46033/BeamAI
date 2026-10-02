@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QKeyEvent>
 #include <QAction>
 #include <QContextMenuEvent>
 #include <QComboBox>
@@ -24,7 +25,8 @@ WorkflowMriView::WorkflowMriView(QWidget* parent) : QWidget(parent) {
     setMinimumSize(300, 300);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMouseTracking(true);
-    setCursor(Qt::OpenHandCursor);
+    setCursor(Qt::ArrowCursor);
+    setFocusPolicy(Qt::StrongFocus);
 }
 
 void WorkflowMriView::setNavigationCrosshair(QPointF normalizedPosition) {
@@ -149,7 +151,7 @@ void WorkflowMriView::focusOn(QPointF normalizedPosition, double zoom) {
 
 void WorkflowMriView::setPointPlacementEnabled(bool enabled) {
     pointPlacementEnabled_ = enabled;
-    setCursor(enabled ? Qt::CrossCursor : Qt::OpenHandCursor);
+    setCursor(enabled ? Qt::CrossCursor : Qt::ArrowCursor);
 }
 
 void WorkflowMriView::setMarkerPickedHandler(std::function<void(int)> handler) {
@@ -267,6 +269,7 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
     }
 
     painter.setRenderHint(QPainter::Antialiasing, true);
+    paintMeasurement(painter, displayed);
     for (const WorkflowMriMarker& marker : markers_) {
         const QPointF point(displayed.left() + marker.normalizedPosition.x() * displayed.width(),
                             displayed.top() + marker.normalizedPosition.y() * displayed.height());
@@ -331,6 +334,19 @@ void WorkflowMriView::wheelEvent(QWheelEvent* event) {
 }
 
 void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
+    // Placing a point wins over grabbing a handle: measurements are often
+    // started from a corner of an existing one, and grabbing there would
+    // silently drag that instead of beginning the new shape.
+    if (measurementInProgress() && event->button() == Qt::LeftButton) {
+        if (addMeasurementPoint(event->position())) {
+            event->accept();
+            return;
+        }
+    }
+    if (event->button() == Qt::LeftButton && grabMeasurementVertex(event->position())) {
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton && pointPlacementEnabled_) {
         if (const auto ras = rasAtWidgetPosition(event->position()); ras && pointPickedHandler_)
             pointPickedHandler_(*ras);
@@ -358,12 +374,18 @@ void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && !image_.isNull()) {
         panning_ = true;
         lastMousePosition_ = event->pos();
-        setCursor(Qt::ClosedHandCursor);
+        setCursor(Qt::SizeAllCursor);
         event->accept();
     }
 }
 
 void WorkflowMriView::mouseMoveEvent(QMouseEvent* event) {
+    if (draggingMeasurementVertex()) {
+        moveGrabbedVertex(event->position());
+        event->accept();
+        return;
+    }
+    if (measurementInProgress()) setMeasurementHover(event->position());
     if (draggingMarker_) {
         if (const auto ras = rasAtWidgetPosition(event->position()); ras && pointPickedHandler_)
             pointPickedHandler_(*ras);
@@ -377,14 +399,26 @@ void WorkflowMriView::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void WorkflowMriView::mouseReleaseEvent(QMouseEvent* event) {
+    if (draggingMeasurementVertex()) {
+        releaseMeasurementVertex();
+        event->accept();
+        return;
+    }
     if (event->button() == Qt::LeftButton) {
         draggingMarker_ = false;
         panning_ = false;
-        setCursor(Qt::OpenHandCursor);
+        setCursor(Qt::ArrowCursor);
     }
 }
 
-void WorkflowMriView::mouseDoubleClickEvent(QMouseEvent*) { resetView(); }
+void WorkflowMriView::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (measurementInProgress()) {
+        finishMeasurement();
+        event->accept();
+        return;
+    }
+    resetView();
+}
 
 void WorkflowMriView::leaveEvent(QEvent*) {
     mouseRasMm_.reset();
@@ -452,6 +486,22 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
                     pointPickedHandler_(*coordinateAtContext);
                 menu.close();
             });
+        }
+    }
+    if (!plane_.isEmpty() && !image_.isNull()) {
+        menu.addSeparator();
+        QAction* line = menu.addAction(QStringLiteral("Measure distance"));
+        connect(line, &QAction::triggered, this,
+                [this] { beginMeasurement(MeasureMode::Line); });
+        QAction* angle = menu.addAction(QStringLiteral("Measure angle"));
+        connect(angle, &QAction::triggered, this,
+                [this] { beginMeasurement(MeasureMode::Angle); });
+        QAction* contour = menu.addAction(QStringLiteral("Measure area"));
+        connect(contour, &QAction::triggered, this,
+                [this] { beginMeasurement(MeasureMode::Contour); });
+        if (hasMeasurement()) {
+            QAction* clear = menu.addAction(QStringLiteral("Clear measurements"));
+            connect(clear, &QAction::triggered, this, [this] { clearMeasurement(); });
         }
     }
     if (openViewerHandler_) {
@@ -562,4 +612,316 @@ std::optional<Eigen::Vector3d> WorkflowMriView::rasAtWidgetPosition(const QPoint
     else if (plane_ == QStringLiteral("axial"))
         return Eigen::Vector3d(horizontalMm, verticalMm, fixedCoordinateMm_);
     return std::nullopt;
+}
+// A detached viewer shows the same plane as its pane, so it shares the pane's
+// measurements rather than keeping its own: one owner, drawn in both windows,
+// editable from either.
+void WorkflowMriView::setMeasurementPeer(WorkflowMriView* peer) { measurementPeer_ = peer; }
+
+WorkflowMriView* WorkflowMriView::measurementOwner() {
+    return measurementPeer_ ? measurementPeer_.data() : this;
+}
+
+const WorkflowMriView* WorkflowMriView::measurementOwner() const {
+    return measurementPeer_ ? measurementPeer_.data() : this;
+}
+
+std::size_t WorkflowMriView::pointsNeededFor(MeasureMode mode) {
+    switch (mode) {
+        case MeasureMode::Line: return 2;
+        case MeasureMode::Angle: return 3;
+        case MeasureMode::Contour: return 3;
+        case MeasureMode::None: break;
+    }
+    return 0;
+}
+
+void WorkflowMriView::beginMeasurement(MeasureMode mode) {
+    WorkflowMriView* owner = measurementOwner();
+    owner->cancelMeasurementInProgress();
+    Measurement started;
+    started.mode = mode;
+    started.plane = plane_;
+    started.sliceMm = fixedCoordinateMm_;
+    owner->measurements_.push_back(std::move(started));
+    owner->activeMeasurement_ = static_cast<int>(owner->measurements_.size()) - 1;
+    owner->hoverNormalized_.reset();
+    owner->hoverRasMm_.reset();
+    owner->update();
+    setFocus(Qt::OtherFocusReason);
+    update();
+}
+
+// Abandons the one being drawn, leaving every completed measurement alone.
+void WorkflowMriView::cancelMeasurementInProgress() {
+    WorkflowMriView* owner = measurementOwner();
+    if (owner->activeMeasurement_ < 0) return;
+    owner->measurements_.erase(owner->measurements_.begin() + owner->activeMeasurement_);
+    owner->activeMeasurement_ = -1;
+    owner->hoverNormalized_.reset();
+    owner->hoverRasMm_.reset();
+    owner->update();
+    update();
+}
+
+void WorkflowMriView::clearMeasurement() {
+    WorkflowMriView* owner = measurementOwner();
+    owner->measurements_.clear();
+    owner->activeMeasurement_ = -1;
+    owner->dragMeasurement_ = -1;
+    owner->dragVertex_ = -1;
+    owner->hoverNormalized_.reset();
+    owner->hoverRasMm_.reset();
+    owner->update();
+    update();
+}
+
+bool WorkflowMriView::hasMeasurement() const {
+    return !measurementOwner()->measurements_.empty();
+}
+
+bool WorkflowMriView::measurementInProgress() const {
+    return measurementOwner()->activeMeasurement_ >= 0;
+}
+
+QPointF WorkflowMriView::normalizedAtWidgetPosition(const QPointF& widgetPosition) const {
+    const QRectF displayed = imageRect();
+    if (displayed.width() <= 0.0 || displayed.height() <= 0.0) return QPointF();
+    return QPointF((widgetPosition.x() - displayed.left()) / displayed.width(),
+                   (widgetPosition.y() - displayed.top()) / displayed.height());
+}
+
+// A measurement belongs to the slice it was drawn on; showing it over any
+// other slice would imply the structure is there too.
+bool WorkflowMriView::measurementShownHere(const Measurement& measurement) const {
+    return !measurement.normalized.empty() && measurement.plane == plane_ &&
+           std::abs(measurement.sliceMm - fixedCoordinateMm_) < 1e-6;
+}
+
+bool WorkflowMriView::addMeasurementPoint(const QPointF& widgetPosition) {
+    const auto ras = rasAtWidgetPosition(widgetPosition);
+    if (!ras) return false;
+    WorkflowMriView* owner = measurementOwner();
+    if (owner->activeMeasurement_ < 0) return false;
+    Measurement& active = owner->measurements_[static_cast<std::size_t>(owner->activeMeasurement_)];
+
+    // Clicking back on the first vertex closes a contour.
+    if (active.mode == MeasureMode::Contour && active.normalized.size() >= 3) {
+        const QRectF displayed = imageRect();
+        const QPointF first(displayed.left() + active.normalized.front().x() * displayed.width(),
+                            displayed.top() + active.normalized.front().y() * displayed.height());
+        if (QLineF(first, widgetPosition).length() < 10.0) {
+            finishMeasurement();
+            return true;
+        }
+    }
+
+    active.normalized.push_back(normalizedAtWidgetPosition(widgetPosition));
+    active.rasMm.push_back(*ras);
+    // Line and Angle take a fixed number of points and complete themselves.
+    if (active.mode != MeasureMode::Contour && active.normalized.size() >= pointsNeededFor(active.mode)) {
+        finishMeasurement();
+        return true;
+    }
+    owner->update();
+    update();
+    return true;
+}
+
+void WorkflowMriView::setMeasurementHover(const QPointF& widgetPosition) {
+    WorkflowMriView* owner = measurementOwner();
+    owner->hoverNormalized_ = normalizedAtWidgetPosition(widgetPosition);
+    owner->hoverRasMm_ = rasAtWidgetPosition(widgetPosition);
+    owner->update();
+}
+
+void WorkflowMriView::finishMeasurement() {
+    WorkflowMriView* owner = measurementOwner();
+    if (owner->activeMeasurement_ < 0) return;
+    Measurement& active = owner->measurements_[static_cast<std::size_t>(owner->activeMeasurement_)];
+    if (active.normalized.size() < pointsNeededFor(active.mode)) return;
+    active.finished = true;
+    owner->activeMeasurement_ = -1;
+    owner->hoverNormalized_.reset();
+    owner->hoverRasMm_.reset();
+    owner->update();
+    update();
+}
+
+// A finished measurement stays editable: its vertices are grab handles.
+bool WorkflowMriView::grabMeasurementVertex(const QPointF& widgetPosition) {
+    WorkflowMriView* owner = measurementOwner();
+    const QRectF displayed = imageRect();
+    for (std::size_t m = 0; m < owner->measurements_.size(); ++m) {
+        const Measurement& measurement = owner->measurements_[m];
+        if (!measurement.finished || !measurementShownHere(measurement)) continue;
+        for (std::size_t v = 0; v < measurement.normalized.size(); ++v) {
+            const QPointF point(displayed.left() + measurement.normalized[v].x() * displayed.width(),
+                                displayed.top() + measurement.normalized[v].y() * displayed.height());
+            if (QLineF(point, widgetPosition).length() <= 9.0) {
+                owner->dragMeasurement_ = static_cast<int>(m);
+                owner->dragVertex_ = static_cast<int>(v);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void WorkflowMriView::moveGrabbedVertex(const QPointF& widgetPosition) {
+    WorkflowMriView* owner = measurementOwner();
+    if (owner->dragMeasurement_ < 0 || owner->dragVertex_ < 0) return;
+    const auto ras = rasAtWidgetPosition(widgetPosition);
+    if (!ras) return;
+    Measurement& measurement = owner->measurements_[static_cast<std::size_t>(owner->dragMeasurement_)];
+    const auto vertex = static_cast<std::size_t>(owner->dragVertex_);
+    if (vertex >= measurement.normalized.size()) return;
+    measurement.normalized[vertex] = normalizedAtWidgetPosition(widgetPosition);
+    measurement.rasMm[vertex] = *ras;
+    owner->update();
+    update();
+}
+
+bool WorkflowMriView::draggingMeasurementVertex() const {
+    return measurementOwner()->dragMeasurement_ >= 0;
+}
+
+void WorkflowMriView::releaseMeasurementVertex() {
+    WorkflowMriView* owner = measurementOwner();
+    owner->dragMeasurement_ = -1;
+    owner->dragVertex_ = -1;
+}
+
+// The placed points, plus the one under the cursor while still drawing, so
+// the number updates as the shape is pulled out.
+std::vector<Eigen::Vector3d> WorkflowMriView::pointsForSummary(const Measurement& measurement) const {
+    const WorkflowMriView* owner = measurementOwner();
+    std::vector<Eigen::Vector3d> points = measurement.rasMm;
+    if (!measurement.finished && owner->hoverRasMm_) points.push_back(*owner->hoverRasMm_);
+    return points;
+}
+
+QString WorkflowMriView::summaryFor(const Measurement& measurement) const {
+    const std::vector<Eigen::Vector3d> points = pointsForSummary(measurement);
+    if (points.size() < 2) return QString();
+
+    if (measurement.mode == MeasureMode::Line)
+        return QStringLiteral("%1 mm").arg((points[1] - points[0]).norm(), 0, 'f', 1);
+
+    if (measurement.mode == MeasureMode::Angle) {
+        // Points are clicked arm, vertex, arm: the angle opens at points[1].
+        if (points.size() < 3)
+            return QStringLiteral("%1 mm").arg((points[1] - points[0]).norm(), 0, 'f', 1);
+        const Eigen::Vector3d first = points[0] - points[1];
+        const Eigen::Vector3d second = points[2] - points[1];
+        const double lengths = first.norm() * second.norm();
+        if (lengths <= 0.0) return QString();
+        const double cosine = std::clamp(first.dot(second) / lengths, -1.0, 1.0);
+        const double degrees = std::acos(cosine) * 180.0 / 3.14159265358979323846;
+        return QStringLiteral("%1 deg").arg(degrees, 0, 'f', 1);
+    }
+
+    if (points.size() < 3)
+        return QStringLiteral("%1 mm").arg((points[1] - points[0]).norm(), 0, 'f', 1);
+
+    // Shoelace over the plane's two varying axes; the third is constant, so
+    // the in-plane projection loses nothing.
+    const int a = plane_ == QStringLiteral("sagittal") ? 1 : 0;
+    const int b = plane_ == QStringLiteral("axial") ? 1 : 2;
+    double twiceArea = 0.0;
+    double perimeter = 0.0;
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const Eigen::Vector3d& p = points[i];
+        const Eigen::Vector3d& q = points[(i + 1) % points.size()];
+        twiceArea += p(a) * q(b) - q(a) * p(b);
+        perimeter += (q - p).norm();
+    }
+    const double area = std::abs(twiceArea) / 2.0;
+    return area >= 100.0 ? QStringLiteral("%1 mm2  (%2 cm2)   perimeter %3 mm")
+                               .arg(area, 0, 'f', 1)
+                               .arg(area / 100.0, 0, 'f', 2)
+                               .arg(perimeter, 0, 'f', 1)
+                         : QStringLiteral("%1 mm2   perimeter %2 mm")
+                               .arg(area, 0, 'f', 1)
+                               .arg(perimeter, 0, 'f', 1);
+}
+
+QStringList WorkflowMriView::measurementSummaries() const {
+    QStringList all;
+    for (const Measurement& measurement : measurementOwner()->measurements_) {
+        const QString summary = summaryFor(measurement);
+        if (!summary.isEmpty()) all << summary;
+    }
+    return all;
+}
+
+QString WorkflowMriView::measurementSummary() const {
+    const QStringList all = measurementSummaries();
+    return all.isEmpty() ? QString() : all.last();
+}
+
+void WorkflowMriView::paintMeasurement(QPainter& painter, const QRectF& displayed) const {
+    const WorkflowMriView* owner = measurementOwner();
+    const auto toWidget = [&displayed](const QPointF& normalized) {
+        return QPointF(displayed.left() + normalized.x() * displayed.width(),
+                       displayed.top() + normalized.y() * displayed.height());
+    };
+    const QColor ink(255, 214, 64);
+    const QFontMetricsF metrics(painter.font());
+
+    for (const Measurement& measurement : owner->measurements_) {
+        if (!measurementShownHere(measurement)) continue;
+        QVector<QPointF> points;
+        points.reserve(static_cast<int>(measurement.normalized.size()) + 1);
+        for (const QPointF& normalized : measurement.normalized) points.push_back(toWidget(normalized));
+        const bool drawing = !measurement.finished && owner->hoverNormalized_.has_value();
+        if (drawing) points.push_back(toWidget(*owner->hoverNormalized_));
+        if (points.isEmpty()) continue;
+
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(ink, 1.8));
+        if (measurement.mode == MeasureMode::Contour &&
+            (measurement.finished || points.size() > 2)) {
+            painter.drawPolygon(points);
+        } else {
+            painter.drawPolyline(points);
+        }
+        painter.setPen(QPen(ink, 1.4));
+        for (const QPointF& point : points) painter.drawEllipse(point, 3.0, 3.0);
+
+        const QString summary = summaryFor(measurement);
+        if (summary.isEmpty()) continue;
+        // While drawing the number rides with the cursor; once finished it
+        // settles on the measurement's own anchor so it stops moving. An angle
+        // labels its vertex, which is where the reader looks.
+        QPointF anchorPoint = points.front();
+        if (drawing) {
+            anchorPoint = points.back();
+        } else if (measurement.mode == MeasureMode::Angle && points.size() >= 2) {
+            anchorPoint = points[1];
+        }
+        const QRectF box(anchorPoint + QPointF(10, -24),
+                         QSizeF(metrics.horizontalAdvance(summary) + 12, 19));
+        painter.fillRect(box, QColor(60, 45, 0, 225));
+        painter.setPen(QPen(ink, 1.0));
+        painter.drawRect(box);
+        painter.setPen(QColor(255, 240, 190));
+        painter.drawText(box.adjusted(6, 0, -2, 0), Qt::AlignVCenter, summary);
+    }
+}
+
+void WorkflowMriView::keyPressEvent(QKeyEvent* event) {
+    // Escape abandons what is being drawn. Finished measurements persist until
+    // "Clear measurements", so Escape never silently discards them.
+    if (event->key() == Qt::Key_Escape && measurementInProgress()) {
+        cancelMeasurementInProgress();
+        event->accept();
+        return;
+    }
+    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && measurementInProgress()) {
+        finishMeasurement();
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent(event);
 }

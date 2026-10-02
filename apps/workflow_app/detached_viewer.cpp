@@ -74,6 +74,7 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
     auto* view = new WorkflowMriView(window);
     view->setMinimumSize(kMinViewerSide, kMinViewerSide);
     view->mirrorFrom(*source);
+    view->setMeasurementPeer(source);
     layout->addWidget(view, 1);
 
     // The control row drives the pane's own widgets, so this window never
@@ -103,6 +104,8 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
         connect(windowSlider, &QSlider::valueChanged, slider, &QSlider::setValue);
         connect(slider, &QSlider::valueChanged, windowSlider, &QSlider::setValue);
         connect(slider, &QSlider::rangeChanged, windowSlider, &QSlider::setRange);
+        windowSlider->setToolTip(slider->toolTip());
+        installSliceReadout(windowSlider, slider->property("sliceAxis").toString());
     }
 
     auto* label = new QLabel(sliceLabel ? sliceLabel->text() : QString(), window);
@@ -125,7 +128,16 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
 
     // Escape closes, matching Beam's viewer.
     auto* closeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), window);
-    connect(closeShortcut, &QShortcut::activated, window, &QWidget::close);
+    connect(closeShortcut, &QShortcut::activated, window, [window, view] {
+        // Escape already closed this window; now it also clears a measurement.
+        // Clearing has to win, or there is no way to drop a line without
+        // losing the window it was drawn in.
+        if (view->hasMeasurement()) {
+            view->clearMeasurement();
+            return;
+        }
+        window->close();
+    });
 
     detachedViewers_.push_back(DetachedViewer{window, view, source, label, sliceLabel});
     connect(window, &QObject::destroyed, this, [this, window] {
