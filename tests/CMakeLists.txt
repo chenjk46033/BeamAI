@@ -8,6 +8,7 @@ add_executable(unit_tests
     correction_tests.cpp
     stimulation_tests.cpp
     mri_tests.cpp
+    fiducial_detect_tests.cpp
     infra_dicom_tests.cpp
     registration_tests.cpp
     serialcom_tests.cpp
@@ -44,4 +45,6 @@ gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST)
 # rather than failing when it is not present.
 target_compile_definitions(unit_tests PRIVATE
     BEAM_DEFAULT_SUBJECT_RECT_CSV="${CMAKE_SOURCE_DIR}/../DefaultSubjectV0/defaultSubjectArrayRect.csv"
+    BEAM_MRI_FIXTURE_NII="${CMAKE_SOURCE_DIR}/testdata/beamai_F040_T1_MRI.nii"
+    BEAM_FIDUCIAL_FIXTURE_CSV="${CMAKE_SOURCE_DIR}/testdata/beamai_fiducials_F040_T1_MRI.csv"
 )

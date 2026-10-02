@@ -7,6 +7,7 @@ add_library(mri
     src/dicom_series_geometry.cpp
     src/slice.cpp
     src/affine_volume.cpp
+    src/fiducial_detect.cpp
 )
 target_include_directories(mri PUBLIC include)
 target_link_libraries(mri PUBLIC Eigen3::Eigen)

@@ -99,6 +99,9 @@ private:
     QString writeFiducialsCsv(const QString& path) const;
     void saveFiducialsCsv();
     void importFiducialsCsv();
+    void detectFiducials();
+    void applyFiducialConfidenceToTable();
+    void highlightRegistrationRow(int currentRow);
     void updateArrayPositionReadout();
     void updateRegistrationAvailability();
     void updateRegistrationStepIndicators();
@@ -174,6 +177,11 @@ private:
     std::array<bool, 6> sourceFiducialConfirmed_{};
     std::array<bool, 6> fiducialLocated_{};
     std::array<bool, 6> sourceFiducialLocated_{};
+    // Per-marker detector scores, 0 when a marker was placed by hand or
+    // imported rather than detected. Below kFiducialTrustThreshold the table
+    // marks the row untrusted.
+    std::array<double, 6> fiducialConfidence_{};
+    std::array<double, 6> fiducialStability_{};
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();
     bool registrationGeometryLoaded_ = false;
     RegistrationPhase registrationPhase_ = RegistrationPhase::Locating;
@@ -194,6 +202,7 @@ private:
     QLabel* registrationStep1Label_ = nullptr;
     QLabel* registrationStep2Label_ = nullptr;
     QPushButton* importFiducialsButton_ = nullptr;
+    QPushButton* detectFiducialsButton_ = nullptr;
     QPushButton* saveFiducialsButton_ = nullptr;
     QLabel* registrationStep3Label_ = nullptr;
     QLabel* arrayPositionLabel_ = nullptr;

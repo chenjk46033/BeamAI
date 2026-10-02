@@ -25,6 +25,15 @@ target_compile_definitions(parity_registration PRIVATE
     BEAM_FIDUCIAL_FIXTURE_CSV="${CMAKE_SOURCE_DIR}/testdata/beamai_fiducials_F040_T1_MRI.csv")
 target_link_libraries(parity_registration PRIVATE registration array util)
 
+# Scores the automatic donut detector the Registration tab's button runs
+# against the operator's own measured fiducials.
+add_executable(detect_fiducials detect_fiducials/main.cpp)
+target_compile_definitions(detect_fiducials PRIVATE
+    BEAM_MRI_FIXTURE_NII="${CMAKE_SOURCE_DIR}/testdata/beamai_F040_T1_MRI.nii"
+    BEAM_FIDUCIAL_FIXTURE_CSV="${CMAKE_SOURCE_DIR}/testdata/beamai_fiducials_F040_T1_MRI.csv"
+    BEAM_DEFAULT_SUBJECT_RECT_CSV="${CMAKE_SOURCE_DIR}/../DefaultSubjectV0/defaultSubjectArrayRect.csv")
+target_link_libraries(detect_fiducials PRIVATE infra_dicom mri array registration util)
+
 add_executable(parity_safety parity_safety/main.cpp)
 target_link_libraries(parity_safety PRIVATE safety)
 

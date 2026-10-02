@@ -238,3 +238,64 @@ This does not settle **LR**. Flipping AP/IS moves the array off the blocks
 entirely, which is why the test separates those cases so sharply; a left/right
 flip would instead land the array on the opposite block and score well either
 way. Laterality still needs a scan with known asymmetry.
+
+### Resolved: LR laterality agrees with the operator's measurements
+
+Automatic marker detection settles this without needing an asymmetric
+phantom, because it reads the voxels directly and never consults a fiducial
+that was placed in the viewer.
+
+`beam::mri::detectFiducialDonuts` correlates each sagittal slice against a
+bank of annulus templates and reports where the six donuts actually are. Run
+in BeamAI's own frame -- `loadMriRas`, then `installMri`'s ascending
+normalisation, voxels untouched -- its six detections land on the operator's
+measured fiducials with **no mirroring applied**:
+
+| marker | detected LR, AP, IS (mm) | error vs measured |
+|---|---|---|
+| LeftY1Z3  | -75.13,  46.96,  42.69 | 0.60 mm |
+| LeftY1Z1  | -74.36,  47.82,  23.33 | 0.88 mm |
+| LeftY4Z1  | -71.72,  25.66,  19.26 | 4.97 mm |
+| RightY1Z3 | 140.40,  62.17,  44.56 | 0.59 mm |
+| RightY1Z1 | 138.72,  63.46,  25.00 | 1.74 mm |
+| RightY4Z1 | 139.75,  41.46,  23.17 | 1.14 mm |
+
+Had the app's LR pairing been mirrored, the left panel's markers would have
+been sought at +75 mm instead of -75 mm and nothing would have been found on
+either side. Five of six agree to within 1.74 mm and the sixth is flagged (see
+below), so **the app's LR convention is correct** and this item is closed.
+
+The earlier MATLAB prototype needed a `2*34.309 - lr` mirror to make its
+detections line up. That mirror was an artefact of the prototype, which paired
+the loader's raw (descending) axes with the loader's voxel order rather than
+normalising as the app does. It was not evidence of a laterality bug.
+
+`detect_fiducials` reproduces the table above; `FiducialDetect.*` in the unit
+tests pins it.
+
+### Still open: the panel's AP arm, and marker LeftY4Z1
+
+`setArrayFiducialMarkers.m` places each marker at a fixed `absY` = 22.5 mm
+from its panel's rect centre, but the measured AP arm is 18.93 mm on the left
+panel and 20.32 mm on the right. The disagreement is frame-invariant, so it is
+a real conflict between the hardware constants and the placements.
+
+Two consequences, both live:
+
+- Nominal fiducials are systematically 54.38 mm inferior to the real markers,
+  which is why `FiducialDetectOptions` carries a deliberately lopsided IS
+  search window (-20 / +80 mm). That constant is fitted on one subject. Root-
+  causing the offset in `centerArray - [0, 50, -25]` would let the window
+  shrink to roughly +/-25 mm and make the search both cheaper and safer.
+- A rigid (Kabsch) fit of the nominal constellation onto the detections makes
+  accuracy *worse* -- mean error 1.65 mm -> 2.09 mm -- because the nominal
+  triangle is not the triangle the markers form. The detector therefore uses
+  the constellation only to choose among candidates, never to move one.
+
+`LeftY4Z1` is the one marker the detector places badly (4.97 mm). It has no
+stable ring: its peak correlation is 0.51 against 0.78-0.85 for the other
+five, and neighbouring slices agree on its centre to only 0.15 against
+0.50-0.92. Both signals independently mark it as the untrustworthy one, which
+is what the 75% confidence cut in the Registration tab reports. Whether the
+marker is poorly imaged in this subject or the detector mismodels it is not
+yet established -- n=1.
