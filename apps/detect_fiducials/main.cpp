@@ -1,4 +1,4 @@
-// detect_fiducials -- runs beam::mri::detectFiducialDonuts against the
+﻿// detect_fiducials -- runs beam::mri::detectFiducialDonuts against the
 // checked-in MRI fixture and scores it on the operator's own measurements.
 //
 // The GUI button calls the same library function on the same inputs; this is
@@ -7,6 +7,7 @@
 //   detect_fiducials [<mri-path> [<fiducials-csv>]]
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <fstream>
@@ -14,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
 
 #include "array/array_data.hpp"
 #include "infra_dicom/load_mri_ras.hpp"
@@ -109,8 +111,19 @@ int main(int argc, char** argv) {
             names.push_back(marker.name);
         }
 
-        const std::vector<beam::mri::FiducialDetection> detections =
-            beam::mri::detectFiducialDonuts(volume, axes, priorMm, names);
+        beam::mri::FiducialDetectOptions options;
+        if (argc > 3) options.lrMarginMm = std::stod(argv[3]);
+        std::printf("LR search margin %.1f mm\n\n", options.lrMarginMm);
+
+        std::vector<beam::mri::FiducialDetection> detections;
+        for (int pass = 0; pass < 5; ++pass) {
+            const auto started = std::chrono::steady_clock::now();
+            detections = beam::mri::detectFiducialDonuts(volume, axes, priorMm, names, options);
+            const auto elapsed = std::chrono::steady_clock::now() - started;
+            std::printf("detect pass %d: %.0f ms\n", pass + 1,
+                        std::chrono::duration<double, std::milli>(elapsed).count());
+        }
+        std::printf("\n");
 
         const std::map<std::string, Eigen::Vector3d> measured = readFiducialCsv(fiducialPath);
         std::printf("%-3s %-11s %9s %9s %9s %7s %7s %7s %9s\n", "#", "marker", "LR", "AP", "IS",
@@ -134,6 +147,64 @@ int main(int argc, char** argv) {
                         found.positionMm.z(), 100.0 * found.confidence, found.stability,
                         found.radiusMm, error, found.confidence < 0.75 ? " UNTRUSTED" : "");
         }
+        // What the per-row "Detect this fiducial" does, from three starts.
+        std::printf("\nper-marker refine (12 mm radius), from three starting points:\n");
+        std::printf("%-3s %-11s %18s %18s %18s\n", "#", "marker", "from detection",
+                    "from measured+5mm", "from nominal prior");
+        for (std::size_t index = 0; index < detections.size(); ++index) {
+            const beam::mri::FiducialDetection& found = detections[index];
+            const auto truth = measured.find(found.name);
+            if (truth == measured.end()) continue;
+
+            std::vector<Eigen::Vector3d> avoid;
+            for (std::size_t other = 0; other < detections.size(); ++other)
+                if (other != index) avoid.push_back(detections[other].positionMm);
+
+            const auto describe = [&](const Eigen::Vector3d& start) {
+                const std::vector<beam::mri::FiducialDetection> ranked =
+                    beam::mri::detectFiducialDonutsNear(volume, axes, start, avoid, 12.0,
+                                                        found.name);
+                const beam::mri::FiducialDetection refined =
+                    ranked.empty() ? beam::mri::FiducialDetection{} : ranked.front();
+                char text[32];
+                if (!refined.found) {
+                    std::snprintf(text, sizeof(text), "%17s", "not found");
+                } else {
+                    std::snprintf(text, sizeof(text), "err %5.2f mv %5.2f",
+                                  (refined.positionMm - truth->second).norm(),
+                                  (refined.positionMm - start).norm());
+                }
+                return std::string(text);
+            };
+
+            std::printf("%-3zu %-11s %18s %18s %18s\n", index + 1, found.name.c_str(),
+                        describe(found.positionMm).c_str(),
+                        describe(truth->second + Eigen::Vector3d(2.0, 4.0, 3.0)).c_str(),
+                        describe(priorMm[index]).c_str());
+        }
+        std::printf("err = mm from the operator's measurement, mv = mm it moved from the start\n");
+
+        // Ranked local candidates: is the true marker ever the runner-up?
+        std::printf("\nranked candidates within 12 mm of each detected point:\n");
+        for (std::size_t index = 0; index < detections.size(); ++index) {
+            const auto truth = measured.find(detections[index].name);
+            if (truth == measured.end()) continue;
+            std::vector<Eigen::Vector3d> avoid;
+            for (std::size_t other = 0; other < detections.size(); ++other)
+                if (other != index) avoid.push_back(detections[other].positionMm);
+            const std::vector<beam::mri::FiducialDetection> ranked =
+                beam::mri::detectFiducialDonutsNear(volume, axes, detections[index].positionMm,
+                                                    avoid, 12.0, detections[index].name);
+            std::printf("  %-11s", detections[index].name.c_str());
+            if (ranked.empty()) std::printf("  (none)");
+            for (std::size_t rank = 0; rank < ranked.size() && rank < 4; ++rank) {
+                std::printf("  #%zu %.3f err %.2f", rank + 1, ranked[rank].confidence,
+                            (ranked[rank].positionMm - truth->second).norm());
+            }
+            std::printf("\n");
+        }
+
+
         if (scored > 0) {
             std::printf("\nmean error %.2f mm over %d scored markers; %d flagged under 75%%\n",
                         total / scored, scored, flagged);

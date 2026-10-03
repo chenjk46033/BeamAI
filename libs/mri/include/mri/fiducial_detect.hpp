@@ -8,18 +8,12 @@
 #include "mri/ras_transform.hpp"
 #include "mri/slice.hpp"
 
-// Automatic detection of Beam's six fiducial "donuts" in a loaded MRI.
+// Automatic detection of the six fiducial donuts. Not a port; BeamV0 places
+// them by hand. Sagittal slices are correlated against a bank of annulus
+// templates, then the panel triangle picks among the responses.
 //
-// Not a port: BeamV0 has no equivalent -- its operator places all six by
-// hand. The markers image as bright annuli with dark centres, 10-12mm
-// across, three per transducer panel, so each sagittal slice is correlated
-// against a bank of zero-mean annulus templates and the strongest
-// responses are assigned to markers by the panel's known triangle.
-//
-// Nothing here moves a detection to fit the model: geometry only chooses
-// among candidates. An earlier rigid-fit variant pulled accurate points
-// off by ~0.4mm because the hardware triangle and the measured one differ
-// (see docs/known_gaps_mri.md).
+// Geometry only selects candidates, never moves one: a rigid fit is worse
+// than the raw detections (docs/known_gaps_mri.md).
 
 namespace beam::mri {
 
@@ -28,18 +22,17 @@ struct FiducialDetection {
     Eigen::Vector3d positionMm = Eigen::Vector3d::Zero();
     double response = 0.0;   // peak zero-mean normalised cross-correlation
     double stability = 0.0;  // how far neighbouring slices agree on the centre
-    double confidence = 0.0; // == response; reported separately so the two
-                             // signals stay distinguishable to a caller
+    double confidence = 0.0;
     double radiusMm = 0.0;
     bool found = false;
 };
 
 struct FiducialDetectOptions {
-    // Margins added to the prior's own bounding box, per axis. The prior
-    // predicts laterality well and elevation badly -- it sits ~54mm inferior
-    // to where the markers actually are -- so the IS window is deliberately
-    // lopsided. See docs/known_gaps_mri.md.
-    double lrMarginMm = 8.0;
+    // Added to the prior's bounding box. IS is lopsided because the nominal
+    // placement sits ~54mm inferior to the markers (docs/known_gaps_mri.md).
+    // LR: nominal is off by 12mm on F017 and 0.4mm on F040; 16mm already
+    // recovers both, so this carries headroom at no measurable cost.
+    double lrMarginMm = 20.0;
     double apMarginMm = 35.0;
     double isMarginInferiorMm = 20.0;
     double isMarginSuperiorMm = 80.0;
@@ -48,26 +41,30 @@ struct FiducialDetectOptions {
     double maxRadiusMm = 6.0;
     double radiusStepMm = 0.5;
 
-    double responseFloor = 0.45;   // below this a local maximum is not a candidate
-    double clusterRadiusMm = 7.0;  // merges responses from neighbouring slices
-    int candidatesPerSide = 15;    // how many survive into triangle assignment
+    double responseFloor = 0.45;
+    double clusterRadiusMm = 7.0;
+    int candidatesPerSide = 15;
 };
 
-// priorMm: the six nominal marker positions, in millimetres, in the same
-// per-index order setArrayFiducialMarkers produces (three right, three
-// left). Only their geometry is used -- the absolute placement supplies
-// the search window, the within-panel triangle supplies the assignment.
-//
-// axes must be the ascending-normalised vectors the viewer uses, so a
-// detection's millimetres mean the same thing as a coordinate typed into
-// the registration table.
-//
-// Throws std::invalid_argument unless priorMm has exactly 6 entries, or if
-// the volume and axes disagree on dimensions.
+// priorMm: six nominal marker positions in mm, in setArrayFiducialMarkers
+// order. axes must be the ascending-normalised vectors the viewer uses.
+// Throws std::invalid_argument on a wrong count or a volume/axes mismatch.
 std::vector<FiducialDetection> detectFiducialDonuts(
     const Volume3D& volume, const RasAxisVectors& axes,
     const std::vector<Eigen::Vector3d>& priorMm,
     const std::vector<std::string>& names,
+    const FiducialDetectOptions& options = {});
+
+// One marker: every donut-like response within searchRadiusMm of aroundMm,
+// strongest first, empty if none. No constellation constraint -- the caller
+// has already said which marker this is.
+//
+// avoidMm holds the other markers' positions; a candidate nearer to one of
+// those than to aroundMm is dropped, so a generous radius cannot snap onto
+// the neighbouring marker ~20mm away.
+std::vector<FiducialDetection> detectFiducialDonutsNear(
+    const Volume3D& volume, const RasAxisVectors& axes, const Eigen::Vector3d& aroundMm,
+    const std::vector<Eigen::Vector3d>& avoidMm, double searchRadiusMm, const std::string& name,
     const FiducialDetectOptions& options = {});
 
 }  // namespace beam::mri

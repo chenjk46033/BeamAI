@@ -100,6 +100,7 @@ private:
     void saveFiducialsCsv();
     void importFiducialsCsv();
     void detectFiducials();
+    void detectSingleFiducial(int row);
     void applyFiducialConfidenceToTable();
     void highlightRegistrationRow(int currentRow);
     void updateArrayPositionReadout();
@@ -177,9 +178,7 @@ private:
     std::array<bool, 6> sourceFiducialConfirmed_{};
     std::array<bool, 6> fiducialLocated_{};
     std::array<bool, 6> sourceFiducialLocated_{};
-    // Per-marker detector scores, 0 when a marker was placed by hand or
-    // imported rather than detected. Below kFiducialTrustThreshold the table
-    // marks the row untrusted.
+    // 0 when placed by hand or imported rather than detected.
     std::array<double, 6> fiducialConfidence_{};
     std::array<double, 6> fiducialStability_{};
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();

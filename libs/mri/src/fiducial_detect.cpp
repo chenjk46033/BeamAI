@@ -61,8 +61,7 @@ Eigen::Index nearestIndex(const Eigen::VectorXd& axis, double mm) {
     return best;
 }
 
-// Vertex of the parabola through (-1,a) (0,b) (1,c). Turns a peak quantised
-// to the voxel grid into a sub-voxel one.
+// Sub-voxel peak: vertex of the parabola through (-1,a) (0,b) (1,c).
 double parabolaOffset(double a, double b, double c) {
     const double denominator = a - 2.0 * b + c;
     if (std::abs(denominator) < 1e-12) return 0.0;
@@ -79,7 +78,7 @@ struct Peak {
     Eigen::Vector3d positionMm = Eigen::Vector3d::Zero();
 };
 
-// One panel's correlation maps, one per sagittal slice, sharing a window.
+// One panel, one map per sagittal slice over a shared window.
 struct SideMaps {
     Eigen::Index iLo = 0;
     Eigen::Index jLo = 0;
@@ -106,9 +105,8 @@ SideMaps correlateSide(const Volume3D& volume, const std::vector<Annulus>& bank,
             const double count = static_cast<double>((2 * half + 1) * (2 * half + 1));
             for (Eigen::Index j = jLo; j <= jHi; ++j) {
                 for (Eigen::Index k = kLo; k <= kHi; ++k) {
-                    // Reads outside the requested window but inside the
-                    // volume, so every centre in the box gets a real
-                    // correlation instead of a half-kernel dead border.
+                    // Reads outside the window but inside the volume: avoids a
+                    // half-kernel dead border at the box edge.
                     if (j - half < 0 || j + half >= volume.ny) continue;
                     if (k - half < 0 || k + half >= volume.nz) continue;
                     double dot = 0.0;
@@ -189,9 +187,8 @@ Eigen::Vector3d refine(const SideMaps& maps, const RasAxisVectors& axes, const P
             axes.dimIS(peak.k) + isOffset * signedAxisStep(axes.dimIS)};
 }
 
-// How well neighbouring slices agree on the in-plane centre. A donut is a
-// solid of revolution: its centre barely moves across the slices that cut
-// it, while a noise peak wanders. This discriminates better than peak height.
+// Cross-slice agreement on the in-plane centre. Discriminates better than
+// peak height: a real donut holds still, a noise peak wanders.
 double stabilityOf(const SideMaps& maps, const RasAxisVectors& axes, const Peak& peak,
                    double searchRadiusMm, double toleranceMm) {
     const std::size_t centre = static_cast<std::size_t>(peak.i - maps.iLo);
@@ -221,10 +218,9 @@ double stabilityOf(const SideMaps& maps, const RasAxisVectors& axes, const Peak&
     return counted > 0 ? total / counted : 0.0;
 }
 
-// Does `actual` run the same way as `expected` along AP and IS? Only
-// components the prior makes meaningful are checked, so the panel's
-// hypotenuse edge -- whose AP and IS legs are within 2.5mm of each other --
-// cannot be rejected over which of the two happens to be larger.
+// Same direction along AP and IS, checking only components the prior makes
+// meaningful. A dominant-axis test instead flips on the hypotenuse edge,
+// whose legs are within 2.5mm of each other.
 bool edgeOrientationAgrees(const Eigen::Vector3d& expected, const Eigen::Vector3d& actual) {
     constexpr double kMeaningfulMm = 5.0;
     for (int axis : {1, 2}) {
@@ -259,8 +255,7 @@ std::vector<FiducialDetection> detectFiducialDonuts(const Volume3D& volume,
     std::vector<FiducialDetection> results(6);
     for (std::size_t index = 0; index < 6; ++index) results[index].name = names[index];
 
-    // Split the prior into its two panels on the midline rather than trusting
-    // a fixed index order.
+    // Panels split on the midline, not on index order.
     std::vector<double> lateral;
     for (const Eigen::Vector3d& position : priorMm) lateral.push_back(position.x());
     std::vector<double> sorted = lateral;
@@ -321,17 +316,15 @@ std::vector<FiducialDetection> detectFiducialDonuts(const Volume3D& volume,
                                               3.0 * std::max(apStep, isStep));
         }
 
-        // Assign candidates to the panel's three markers using the prior's
-        // triangle: pairwise lengths plus the sign of each edge on its
-        // dominant axis, so the three cannot be permuted.
+        // Assign by the prior triangle: pairwise lengths plus edge directions,
+        // so the three cannot be permuted.
         const Eigen::Vector3d p0 = priorMm[static_cast<std::size_t>(group[0])];
         const Eigen::Vector3d p1 = priorMm[static_cast<std::size_t>(group[1])];
         const Eigen::Vector3d p2 = priorMm[static_cast<std::size_t>(group[2])];
         const std::array<double, 3> expected{(p0 - p1).norm(), (p0 - p2).norm(), (p1 - p2).norm()};
         const std::array<Eigen::Vector3d, 3> expectedEdges{p0 - p1, p0 - p2, p1 - p2};
-        // The measured panel triangle and the nominal one disagree by ~3.5mm
-        // on the AP arm (docs/known_gaps_mri.md), so this must not encode the
-        // nominal lengths tightly.
+        // Loose: nominal and measured AP arms differ by ~3.5mm
+        // (docs/known_gaps_mri.md).
         constexpr double kEdgeToleranceMm = 8.0;
 
         double bestScore = -1.0;
@@ -383,6 +376,77 @@ std::vector<FiducialDetection> detectFiducialDonuts(const Volume3D& volume,
             out.radiusMm = peak.radiusMm;
             out.found = true;
         }
+    }
+    return results;
+}
+
+std::vector<FiducialDetection> detectFiducialDonutsNear(
+    const Volume3D& volume, const RasAxisVectors& axes, const Eigen::Vector3d& aroundMm,
+    const std::vector<Eigen::Vector3d>& avoidMm, double searchRadiusMm, const std::string& name,
+    const FiducialDetectOptions& options) {
+    if (axes.dimLR.size() != volume.nx || axes.dimAP.size() != volume.ny ||
+        axes.dimIS.size() != volume.nz) {
+        throw std::invalid_argument(
+            "detectFiducialDonutNear: volume and axes disagree on dimensions");
+    }
+    if (searchRadiusMm <= 0.0) {
+        throw std::invalid_argument("detectFiducialDonutNear needs a positive search radius");
+    }
+
+    const double apStep = axisStep(axes.dimAP);
+    const double isStep = axisStep(axes.dimIS);
+    const std::vector<Annulus> bank = buildAnnulusBank(options, apStep, isStep);
+
+    const auto range = [](const Eigen::VectorXd& axis, double centre, double radius,
+                          Eigen::Index n) {
+        Eigen::Index a = nearestIndex(axis, centre - radius);
+        Eigen::Index b = nearestIndex(axis, centre + radius);
+        if (a > b) std::swap(a, b);
+        return std::pair<Eigen::Index, Eigen::Index>{std::clamp<Eigen::Index>(a, 0, n - 1),
+                                                     std::clamp<Eigen::Index>(b, 0, n - 1)};
+    };
+    const auto lrRange = range(axes.dimLR, aroundMm.x(), searchRadiusMm, volume.nx);
+    const auto apRange = range(axes.dimAP, aroundMm.y(), searchRadiusMm, volume.ny);
+    const auto isRange = range(axes.dimIS, aroundMm.z(), searchRadiusMm, volume.nz);
+
+    const SideMaps maps =
+        correlateSide(volume, bank, lrRange.first, lrRange.second, apRange.first, apRange.second,
+                      isRange.first, isRange.second);
+    std::vector<Peak> peaks = localMaxima(maps, options);
+
+    std::vector<Peak> accepted;
+    for (Peak& peak : peaks) {
+        peak.positionMm = refine(maps, axes, peak);
+        const double toTarget = (peak.positionMm - aroundMm).norm();
+        if (toTarget > searchRadiusMm) continue;
+        // Never snap onto a different marker, however generous the radius.
+        const bool belongsToAnother =
+            std::any_of(avoidMm.begin(), avoidMm.end(), [&](const Eigen::Vector3d& other) {
+                return (peak.positionMm - other).norm() < toTarget;
+            });
+        if (belongsToAnother) continue;
+        accepted.push_back(peak);
+    }
+    std::sort(accepted.begin(), accepted.end(),
+              [](const Peak& a, const Peak& b) { return a.response > b.response; });
+
+    std::vector<FiducialDetection> results;
+    for (const Peak& peak : accepted) {
+        const bool duplicate =
+            std::any_of(results.begin(), results.end(), [&](const FiducialDetection& kept) {
+                return (kept.positionMm - peak.positionMm).norm() < options.clusterRadiusMm;
+            });
+        if (duplicate) continue;
+        FiducialDetection result;
+        result.name = name;
+        result.positionMm = peak.positionMm;
+        result.response = peak.response;
+        result.stability = stabilityOf(maps, axes, peak, options.clusterRadiusMm,
+                                       3.0 * std::max(apStep, isStep));
+        result.confidence = peak.response;
+        result.radiusMm = peak.radiusMm;
+        result.found = true;
+        results.push_back(std::move(result));
     }
     return results;
 }

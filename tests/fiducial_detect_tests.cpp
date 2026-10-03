@@ -34,9 +34,7 @@ Eigen::VectorXd axisFrom(double start, double step, Eigen::Index count) {
     return axis;
 }
 
-// Textured background: a flat volume has zero local variance, which the
-// detector skips, so the synthetic case has to look at least a little like
-// an image.
+// A flat volume has zero local variance, which the detector skips.
 double background(Eigen::Index i, Eigen::Index j, Eigen::Index k) {
     return 10.0 + 3.0 * std::sin(0.30 * i) + 3.0 * std::cos(0.21 * j) + 2.0 * std::sin(0.17 * k);
 }
@@ -46,11 +44,8 @@ struct SyntheticVolume {
     beam::mri::RasAxisVectors axes;
 };
 
-// A torus, not a hollow sphere. The distinction matters: an off-equator cut
-// through a shell is a smaller but *thicker* ring, which the annulus bank
-// prefers to the true centre, so a shell phantom biases the LR estimate by
-// ~2.7mm. A torus -- what the markers actually are -- keeps one radius and
-// only thins away from its centre slice.
+// A torus, not a hollow sphere: an off-equator cut through a shell is a
+// smaller but thicker ring, which the bank prefers, biasing LR by ~2.7mm.
 SyntheticVolume makeVolumeWithDonuts(const std::vector<Eigen::Vector3d>& centresMm,
                                      double radiusMm) {
     constexpr double kTubeRadiusMm = 1.5;
@@ -73,7 +68,7 @@ SyntheticVolume makeVolumeWithDonuts(const std::vector<Eigen::Vector3d>& centres
                 for (const Eigen::Vector3d& centre : centresMm) {
                     const Eigen::Vector3d offset = position - centre;
                     const double inPlane = std::hypot(offset.y(), offset.z());
-                    // Symmetry axis along LR, so sagittal slices see it face-on.
+                    // Axis along LR, so sagittal slices see it face-on.
                     if (std::hypot(inPlane - radiusMm, offset.x()) <= kTubeRadiusMm) value += 40.0;
                 }
                 made.volume.kSlices[static_cast<std::size_t>(k)](i, j) = value;
@@ -131,10 +126,10 @@ TEST(FiducialDetect, RecoversSixSyntheticDonutsFromABiasedPrior) {
                                              {20.0, 0.0, -10.0},  {20.0, -20.0, -10.0}};
     const SyntheticVolume made = makeVolumeWithDonuts(truth, 5.0);
 
-    // The real prior is offset from the markers; the search must not depend on
-    // starting on top of them.
+    // The real prior is offset on every axis: 12mm in LR on F017, and the
+    // nominal placement sits well inferior of the markers on both subjects.
     std::vector<Eigen::Vector3d> prior;
-    for (const Eigen::Vector3d& centre : truth) prior.push_back(centre + Eigen::Vector3d(0, 5, 15));
+    for (const Eigen::Vector3d& centre : truth) prior.push_back(centre + Eigen::Vector3d(12, 5, 15));
 
     const std::vector<beam::mri::FiducialDetection> found =
         beam::mri::detectFiducialDonuts(made.volume, made.axes, prior, markerNames());
@@ -149,6 +144,46 @@ TEST(FiducialDetect, RecoversSixSyntheticDonutsFromABiasedPrior) {
     }
 }
 
+TEST(FiducialDetect, RefinesOneNudgedMarkerBackOntoItsDonut) {
+    const std::vector<Eigen::Vector3d> truth{{-20.0, 0.0, 10.0},  {-20.0, 0.0, -10.0},
+                                             {-20.0, -20.0, -10.0}, {20.0, 0.0, 10.0},
+                                             {20.0, 0.0, -10.0},  {20.0, -20.0, -10.0}};
+    const SyntheticVolume made = makeVolumeWithDonuts(truth, 5.0);
+
+    // A rough manual placement, nowhere near another marker.
+    const Eigen::Vector3d nudged = truth[0] + Eigen::Vector3d(2.0, 4.0, 4.0);
+    const std::vector<Eigen::Vector3d> avoid(truth.begin() + 1, truth.end());
+
+    const std::vector<beam::mri::FiducialDetection> ranked = beam::mri::detectFiducialDonutsNear(
+        made.volume, made.axes, nudged, avoid, 12.0, "LeftY1Z3");
+    ASSERT_FALSE(ranked.empty());
+    EXPECT_LT((ranked.front().positionMm - truth[0]).norm(), 1.5);
+    EXPECT_GT(ranked.front().confidence, 0.75);
+}
+
+// Refining one marker must never return another marker, even when dragged
+// nearer the neighbour than its own donut.
+TEST(FiducialDetect, RefiningOneMarkerNeverReturnsANeighbour) {
+    const std::vector<Eigen::Vector3d> truth{{-20.0, 0.0, 10.0},  {-20.0, 0.0, -10.0},
+                                             {-20.0, -20.0, -10.0}, {20.0, 0.0, 10.0},
+                                             {20.0, 0.0, -10.0},  {20.0, -20.0, -10.0}};
+    const SyntheticVolume made = makeVolumeWithDonuts(truth, 5.0);
+
+    // Dragged 13mm of the 20mm gap towards LeftY1Z1: the nearest donut is now
+    // the wrong one.
+    const Eigen::Vector3d strayed = truth[0] + Eigen::Vector3d(0.0, 0.0, -13.0);
+    const std::vector<Eigen::Vector3d> avoid(truth.begin() + 1, truth.end());
+
+    const std::vector<beam::mri::FiducialDetection> ranked = beam::mri::detectFiducialDonutsNear(
+        made.volume, made.axes, strayed, avoid, 12.0, "LeftY1Z3");
+    for (const beam::mri::FiducialDetection& candidate : ranked) {
+        for (std::size_t other = 1; other < truth.size(); ++other) {
+            EXPECT_GT((candidate.positionMm - truth[other]).norm(), 3.0)
+                << "offered marker index " << other;
+        }
+    }
+}
+
 TEST(FiducialDetect, RejectsAWrongNumberOfPriorPoints) {
     const SyntheticVolume made = makeVolumeWithDonuts({}, 5.0);
     const std::vector<Eigen::Vector3d> tooFew(5, Eigen::Vector3d::Zero());
@@ -156,9 +191,8 @@ TEST(FiducialDetect, RejectsAWrongNumberOfPriorPoints) {
                  std::invalid_argument);
 }
 
-// The accuracy claim the feature rests on: five of the six markers land within
-// the 1-2mm the operator asked for, and the sixth -- which the detector places
-// ~5mm out -- is the one the confidence score sends below the 75% cut.
+// Five markers within 2mm; the sixth, ~5mm out, is the one the confidence
+// score sends below the cut.
 TEST(FiducialDetect, MatchesTheOperatorsMeasurementsOnTheReferenceSubject) {
     const Eigen::MatrixXd rect = readRectCsv(BEAM_DEFAULT_SUBJECT_RECT_CSV);
     const std::map<std::string, Eigen::Vector3d> measured =
@@ -211,9 +245,7 @@ TEST(FiducialDetect, MatchesTheOperatorsMeasurementsOnTheReferenceSubject) {
         const bool trusted = detection.confidence >= 0.75;
         if (error <= 2.0) ++within2mm;
         if (!trusted) ++flagged;
-        // The point of the confidence score: anything it vouches for has to be
-        // accurate. A trusted point further out than 2mm is the failure this
-        // guards against.
+        // Anything the score vouches for must be accurate.
         if (trusted) EXPECT_LE(error, 2.0);
     }
     EXPECT_EQ(within2mm, 5);

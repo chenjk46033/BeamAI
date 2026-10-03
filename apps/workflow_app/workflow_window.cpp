@@ -234,12 +234,24 @@ double normalizedAxisPosition(const Eigen::VectorXd& axis, double mm) {
 constexpr int kMinMriViewerHeight = 300;
 constexpr int kMaxMriViewerHeight = 900;
 
-// Automatic fiducial detection below this peak-correlation score is reported
-// as untrusted. On the reference subject the one marker the detector places
-// badly (~5mm out) scores 0.51 while the five accurate ones score 0.78-0.85,
-// so the cut separates them with room to spare -- but it is calibrated on a
-// single subject (docs/known_gaps_mri.md).
+// Calibrated on one subject: the five accurate markers score 0.78-0.85
+// (docs/known_gaps_mri.md).
 constexpr double kFiducialTrustThreshold = 0.75;
+// Below this, reported as probably wrong rather than merely unverified.
+constexpr double kFiducialRejectThreshold = 0.50;
+
+// Safe at this size because the detector drops candidates belonging to a
+// neighbouring marker.
+constexpr double kSingleFiducialSearchRadiusMm = 12.0;
+
+enum class FiducialTrust { Unscored, Reject, Caution, Trusted };
+
+FiducialTrust fiducialTrustOf(double confidence) {
+    if (confidence <= 0.0) return FiducialTrust::Unscored;
+    if (confidence < kFiducialRejectThreshold) return FiducialTrust::Reject;
+    if (confidence < kFiducialTrustThreshold) return FiducialTrust::Caution;
+    return FiducialTrust::Trusted;
+}
 
 QString statusSymbol(beam::gui::WorkflowStatus status) {
     switch (status) {
@@ -1437,15 +1449,27 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 if (row < 0 || row >= ui_->registrationTable->rowCount()) return;
                 ui_->registrationTable->setCurrentCell(row, 0);
                 QMenu menu(this);
+                QAction* detect = nullptr;
+                if (row < 6) {
+                    const QTableWidgetItem* nameCell = ui_->registrationTable->item(row, 0);
+                    detect = menu.addAction(
+                        QStringLiteral("Detect this fiducial (%1)")
+                            .arg(nameCell != nullptr ? nameCell->text()
+                                                     : QString::number(row + 1)));
+                }
                 QAction* confirm = menu.addAction(QStringLiteral("Confirm this fiducial"));
                 confirm->setEnabled(row >= 0 && row < 6 &&
                                     fiducialLocated_[static_cast<std::size_t>(row)] &&
                                     !fiducialConfirmed_[static_cast<std::size_t>(row)]);
-                connect(confirm, &QAction::triggered, this, [this, row] {
+                QAction* chosen =
+                    menu.exec(ui_->registrationTable->viewport()->mapToGlobal(position));
+                if (chosen == nullptr) return;
+                if (chosen == confirm) {
                     ui_->registrationTable->setCurrentCell(row, 0);
                     confirmSelectedFiducial();
-                });
-                menu.exec(ui_->registrationTable->viewport()->mapToGlobal(position));
+                } else if (chosen == detect) {
+                    detectSingleFiducial(row);
+                }
             });
     connect(ui_->registrationTable, &QTableWidget::cellDoubleClicked, this,
             [this](int row, int) {
@@ -2381,60 +2405,73 @@ void WorkflowWindow::confirmSelectedFiducial() {
 
 
 // Matches by marker name, not row order; refuses a file missing any of the six.
-// Sole owner of registration-table cell backgrounds: the selected row's
-// highlight and an untrusted detection's warning fill are both backgrounds,
-// so they have to be decided together or whichever runs last wins.
+// Sole owner of cell backgrounds: selection highlight and warning fill are
+// both backgrounds, so whichever ran last would otherwise win.
 void WorkflowWindow::highlightRegistrationRow(int currentRow) {
     const QColor selectedFill(190, 235, 245);
-    const QColor untrustedFill(0xff, 0xe3, 0xe3);
+    const QColor rejectFill(0xff, 0xe3, 0xe3);
+    const QColor cautionFill(0xff, 0xf4, 0xe0);
     for (int row = 0; row < ui_->registrationTable->rowCount(); ++row) {
         const double confidence = row < 6 ? fiducialConfidence_[static_cast<std::size_t>(row)] : 0.0;
-        const bool untrusted = confidence > 0.0 && confidence < kFiducialTrustThreshold;
-        const QColor fill = row == currentRow ? selectedFill
-                            : untrusted       ? untrustedFill
-                                              : QColor(Qt::transparent);
+        const FiducialTrust trust = fiducialTrustOf(confidence);
+        const QColor fill = row == currentRow                    ? selectedFill
+                            : trust == FiducialTrust::Reject     ? rejectFill
+                            : trust == FiducialTrust::Caution    ? cautionFill
+                                                                 : QColor(Qt::transparent);
         for (int column = 0; column < ui_->registrationTable->columnCount(); ++column) {
             if (auto* item = ui_->registrationTable->item(row, column)) item->setBackground(fill);
         }
     }
 }
 
-// Fills the table's Confidence column and marks a whole row when the
-// detector's score falls below what is worth trusting unreviewed. The red
-// text and bold survive row selection; the fill is applied by
-// highlightRegistrationRow.
+// Confidence column plus per-row warning text. The fill comes from
+// highlightRegistrationRow so it survives row selection.
 void WorkflowWindow::applyFiducialConfidenceToTable() {
-    const QColor untrustedText(0xb1, 0x1c, 0x1c);
+    const QColor rejectText(0xb1, 0x1c, 0x1c);
+    const QColor cautionText(0x8a, 0x55, 0x00);
     ui_->registrationTable->blockSignals(true);
     for (int row = 0; row < 6; ++row) {
         const double confidence = fiducialConfidence_[static_cast<std::size_t>(row)];
         const double stability = fiducialStability_[static_cast<std::size_t>(row)];
-        const bool scored = confidence > 0.0;
-        const bool untrusted = scored && confidence < kFiducialTrustThreshold;
+        const FiducialTrust trust = fiducialTrustOf(confidence);
         if (QTableWidgetItem* cell = ui_->registrationTable->item(row, 6)) {
-            if (!scored) {
+            if (trust == FiducialTrust::Unscored) {
                 cell->setText(QStringLiteral("—"));
                 cell->setToolTip(QString());
             } else {
-                cell->setText(untrusted
-                                  ? QStringLiteral("%1%  ✖").arg(confidence * 100.0, 0, 'f', 0)
-                                  : QStringLiteral("%1%").arg(confidence * 100.0, 0, 'f', 0));
+                // Only a rejected score gets a cross; a caution-band point is
+                // often a good placement on a weakly imaged marker.
+                const QString mark = trust == FiducialTrust::Reject    ? QStringLiteral("  ✖")
+                                     : trust == FiducialTrust::Caution ? QStringLiteral("  ?")
+                                                                       : QString();
+                cell->setText(QStringLiteral("%1%%2").arg(confidence * 100.0, 0, 'f', 0).arg(mark));
+                QString advice;
+                switch (trust) {
+                    case FiducialTrust::Reject:
+                        advice = QStringLiteral("Below 50% — most likely not on the marker. Place "
+                                                "this one by hand.");
+                        break;
+                    case FiducialTrust::Caution:
+                        advice = QStringLiteral("Between 50% and 75% — unverified, not necessarily "
+                                                "wrong. Check it in all three planes.");
+                        break;
+                    default:
+                        advice = QStringLiteral("Still review it before confirming.");
+                        break;
+                }
                 cell->setToolTip(
                     QStringLiteral("Peak annulus correlation %1; neighbouring slices agree on the "
                                    "centre to %2.\n%3")
                         .arg(confidence, 0, 'f', 3)
                         .arg(stability, 0, 'f', 2)
-                        .arg(untrusted
-                                 ? QStringLiteral("Below 75% — do not trust this point without "
-                                                  "checking it in all three planes.")
-                                 : QStringLiteral("Still review it before confirming.")));
+                        .arg(advice));
             }
         }
         for (int column = 0; column < ui_->registrationTable->columnCount(); ++column) {
             QTableWidgetItem* item = ui_->registrationTable->item(row, column);
             if (item == nullptr) continue;
-            if (untrusted) {
-                item->setForeground(untrustedText);
+            if (trust == FiducialTrust::Reject || trust == FiducialTrust::Caution) {
+                item->setForeground(trust == FiducialTrust::Reject ? rejectText : cautionText);
                 QFont font = item->font();
                 font.setBold(true);
                 item->setFont(font);
@@ -2448,6 +2485,99 @@ void WorkflowWindow::applyFiducialConfidenceToTable() {
     highlightRegistrationRow(ui_->registrationTable->currentRow());
 }
 
+// Refines around where the point already is, so the operator decides which
+// marker is meant.
+void WorkflowWindow::detectSingleFiducial(int row) {
+    if (!registrationGeometryLoaded_ || !mriLoaded_ || row < 0 || row >= 6 ||
+        fiducials_.size() < 6 || registrationSourceFiducials_.size() < 6) {
+        QMessageBox::warning(this, QStringLiteral("Detect fiducial"),
+                             QStringLiteral("Load an MRI and its transducer geometry first."));
+        return;
+    }
+    const std::size_t index = static_cast<std::size_t>(row);
+    const QString name = QString::fromStdString(fiducials_[index].name);
+    const Eigen::Vector3d beforeMm = fiducials_[index].position * 1000.0;
+
+    // The same search the Detect fiducials button runs, from the nominal
+    // prior; only this row's result is applied. Refining around the point's
+    // current position instead cannot reach a marker that has never been
+    // located, which sits ~54 mm away.
+    std::vector<Eigen::Vector3d> priorMm;
+    std::vector<std::string> names;
+    for (const auto& marker : registrationSourceFiducials_) {
+        priorMm.push_back(marker.position * 1000.0);
+        names.push_back(marker.name);
+    }
+
+    beam::mri::FiducialDetection found;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        const std::vector<beam::mri::FiducialDetection> all =
+            beam::mri::detectFiducialDonuts(mriVolume_, mriAxes_, priorMm, names);
+        found = all[index];
+        if (!found.found) {
+            std::vector<Eigen::Vector3d> avoidMm;
+            for (std::size_t other = 0; other < fiducials_.size(); ++other)
+                if (other != index) avoidMm.push_back(fiducials_[other].position * 1000.0);
+            const std::vector<beam::mri::FiducialDetection> ranked =
+                beam::mri::detectFiducialDonutsNear(mriVolume_, mriAxes_, beforeMm, avoidMm,
+                                                    kSingleFiducialSearchRadiusMm, names[index]);
+            if (!ranked.empty()) found = ranked.front();
+        }
+    } catch (const std::exception& error) {
+        QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, QStringLiteral("Detect fiducial"),
+                             QStringLiteral("Detection failed: %1").arg(error.what()));
+        return;
+    }
+    QApplication::restoreOverrideCursor();
+
+    if (!found.found) {
+        const QString message = QStringLiteral("%1 was not found. Place it by hand.").arg(name);
+        ui_->registrationResult->setText(message);
+        showMessage(message, true);
+        QMessageBox::information(this, QStringLiteral("Detect fiducial"), message);
+        return;
+    }
+
+    const double movedMm = (found.positionMm - beforeMm).norm();
+    fiducials_[index].position = found.positionMm / 1000.0;
+    fiducialConfidence_[index] = found.confidence;
+    fiducialStability_[index] = found.stability;
+    fiducialLocated_[index] = true;
+    fiducialConfirmed_[index] = false;
+    sourceFiducialConfirmed_[index] = false;
+
+    ui_->registrationTable->blockSignals(true);
+    for (int axis = 0; axis < 3; ++axis) {
+        if (QTableWidgetItem* cell = ui_->registrationTable->item(row, axis + 1))
+            cell->setText(QString::number(found.positionMm(axis), 'f', 2));
+    }
+    if (QTableWidgetItem* cell = ui_->registrationTable->item(row, 4))
+        cell->setText(QStringLiteral("Detected"));
+    ui_->registrationTable->blockSignals(false);
+    applyFiducialConfidenceToTable();
+
+    // Moving one point invalidates any fit from the old six.
+    setRegistrationPhase(RegistrationPhase::Locating);
+    workflow_.change(beam::gui::WorkflowStage::Registration,
+                     "A fiducial was re-detected; registration must be recalculated.");
+    showMriPreviews();
+    updateRegistrationAvailability();
+    ui_->registrationTable->setCurrentCell(row, 0);
+    ui_->registrationTable->selectRow(row);
+    ui_->registrationFiducialLayout->setSelectedIndex(row);
+    navigateToRegistrationFiducial(row);
+
+    const QString message = QStringLiteral("%1 re-detected at %2%% confidence, moved %3 mm.")
+                                .arg(name)
+                                .arg(found.confidence * 100.0, 0, 'f', 0)
+                                .arg(movedMm, 0, 'f', 2);
+    ui_->registrationResult->setText(message);
+    showMessage(message, fiducialTrustOf(found.confidence) != FiducialTrust::Trusted);
+    refresh();
+}
+
 void WorkflowWindow::detectFiducials() {
     if (!registrationGeometryLoaded_ || !mriLoaded_ || fiducials_.size() < 6 ||
         registrationSourceFiducials_.size() < 6) {
@@ -2455,8 +2585,8 @@ void WorkflowWindow::detectFiducials() {
         return;
     }
 
-    // The prior is the nominal placement, never the operator's current edits:
-    // seeding the search from an edited point would only confirm it.
+    // Nominal placement, never the current edits: seeding from an edited point
+    // would only confirm it.
     std::vector<Eigen::Vector3d> priorMm;
     std::vector<std::string> names;
     for (const auto& marker : registrationSourceFiducials_) {
@@ -2479,7 +2609,8 @@ void WorkflowWindow::detectFiducials() {
     QApplication::restoreOverrideCursor();
 
     int detected = 0;
-    int untrusted = 0;
+    int rejected = 0;
+    int caution = 0;
     ui_->registrationTable->blockSignals(true);
     for (int row = 0; row < 6; ++row) {
         const std::size_t index = static_cast<std::size_t>(row);
@@ -2488,14 +2619,14 @@ void WorkflowWindow::detectFiducials() {
         fiducialStability_[index] = found.found ? found.stability : 0.0;
         if (!found.found) continue;
         ++detected;
-        if (found.confidence < kFiducialTrustThreshold) ++untrusted;
+        if (fiducialTrustOf(found.confidence) == FiducialTrust::Reject) ++rejected;
+        if (fiducialTrustOf(found.confidence) == FiducialTrust::Caution) ++caution;
         fiducials_[index].position = found.positionMm / 1000.0;
         for (int axis = 0; axis < 3; ++axis) {
             if (QTableWidgetItem* cell = ui_->registrationTable->item(row, axis + 1))
                 cell->setText(QString::number(found.positionMm(axis), 'f', 2));
         }
-        // Located, deliberately not confirmed: every detection has to pass
-        // under the operator's eye in Step 2 before it can be registered.
+        // Located, deliberately not confirmed: Step 2 must still review it.
         fiducialLocated_[index] = true;
         fiducialConfirmed_[index] = false;
         sourceFiducialConfirmed_[index] = false;
@@ -2518,15 +2649,39 @@ void WorkflowWindow::detectFiducials() {
                      "Fiducials detected automatically; each must be confirmed.");
     showMriPreviews();
     updateRegistrationAvailability();
+
+    // First marker the detector vouches for, else the first found at all.
+    int firstTrusted = -1;
+    int firstDetected = -1;
+    for (int row = 0; row < 6; ++row) {
+        if (!detections[static_cast<std::size_t>(row)].found) continue;
+        if (firstDetected < 0) firstDetected = row;
+        if (fiducialConfidence_[static_cast<std::size_t>(row)] >= kFiducialTrustThreshold &&
+            firstTrusted < 0)
+            firstTrusted = row;
+    }
+    const int openOn = firstTrusted >= 0 ? firstTrusted : firstDetected;
+    if (openOn >= 0) {
+        ui_->registrationTable->setCurrentCell(openOn, 0);
+        ui_->registrationTable->selectRow(openOn);
+        ui_->registrationFiducialLayout->setSelectedIndex(openOn);
+        // setCurrentCell only navigates via currentCellChanged when the row
+        // actually changes, and row 0 is already current after population.
+        navigateToRegistrationFiducial(openOn);
+    }
+
     QString summary = QStringLiteral("Detected %1 of 6 fiducials.").arg(detected);
-    if (untrusted > 0)
-        summary += QStringLiteral(" %1 below 75%% confidence, marked in red — correct those by hand "
-                                  "before confirming.")
-                       .arg(untrusted);
-    else
+    if (rejected > 0)
+        summary += QStringLiteral(" %1 below 50%% confidence, marked in red — place those by hand.")
+                       .arg(rejected);
+    if (caution > 0)
+        summary += QStringLiteral(" %1 between 50%% and 75%%, marked in amber — unverified, check "
+                                  "in all three planes.")
+                       .arg(caution);
+    if (rejected == 0 && caution == 0)
         summary += QStringLiteral(" Confirm each one after checking it in all three planes.");
     ui_->registrationResult->setText(summary);
-    showMessage(summary, untrusted > 0);
+    showMessage(summary, rejected > 0 || caution > 0);
     refresh();
 }
 
@@ -2627,8 +2782,7 @@ void WorkflowWindow::importFiducialsCsv() {
         // Already confirmed once, so Step 2 is available immediately.
         fiducialLocated_[index] = true;
         fiducialConfirmed_[index] = true;
-        // An imported point carries the operator's own judgement, not a
-        // detector score; any score left from an earlier detection is stale.
+        // An imported point has no detector score; an old one is stale.
         fiducialConfidence_[index] = 0.0;
         fiducialStability_[index] = 0.0;
         ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Confirmed"));
