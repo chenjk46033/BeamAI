@@ -1,9 +1,10 @@
-#include "mri/fiducial_detect.hpp"
+﻿#include "mri/fiducial_detect.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace beam::mri {
@@ -89,7 +90,7 @@ struct SideMaps {
 
 SideMaps correlateSide(const Volume3D& volume, const std::vector<Annulus>& bank, Eigen::Index iLo,
                        Eigen::Index iHi, Eigen::Index jLo, Eigen::Index jHi, Eigen::Index kLo,
-                       Eigen::Index kHi) {
+                       Eigen::Index kHi, unsigned maxThreads) {
     SideMaps maps;
     maps.iLo = iLo;
     maps.jLo = jLo;
@@ -97,31 +98,72 @@ SideMaps correlateSide(const Volume3D& volume, const std::vector<Annulus>& bank,
     const Eigen::Index rows = jHi - jLo + 1;
     const Eigen::Index cols = kHi - kLo + 1;
 
-    for (Eigen::Index i = iLo; i <= iHi; ++i) {
+    int maxHalf = 0;
+    for (const Annulus& annulus : bank) maxHalf = std::max(maxHalf, annulus.half);
+
+    // Volume3D holds one matrix per axial slice, so a sagittal window reads one
+    // element from each of (2*half+1) different matrices. Copy the plane out
+    // once per slice and the inner loops walk contiguous memory.
+    const Eigen::Index jPadLo = std::max<Eigen::Index>(0, jLo - maxHalf);
+    const Eigen::Index jPadHi = std::min<Eigen::Index>(volume.ny - 1, jHi + maxHalf);
+    const Eigen::Index kPadLo = std::max<Eigen::Index>(0, kLo - maxHalf);
+    const Eigen::Index kPadHi = std::min<Eigen::Index>(volume.nz - 1, kHi + maxHalf);
+    const Eigen::Index planeRows = jPadHi - jPadLo + 1;
+    const Eigen::Index planeCols = kPadHi - kPadLo + 1;
+
+    const std::size_t sliceCount = static_cast<std::size_t>(iHi - iLo + 1);
+    maps.response.resize(sliceCount);
+    maps.radius.resize(sliceCount);
+
+    // Slices are independent, so the result does not depend on how they are
+    // divided up.
+    const auto correlateOneSlice = [&](Eigen::Index i) {
+        Eigen::MatrixXd plane(planeRows, planeCols);
+        Eigen::MatrixXd integral = Eigen::MatrixXd::Zero(planeRows + 1, planeCols + 1);
+        Eigen::MatrixXd integralSquares = Eigen::MatrixXd::Zero(planeRows + 1, planeCols + 1);
+        for (Eigen::Index k = kPadLo; k <= kPadHi; ++k)
+            for (Eigen::Index j = jPadLo; j <= jPadHi; ++j)
+                plane(j - jPadLo, k - kPadLo) = volume(i, j, k);
+
+        // Window sum and sum of squares are radius-independent; computing them
+        // per radius was two thirds of the work.
+        for (Eigen::Index c = 0; c < planeCols; ++c) {
+            for (Eigen::Index r = 0; r < planeRows; ++r) {
+                const double value = plane(r, c);
+                integral(r + 1, c + 1) =
+                    value + integral(r, c + 1) + integral(r + 1, c) - integral(r, c);
+                integralSquares(r + 1, c + 1) = value * value + integralSquares(r, c + 1) +
+                                                integralSquares(r + 1, c) - integralSquares(r, c);
+            }
+        }
+
         Eigen::MatrixXd best = Eigen::MatrixXd::Constant(rows, cols, -1.0);
         Eigen::MatrixXd bestRadius = Eigen::MatrixXd::Zero(rows, cols);
         for (const Annulus& annulus : bank) {
             const int half = annulus.half;
-            const double count = static_cast<double>((2 * half + 1) * (2 * half + 1));
+            const Eigen::Index span = 2 * half + 1;
+            const double count = static_cast<double>(span * span);
             for (Eigen::Index j = jLo; j <= jHi; ++j) {
+                // Reads outside the window but inside the volume: avoids a
+                // half-kernel dead border at the box edge.
+                if (j - half < 0 || j + half >= volume.ny) continue;
+                const Eigen::Index r0 = j - half - jPadLo;
                 for (Eigen::Index k = kLo; k <= kHi; ++k) {
-                    // Reads outside the window but inside the volume: avoids a
-                    // half-kernel dead border at the box edge.
-                    if (j - half < 0 || j + half >= volume.ny) continue;
                     if (k - half < 0 || k + half >= volume.nz) continue;
-                    double dot = 0.0;
-                    double sum = 0.0;
-                    double sumSquares = 0.0;
-                    for (int a = -half; a <= half; ++a) {
-                        for (int b = -half; b <= half; ++b) {
-                            const double value = volume(i, j + a, k + b);
-                            dot += value * annulus.weights(a + half, b + half);
-                            sum += value;
-                            sumSquares += value * value;
-                        }
-                    }
+                    const Eigen::Index c0 = k - half - kPadLo;
+                    const double sum = integral(r0 + span, c0 + span) - integral(r0, c0 + span) -
+                                       integral(r0 + span, c0) + integral(r0, c0);
+                    const double sumSquares =
+                        integralSquares(r0 + span, c0 + span) - integralSquares(r0, c0 + span) -
+                        integralSquares(r0 + span, c0) + integralSquares(r0, c0);
                     const double variance = sumSquares - sum * sum / count;
                     if (variance <= 1e-12) continue;
+                    double dot = 0.0;
+                    for (Eigen::Index b = 0; b < span; ++b) {
+                        const double* pixels = &plane(r0, c0 + b);
+                        const double* weights = &annulus.weights(0, b);
+                        for (Eigen::Index a = 0; a < span; ++a) dot += pixels[a] * weights[a];
+                    }
                     const double ncc = dot / std::sqrt(variance);
                     if (ncc > best(j - jLo, k - kLo)) {
                         best(j - jLo, k - kLo) = ncc;
@@ -130,9 +172,31 @@ SideMaps correlateSide(const Volume3D& volume, const std::vector<Annulus>& bank,
                 }
             }
         }
-        maps.response.push_back(std::move(best));
-        maps.radius.push_back(std::move(bestRadius));
+        const std::size_t slot = static_cast<std::size_t>(i - iLo);
+        maps.response[slot] = std::move(best);
+        maps.radius[slot] = std::move(bestRadius);
+    };
+
+    const unsigned hardware =
+        maxThreads > 0 ? maxThreads : std::max(1u, std::thread::hardware_concurrency());
+    // At least two slices each. One slice per thread leaves most of them idle
+    // after a single slice while the whole panel waits on whichever landed on
+    // a slow core -- measurably worse than using fewer threads.
+    const std::size_t workers =
+        std::min<std::size_t>(hardware, std::max<std::size_t>(1, sliceCount / 2));
+    if (workers <= 1) {
+        for (Eigen::Index i = iLo; i <= iHi; ++i) correlateOneSlice(i);
+        return maps;
     }
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    for (std::size_t worker = 0; worker < workers; ++worker) {
+        threads.emplace_back([&, worker] {
+            for (std::size_t slot = worker; slot < sliceCount; slot += workers)
+                correlateOneSlice(iLo + static_cast<Eigen::Index>(slot));
+        });
+    }
+    for (std::thread& thread : threads) thread.join();
     return maps;
 }
 
@@ -295,7 +359,7 @@ std::vector<FiducialDetection> detectFiducialDonuts(const Volume3D& volume,
 
         const SideMaps maps = correlateSide(volume, bank, lrRange.first, lrRange.second,
                                             apRange.first, apRange.second, isRange.first,
-                                            isRange.second);
+                                            isRange.second, options.maxThreads);
         std::vector<Peak> peaks = localMaxima(maps, options);
         for (Peak& peak : peaks) peak.positionMm = refine(maps, axes, peak);
         std::sort(peaks.begin(), peaks.end(),
@@ -411,7 +475,7 @@ std::vector<FiducialDetection> detectFiducialDonutsNear(
 
     const SideMaps maps =
         correlateSide(volume, bank, lrRange.first, lrRange.second, apRange.first, apRange.second,
-                      isRange.first, isRange.second);
+                      isRange.first, isRange.second, options.maxThreads);
     std::vector<Peak> peaks = localMaxima(maps, options);
 
     std::vector<Peak> accepted;

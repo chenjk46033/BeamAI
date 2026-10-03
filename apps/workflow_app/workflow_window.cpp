@@ -2607,7 +2607,6 @@ void WorkflowWindow::detectFiducials() {
     }
     detectFiducialsButton_->setEnabled(true);
     QApplication::restoreOverrideCursor();
-
     int detected = 0;
     int rejected = 0;
     int caution = 0;

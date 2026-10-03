@@ -44,6 +44,7 @@ struct FiducialDetectOptions {
     double responseFloor = 0.45;
     double clusterRadiusMm = 7.0;
     int candidatesPerSide = 15;
+    unsigned maxThreads = 0;  // 0 = hardware_concurrency
 };
 
 // priorMm: six nominal marker positions in mm, in setArrayFiducialMarkers

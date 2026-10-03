@@ -111,19 +111,30 @@ int main(int argc, char** argv) {
             names.push_back(marker.name);
         }
 
+        // argv[5] = a fiducials CSV to use AS THE PRIOR, reproducing what the
+        // app does after a session load (registrationSourceFiducials_ holds
+        // the session's own points, not the nominal placement).
+        if (argc > 5) {
+            const std::map<std::string, Eigen::Vector3d> seed = readFiducialCsv(argv[5]);
+            for (std::size_t n = 0; n < names.size(); ++n) {
+                const auto found = seed.find(names[n]);
+                if (found != seed.end()) priorMm[n] = found->second;
+            }
+            std::printf("prior taken from %s\n", argv[5]);
+        }
+
         beam::mri::FiducialDetectOptions options;
         if (argc > 3) options.lrMarginMm = std::stod(argv[3]);
-        std::printf("LR search margin %.1f mm\n\n", options.lrMarginMm);
+        if (argc > 4) options.maxThreads = static_cast<unsigned>(std::stoul(argv[4]));
+        std::printf("LR search margin %.1f mm, threads %u\n\n", options.lrMarginMm,
+                    options.maxThreads);
 
-        std::vector<beam::mri::FiducialDetection> detections;
-        for (int pass = 0; pass < 5; ++pass) {
-            const auto started = std::chrono::steady_clock::now();
-            detections = beam::mri::detectFiducialDonuts(volume, axes, priorMm, names, options);
-            const auto elapsed = std::chrono::steady_clock::now() - started;
-            std::printf("detect pass %d: %.0f ms\n", pass + 1,
-                        std::chrono::duration<double, std::milli>(elapsed).count());
-        }
-        std::printf("\n");
+        const auto started = std::chrono::steady_clock::now();
+        const std::vector<beam::mri::FiducialDetection> detections =
+            beam::mri::detectFiducialDonuts(volume, axes, priorMm, names, options);
+        std::printf("detection took %.0f ms\n\n",
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - started).count());
 
         const std::map<std::string, Eigen::Vector3d> measured = readFiducialCsv(fiducialPath);
         std::printf("%-3s %-11s %9s %9s %9s %7s %7s %7s %9s\n", "#", "marker", "LR", "AP", "IS",
