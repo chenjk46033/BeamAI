@@ -47,4 +47,5 @@ target_compile_definitions(unit_tests PRIVATE
     BEAM_DEFAULT_SUBJECT_RECT_CSV="${CMAKE_SOURCE_DIR}/../DefaultSubjectV0/defaultSubjectArrayRect.csv"
     BEAM_MRI_FIXTURE_NII="${CMAKE_SOURCE_DIR}/testdata/beamai_F040_T1_MRI.nii"
     BEAM_FIDUCIAL_FIXTURE_CSV="${CMAKE_SOURCE_DIR}/testdata/beamai_fiducials_F040_T1_MRI.csv"
+    BEAM_DETECTED_FIDUCIAL_CSV="${CMAKE_SOURCE_DIR}/testdata/beamai_fiducials_F040_detected.csv"
 )

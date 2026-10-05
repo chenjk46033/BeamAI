@@ -61,7 +61,7 @@ public:
     // until a double-click, Enter, or a click back on the first one. Escape
     // abandons one in progress, or clears a finished one. A measurement
     // belongs to the slice it was drawn on and is not shown on any other.
-    enum class MeasureMode { None, Line, Angle, Contour };
+    enum class MeasureMode { None, Line, Contour };
     void beginMeasurement(MeasureMode mode);
     // Makes this view share another view.s measurement instead of owning one,
     // so a detached viewer and its pane are the same canvas.

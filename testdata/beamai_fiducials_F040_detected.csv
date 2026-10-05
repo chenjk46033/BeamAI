@@ -1,0 +1,13 @@
+# BeamAI AUTO-DETECTED fiducials, millimetres, RAS (+x right, +y anterior, +z superior)
+# MRI: C:/Users/jkche/dev/spire.us/BeamExampleDataDICOMandMatFiles/BEAM MRIs/F040
+# geometry: 192,192,192,-89.8411,158.459,-109.29103,145.375,-133.67803,120.988
+# lock left: horizontal=3, vertical=3
+# lock right: horizontal=3, vertical=3
+# source: beam::mri::detectFiducialDonuts, LeftY4Z1 is the 51% low-confidence one
+name,x,y,z
+LeftY1Z3,-75.13,46.96,42.69
+LeftY1Z1,-74.36,47.82,23.33
+LeftY4Z1,-71.72,25.66,19.26
+RightY1Z3,140.40,62.17,44.56
+RightY1Z1,138.72,63.46,25.00
+RightY4Z1,139.75,41.46,23.17

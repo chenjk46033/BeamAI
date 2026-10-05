@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
         // argv[5] = a fiducials CSV to use AS THE PRIOR, reproducing what the
         // app does after a session load (registrationSourceFiducials_ holds
         // the session's own points, not the nominal placement).
-        if (argc > 5) {
+        if (argc > 5 && std::string(argv[5]) != "-") {
             const std::map<std::string, Eigen::Vector3d> seed = readFiducialCsv(argv[5]);
             for (std::size_t n = 0; n < names.size(); ++n) {
                 const auto found = seed.find(names[n]);
@@ -135,7 +135,6 @@ int main(int argc, char** argv) {
         std::printf("detection took %.0f ms\n\n",
                     std::chrono::duration<double, std::milli>(
                         std::chrono::steady_clock::now() - started).count());
-
         const std::map<std::string, Eigen::Vector3d> measured = readFiducialCsv(fiducialPath);
         std::printf("%-3s %-11s %9s %9s %9s %7s %7s %7s %9s\n", "#", "marker", "LR", "AP", "IS",
                     "conf", "stab", "radius", "err");

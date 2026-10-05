@@ -1,5 +1,8 @@
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -399,4 +402,152 @@ TEST(RegisterCurrentTransducerPosition, HorizontalSliderShiftsByExactDeltaMagnit
     const Eigen::Vector3d delta =
         shifted.arrayData.arrayTotal.element[10].position - base.arrayData.arrayTotal.element[10].position;
     EXPECT_NEAR(delta.norm(), 0.0075, 1e-9);  // 7.5mm horizontalDelta / 1000
+}
+
+namespace {
+
+Eigen::MatrixXd readRectCsvOrEmpty(const char* path) {
+    std::ifstream file(path);
+    if (!file) return {};
+    std::vector<std::vector<double>> rows;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        std::stringstream stream(line);
+        std::string cell;
+        std::vector<double> row;
+        while (std::getline(stream, cell, ',')) row.push_back(std::stod(cell));
+        rows.push_back(std::move(row));
+    }
+    if (rows.size() != 19 || rows.front().empty()) return {};
+    Eigen::MatrixXd rect(19, static_cast<Eigen::Index>(rows.front().size()));
+    for (Eigen::Index r = 0; r < 19; ++r)
+        for (Eigen::Index c = 0; c < rect.cols(); ++c)
+            rect(r, c) = rows[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)];
+    return rect;
+}
+
+// In the order setArrayFiducialMarkers produces, which is what both
+// registration entry points expect.
+std::vector<Eigen::Vector3d> readMeasuredFiducials(const char* path,
+                                                    const std::vector<FiducialMarker>& order) {
+    std::ifstream file(path);
+    if (!file) return {};
+    std::map<std::string, Eigen::Vector3d> byName;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line.front() == '#' || line.rfind("name,", 0) == 0) continue;
+        std::stringstream stream(line);
+        std::string name, x, y, z;
+        if (!std::getline(stream, name, ',') || !std::getline(stream, x, ',') ||
+            !std::getline(stream, y, ',') || !std::getline(stream, z, ','))
+            return {};
+        byName.emplace(name, Eigen::Vector3d(std::stod(x), std::stod(y), std::stod(z)));
+    }
+    std::vector<Eigen::Vector3d> result;
+    for (const FiducialMarker& marker : order) {
+        const auto found = byName.find(marker.name);
+        if (found == byName.end()) return {};
+        result.push_back(found->second);
+    }
+    return result;
+}
+
+Eigen::Vector3d arrayCentreMm(const beam::array::ArrayData& data) {
+    return data.arrayTotal.rect
+               .block(beam::array::kRectCenterStartRow, 0, 3, data.arrayTotal.rect.cols())
+               .rowwise()
+               .mean() *
+           1000.0;
+}
+
+}  // namespace
+
+// The whole operator chain on the real 160-element array: six measured
+// fiducials, the MRI-fiducial fit, then the lock position -- with the array
+// centre pinned to what BeamV0 produces.
+//
+// The expected values come from apps/parity_registration, whose 1098 outputs
+// were diffed against BeamV0's registerArrayToFiducials.m and the MRI-Based
+// branch of registerCurrentTransducerPostion.m (max 1.46e-13 mm) and match a
+// GUI-to-GUI comparison on subject F040. Pinning them means ctest catches a
+// regression in the fit without needing MATLAB.
+TEST(RegistrationCentreParity, RealArrayCentreMatchesBeamV0AfterBothSteps) {
+    const Eigen::MatrixXd rect = readRectCsvOrEmpty(BEAM_DEFAULT_SUBJECT_RECT_CSV);
+    if (rect.size() == 0) GTEST_SKIP() << "needs DefaultSubjectV0/defaultSubjectArrayRect.csv";
+
+    beam::array::ArrayData realArray = beam::array::defineArrayData(rect);
+    beam::array::reconstructPhysicalArrayHalves(realArray);
+    ASSERT_EQ(realArray.arrayTotal.rect.cols(), 160);
+
+    const std::vector<Eigen::Vector3d> measured =
+        readMeasuredFiducials(BEAM_FIDUCIAL_FIXTURE_CSV, setArrayFiducialMarkers(realArray));
+    ASSERT_EQ(measured.size(), 6u) << "needs testdata/beamai_fiducials_F040_T1_MRI.csv";
+
+    const AffineArrayResult fitted = registerArrayToFiducials(realArray, measured);
+    const Eigen::Vector3d afterFit = arrayCentreMm(fitted.arrayData);
+    EXPECT_NEAR(afterFit.x(), 32.436594533555571, 1e-6);
+    EXPECT_NEAR(afterFit.y(), 56.481049826224528, 1e-6);
+    EXPECT_NEAR(afterFit.z(), 23.771244554209684, 1e-6);
+
+    // BeamV0's lock sliders are 1-based; (3, 3) is what the operator recorded
+    // for this subject, and the same values verify_registration.m drives.
+    const AffineArrayResult locked =
+        registerCurrentTransducerPosition(realArray, measured, 3.0, 3.0);
+    const Eigen::Vector3d afterLock = arrayCentreMm(locked.arrayData);
+    EXPECT_NEAR(afterLock.x(), 32.436222431833798, 1e-6);
+    EXPECT_NEAR(afterLock.y(), 40.772241722535647, 1e-6);
+    EXPECT_NEAR(afterLock.z(), 42.181532240634823, 1e-6);
+}
+
+// The same chain driven by beam::mri::detectFiducialDonuts' own output rather
+// than hand-placed points, so the detector is checked end to end through
+// registration and not just on where it puts the six markers.
+//
+// Neither fiducial set is ground truth -- the hand-placed one is one operator's
+// click on a faint marker, the detected one is a matched filter. What this
+// pins is that BeamAI's registration is reproducible from the detector, and
+// that BeamV0 agrees when handed the identical six points.
+TEST(RegistrationCentreParity, DetectedFiducialsRegisterTheSameInBothApps) {
+    const Eigen::MatrixXd rect = readRectCsvOrEmpty(BEAM_DEFAULT_SUBJECT_RECT_CSV);
+    if (rect.size() == 0) GTEST_SKIP() << "needs DefaultSubjectV0/defaultSubjectArrayRect.csv";
+
+    beam::array::ArrayData realArray = beam::array::defineArrayData(rect);
+    beam::array::reconstructPhysicalArrayHalves(realArray);
+    ASSERT_EQ(realArray.arrayTotal.rect.cols(), 160);
+
+    const std::vector<Eigen::Vector3d> detected =
+        readMeasuredFiducials(BEAM_DETECTED_FIDUCIAL_CSV, setArrayFiducialMarkers(realArray));
+    ASSERT_EQ(detected.size(), 6u) << "needs testdata/beamai_fiducials_F040_detected.csv";
+
+    const AffineArrayResult fitted = registerArrayToFiducials(realArray, detected);
+    const Eigen::Vector3d afterFit = arrayCentreMm(fitted.arrayData);
+    EXPECT_NEAR(afterFit.x(), 32.356178036481822, 1e-6);
+    EXPECT_NEAR(afterFit.y(), 55.917708777686997, 1e-6);
+    EXPECT_NEAR(afterFit.z(), 23.856101483200874, 1e-6);
+
+    const AffineArrayResult locked =
+        registerCurrentTransducerPosition(realArray, detected, 3.0, 3.0);
+    const Eigen::Vector3d afterLock = arrayCentreMm(locked.arrayData);
+    EXPECT_NEAR(afterLock.x(), 34.038590339800571, 1e-6);
+    EXPECT_NEAR(afterLock.y(), 39.996854232824482, 1e-6);
+    EXPECT_NEAR(afterLock.z(), 41.850265615209814, 1e-6);
+
+    // Cross-app check. BeamV0's GUI, handed these same six points through
+    // app.FiducialROIs with the lock sliders at (3,3), reported
+    // 34.0386 39.9969 41.8503 -- agreeing with the line above to ~5e-5 mm,
+    // which is BeamV0's own display rounding at four decimals. The tolerance
+    // is that rounding, not a real disagreement.
+    const Eigen::Vector3d beamV0Lock(34.0386, 39.9969, 41.8503);
+    EXPECT_LT((afterLock - beamV0Lock).norm(), 1e-3)
+        << "BeamAI " << afterLock.transpose() << " vs BeamV0 " << beamV0Lock.transpose();
+
+    // What swapping hand-placed points for detected ones costs at the array
+    // centre. Neither set is ground truth; this pins the gap so a change in
+    // the detector shows up as a change here.
+    const Eigen::Vector3d handPlacedLock(32.436222431833798, 40.772241722535647,
+                                          42.181532240634823);
+    EXPECT_NEAR((afterLock - handPlacedLock).norm(), 1.810676, 1e-5);
 }
