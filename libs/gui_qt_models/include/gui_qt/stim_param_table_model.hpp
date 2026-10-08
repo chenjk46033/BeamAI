@@ -25,6 +25,9 @@ struct StimParamRow {
     double x = 0.0, y = 0.0, z = 0.0;
     double amplitude = 0.5;
     double startTime = 0.0, endTime = 30.0;
+    // createStimParamTable.m's values, which every BeamV0 protocol CSV also
+    // carries. BeamV0 is the reference: do not change these without changing
+    // it too.
     double bd = 0.03, bi = 0.7, pd = 0.005, pi = 0.01;
 };
 

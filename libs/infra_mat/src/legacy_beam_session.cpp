@@ -34,6 +34,13 @@ matvar_t& field(matvar_t& structure, const char* name) {
     return *result;
 }
 
+std::size_t elementCount(const matvar_t& value) {
+    if (value.rank <= 0 || !value.dims) return 0;
+    std::size_t count = 1;
+    for (int i = 0; i < value.rank; ++i) count *= value.dims[i];
+    return count;
+}
+
 matvar_t* optionalField(matvar_t& structure, const char* name, std::size_t index = 0) {
     return Mat_VarGetStructFieldByName(&structure, name, index);
 }
@@ -131,6 +138,57 @@ LegacyBeamMri loadLegacyBeamMri(const std::string& path) {
             if (result.fiducials[i].name.empty()) result.fiducials[i].name = canonicalNames[i];
     }
     return result;
+}
+
+LegacyBeamPlan loadLegacyBeamPlan(const std::string& path) {
+    std::unique_ptr<mat_t, MatCloser> file(Mat_Open(path.c_str(), MAT_ACC_RDONLY));
+    if (!file) throw std::runtime_error("Cannot open legacy Beam MAT session");
+    std::unique_ptr<matvar_t, VarCloser> sys(Mat_VarReadInfo(file.get(), "sys"));
+    if (!sys || sys->class_type != MAT_C_STRUCT)
+        throw std::runtime_error("MAT file does not contain a Beam sys structure");
+
+    LegacyBeamPlan plan;
+
+    // A MATLAB table arrives as an MCOS reference with no payload. Seeing one
+    // is the expected outcome, not a failure -- it is what makes a .mat an
+    // index and not a parity source.
+    const auto payloadIsEmpty = [&file](matvar_t* value) {
+        if (value == nullptr) return false;
+        if (value->class_type == MAT_C_OPAQUE) return true;
+        if (!value->data) Mat_VarReadDataAll(file.get(), value);
+        return value->data == nullptr || value->nbytes == 0;
+    };
+
+    if (matvar_t* targets = optionalField(*sys, "protocolTables")) {
+        const std::size_t count = elementCount(*targets);
+        plan.targetNames.reserve(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            matvar_t* name = optionalField(*targets, "name", i);
+            plan.targetNames.push_back(name ? charValue(file.get(), *name) : std::string());
+            if (payloadIsEmpty(optionalField(*targets, "stimParamTableData", i)))
+                plan.tablePayloadsUnreadable = true;
+        }
+    }
+
+    if (matvar_t* protocols = optionalField(*sys, "treatmentProtocolTables")) {
+        const std::size_t count = elementCount(*protocols);
+        plan.protocols.reserve(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            LegacyBeamPlan::Protocol protocol;
+            if (matvar_t* name = optionalField(*protocols, "name", i))
+                protocol.name = charValue(file.get(), *name);
+            if (matvar_t* sessions = optionalField(*protocols, "sessions", i))
+                protocol.sessionCount = elementCount(*sessions);
+            if (matvar_t* blank = optionalField(*protocols, "blank", i)) {
+                if (payloadIsEmpty(optionalField(*blank, "Data"))) plan.tablePayloadsUnreadable = true;
+            }
+            plan.protocols.push_back(std::move(protocol));
+        }
+    }
+
+    if (plan.targetNames.empty() && plan.protocols.empty())
+        throw std::runtime_error("sys carries neither protocolTables nor treatmentProtocolTables");
+    return plan;
 }
 
 }  // namespace beam::infra::mat

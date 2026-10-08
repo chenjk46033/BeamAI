@@ -114,3 +114,6 @@ endif()
 
 
 
+
+add_executable(probe_dicom "C:/Users/jkche/AppData/Local/Temp/claude/C--Users-jkche-dev-spire-us-BeamAI/a6a1b6ab-3a57-4432-aa74-df1179a84ee0/scratchpad/probe_dicom/main.cpp")
+target_link_libraries(probe_dicom PRIVATE infra_dicom mri util)

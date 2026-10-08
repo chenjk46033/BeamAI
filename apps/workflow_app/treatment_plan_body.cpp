@@ -43,6 +43,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
@@ -75,12 +76,11 @@ namespace beam::app {
 namespace {
 
 // BeamV0's own target names, the ranking getTopTargetsFromTreatmentProtocolTable.m
-// works from. beam_app's Sonicate tab pre-populates the Target List with
-// exactly these, and so does this one -- the list is a list of targets, not of
-// the sonications that visit them.
+// works from, and the order sys.protocolTables is keyed by. The store normally
+// supplies these from data/treatment_targets.csv; this is the fallback for when
+// that file is missing, so the list is never empty.
 const char* const kTargetNames[] = {"SCC1",  "SCC2",  "SCC3",  "SCC4",  "SCC5",  "SCC6",
                                     "aMCC1", "aMCC2", "aMCC3", "aMCC4", "aMCC5", "aMCC6"};
-
 // The workflow page paints a dark work surface and sets a light Text colour
 // for it, which item views inherit -- light text on their own white Base,
 // plus a near-black AlternateBase. Restoring the ordinary light palette on
@@ -247,6 +247,10 @@ void WorkflowWindow::addTargetListRow(const QString& name, int atRow) {
 }
 
 void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
+    // Before anything that reads it: the Target List is seeded from the store,
+    // and the protocol combo is filled from its protocol names.
+    loadTreatmentTargetStore();
+
     // Layout mirrors app.SonicateTab as beam_app's port builds it: the
     // Sonications panel on the left, and to its right a column holding the
     // stimParamTable button row, the table itself, TabGroup3, and a status
@@ -284,7 +288,15 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // separate Rename, Create New Protocol and Remove Selected Protocol
     // buttons are gone -- they acted on the selected row, which is what the
     // per-row icons say explicitly.
-    for (const char* name : kTargetNames) addTargetListRow(QString::fromLatin1(name));
+    // The store is the Target List: data/treatment_targets.csv holds BeamV0's
+    // own twelve names in its own order. kTargetNames stands in only when that
+    // file could not be read.
+    if (targetStore_.targets().empty()) {
+        for (const char* name : kTargetNames) addTargetListRow(QString::fromLatin1(name));
+    } else {
+        for (const beam::gui::TreatmentTarget& target : targetStore_.targets())
+            addTargetListRow(QString::fromStdString(target.name));
+    }
     targetListWidget_->setCurrentRow(0);
     // Bounded, so the button below sits directly under the list instead of at
     // the foot of a panel as tall as the whole (scrolling) body, where it was
@@ -354,8 +366,25 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     newVisitButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
     auto* visitLabel = new QLabel(QStringLiteral("Visit:"), protocolTab);
     for (QComboBox* combo : {treatmentProtocolCombo_, visitNumberCombo_}) applyItemViewPalette(combo);
+    const auto makeProtocolButton = [&](const QString& text, const QString& tip) {
+        auto* button = new QPushButton(text, protocolTab);
+        button->setToolTip(tip);
+        button->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
+        button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        return button;
+    };
+    newProtocolButton_ = makeProtocolButton(QStringLiteral("New"), QStringLiteral("Create a new, empty protocol"));
+    renameProtocolButton_ = makeProtocolButton(QStringLiteral("Rename"), QStringLiteral("Rename the selected protocol"));
+    deleteProtocolButton_ = makeProtocolButton(QStringLiteral("Delete"), QStringLiteral("Delete the selected protocol"));
+    saveProtocolsButton_ = makeProtocolButton(QStringLiteral("Save protocols"),
+                                               QStringLiteral("Write protocols and target parameters to your own copy"));
     protocolSelectorRow->addWidget(treatmentProtocolLabel_);
     protocolSelectorRow->addWidget(treatmentProtocolCombo_);
+    protocolSelectorRow->addWidget(newProtocolButton_);
+    protocolSelectorRow->addWidget(renameProtocolButton_);
+    protocolSelectorRow->addWidget(deleteProtocolButton_);
+    protocolSelectorRow->addWidget(saveProtocolsButton_);
+    protocolSelectorRow->addSpacing(18);
     protocolSelectorRow->addWidget(visitLabel);
     protocolSelectorRow->addWidget(visitNumberCombo_);
     protocolSelectorRow->addWidget(newVisitButton_);
@@ -395,6 +424,16 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolView_->setModel(protocolModel_);
     configureModelTable(protocolView_);
     protocolLayout->addWidget(protocolView_, 1);
+
+    auto* protocolEntryRow = new QHBoxLayout;
+    addProtocolEntryButton_ = makeProtocolButton(
+        QStringLiteral("Add Entry"), QStringLiteral("Append a sonication of the selected Target List target"));
+    removeProtocolEntryButton_ = makeProtocolButton(
+        QStringLiteral("Remove Selected Rows"), QStringLiteral("Delete the selected rows from this protocol"));
+    protocolEntryRow->addWidget(addProtocolEntryButton_);
+    protocolEntryRow->addWidget(removeProtocolEntryButton_);
+    protocolEntryRow->addStretch(1);
+    protocolLayout->addLayout(protocolEntryRow);
     treatmentTabs_->addTab(protocolTab, QStringLiteral("Treatment Protocol"));
 
     // Pulse Details tab: BeamV0's axPulseWaveformPlot / axBurstWaveformPlot
@@ -536,6 +575,109 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     // ---- the protocol sub-tab -------------------------------------------
     connect(treatmentProtocolCombo_, &QComboBox::currentTextChanged, this,
             [this](const QString& name) { loadTreatmentProtocol(name); });
+
+    connect(newProtocolButton_, &QPushButton::clicked, this, [this] {
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, QStringLiteral("New protocol"),
+                                                    QStringLiteral("Name:"), QLineEdit::Normal,
+                                                    QString(), &ok);
+        if (!ok || name.trimmed().isEmpty()) return;
+        writeProtocolGridToStore();
+        if (!targetStore_.addProtocol(name.trimmed().toStdString())) {
+            showMessage(QStringLiteral("A protocol named \"%1\" already exists.").arg(name.trimmed()), true);
+            return;
+        }
+        setTargetStoreDirty(true);
+        refreshProtocolCombo(name.trimmed());
+        loadTreatmentProtocol(name.trimmed());
+        showMessage(QStringLiteral("Protocol \"%1\" created. Use Add Entry to schedule targets.")
+                        .arg(name.trimmed()), false);
+    });
+
+    connect(renameProtocolButton_, &QPushButton::clicked, this, [this] {
+        const QString current = treatmentProtocolCombo_->currentText();
+        if (current.isEmpty()) return;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, QStringLiteral("Rename protocol"),
+                                                    QStringLiteral("Name:"), QLineEdit::Normal,
+                                                    current, &ok);
+        if (!ok || name.trimmed().isEmpty() || name.trimmed() == current) return;
+        writeProtocolGridToStore();
+        if (!targetStore_.renameProtocol(current.toStdString(), name.trimmed().toStdString())) {
+            showMessage(QStringLiteral("Cannot rename to \"%1\"; that name is taken.").arg(name.trimmed()), true);
+            return;
+        }
+        setTargetStoreDirty(true);
+        refreshProtocolCombo(name.trimmed());
+        loadTreatmentProtocol(name.trimmed());
+    });
+
+    connect(deleteProtocolButton_, &QPushButton::clicked, this, [this] {
+        const QString current = treatmentProtocolCombo_->currentText();
+        if (current.isEmpty()) return;
+        if (targetStore_.protocols().size() <= 1) {
+            showMessage(QStringLiteral("The last protocol cannot be deleted."), true);
+            return;
+        }
+        if (QMessageBox::question(this, QStringLiteral("Delete protocol"),
+                                  QStringLiteral("Delete protocol \"%1\"? Its schedule is lost.")
+                                      .arg(current)) != QMessageBox::Yes)
+            return;
+        targetStore_.removeProtocol(current.toStdString());
+        setTargetStoreDirty(true);
+        refreshProtocolCombo(QString());
+        loadTreatmentProtocol(treatmentProtocolCombo_->currentText());
+        showMessage(QStringLiteral("Protocol \"%1\" deleted.").arg(current), false);
+    });
+
+    connect(addProtocolEntryButton_, &QPushButton::clicked, this, [this] {
+        const QString protocol = treatmentProtocolCombo_->currentText();
+        const QString target = targetListName(targetListWidget_->currentItem());
+        if (protocol.isEmpty() || target.isEmpty()) {
+            showMessage(QStringLiteral("Select a target in the Target List first."), true);
+            return;
+        }
+        writeProtocolGridToStore();
+        beam::gui::TreatmentProtocolEntry entry;
+        entry.target = target.toStdString();
+        if (!targetStore_.appendProtocolEntry(protocol.toStdString(), entry)) {
+            showMessage(QStringLiteral("Could not add \"%1\" to \"%2\".").arg(target, protocol), true);
+            return;
+        }
+        setTargetStoreDirty(true);
+        loadTreatmentProtocol(protocol);
+        if (protocolModel_->rowCount() > 0) protocolView_->selectRow(protocolModel_->rowCount() - 1);
+    });
+
+    connect(removeProtocolEntryButton_, &QPushButton::clicked, this, [this] {
+        const QString protocol = treatmentProtocolCombo_->currentText();
+        const QModelIndexList selected = protocolView_->selectionModel()->selectedRows();
+        if (protocol.isEmpty() || selected.isEmpty()) {
+            showMessage(QStringLiteral("Select one or more protocol rows to remove."), true);
+            return;
+        }
+        writeProtocolGridToStore();
+        const beam::gui::TreatmentProtocolDefinition* definition =
+            targetStore_.findProtocol(protocol.toStdString());
+        if (definition == nullptr) return;
+        std::vector<bool> drop(definition->entries.size(), false);
+        for (const QModelIndex& index : selected) {
+            if (index.row() >= 0 && index.row() < static_cast<int>(drop.size()))
+                drop[static_cast<std::size_t>(index.row())] = true;
+        }
+        std::vector<beam::gui::TreatmentProtocolEntry> kept;
+        for (std::size_t i = 0; i < definition->entries.size(); ++i)
+            if (!drop[i]) kept.push_back(definition->entries[i]);
+        const std::size_t removed = definition->entries.size() - kept.size();
+        targetStore_.setProtocolEntries(protocol.toStdString(), std::move(kept));
+        setTargetStoreDirty(true);
+        loadTreatmentProtocol(protocol);
+        showMessage(QStringLiteral("Removed %1 row(s) from \"%2\".").arg(removed).arg(protocol), false);
+    });
+
+    connect(saveProtocolsButton_, &QPushButton::clicked, this, [this] { saveTreatmentTargetStore(); });
+    connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
+            [this] { setTargetStoreDirty(true); });
     connect(newVisitButton_, &QPushButton::clicked, this, [this] {
         const int next = visitNumberCombo_->count() + 1;
         visitNumberCombo_->addItem(QString::number(next));
@@ -551,6 +693,9 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     });
     connect(protocolModel_, &QAbstractItemModel::dataChanged, this, [this] { updateBestTargets(); });
 
+    // Already loaded in buildTreatmentPlanBody -- the Target List needs it.
+    refreshProtocolCombo(QStringLiteral("Default"));
+
     loadTreatmentProtocol(treatmentProtocolCombo_->currentText());
     updateExampleTargetImage();
 }
@@ -558,82 +703,134 @@ void WorkflowWindow::wireTreatmentPlanBody() {
 // Port of BeamV0's per-protocol CSVs, unchanged from this application's
 // earlier hand-built version except that the rows now land in the real
 // TreatmentProtocolTableModel instead of a QTableWidget of strings.
-void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
-    const auto parseCsvLine = [](const QString& line) {
-        QStringList fields;
-        QString field;
-        bool quoted = false;
-        for (int i = 0; i < line.size(); ++i) {
-            const QChar ch = line.at(i);
-            if (ch == QLatin1Char('"')) {
-                if (quoted && i + 1 < line.size() && line.at(i + 1) == QLatin1Char('"')) {
-                    field += QLatin1Char('"');
-                    ++i;
-                } else {
-                    quoted = !quoted;
-                }
-            } else if (ch == QLatin1Char(',') && !quoted) {
-                fields.push_back(field.trimmed());
-                field.clear();
-            } else {
-                field += ch;
-            }
-        }
-        fields.push_back(field.trimmed());
-        return fields;
+// Where the operator's own protocol/target library lives. The copies under
+// data/ in the install are the shipped seed and are never written: deleting
+// the user's copy restores them.
+QString WorkflowWindow::treatmentDataDirectory() const {
+    const QString home =
+        QDir(QDir::homePath()).filePath(QStringLiteral("Documents/BeamAI/treatment"));
+    QDir().mkpath(home);
+    return home;
+}
+
+void WorkflowWindow::loadTreatmentTargetStore() {
+    const auto locate = [this](const QString& fileName) {
+        const QString user = QDir(treatmentDataDirectory()).filePath(fileName);
+        if (QFileInfo::exists(user)) return user;
+        const QString executableDir = QCoreApplication::applicationDirPath();
+        const QStringList seeds = {
+            QDir(executableDir).filePath(QStringLiteral("../../../data/") + fileName),
+            QDir(executableDir).filePath(QStringLiteral("../../data/") + fileName),
+            QDir(executableDir).filePath(QStringLiteral("data/") + fileName),
+            QDir::current().filePath(QStringLiteral("data/") + fileName)};
+        for (const QString& seed : seeds)
+            if (QFileInfo::exists(seed)) return seed;
+        return QString();
     };
 
-    const QString relative =
-        QStringLiteral("BeamV0/GUIMatlab/BEAM/GUI/SonicationTab/TreatmentProtocols/") + protocolName +
-        QStringLiteral(".csv");
-    const QStringList candidates = {
-        QDir::current().filePath(relative),
-        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../../../") + relative),
-        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../../") + relative)};
-    QString selectedPath;
-    for (const QString& candidate : candidates) {
-        if (QFileInfo::exists(candidate)) {
-            selectedPath = candidate;
-            break;
-        }
+    const QString targetsPath = locate(QStringLiteral("treatment_targets.csv"));
+    const QString protocolsPath = locate(QStringLiteral("treatment_protocols.csv"));
+    if (targetsPath.isEmpty() || protocolsPath.isEmpty()) {
+        showMessage(QStringLiteral("Treatment target/protocol data was not found; using built-in "
+                                   "defaults."),
+                    true);
+        return;
     }
+    try {
+        targetStore_.loadTargets(targetsPath.toStdString());
+        targetStore_.loadProtocols(protocolsPath.toStdString());
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("Treatment data could not be read: %1").arg(error.what()), true);
+        return;
+    }
+    const std::vector<std::string> dangling = targetStore_.danglingTargetNames();
+    if (!dangling.empty()) {
+        showMessage(QStringLiteral("A protocol references %1 undefined target(s), starting with "
+                                   "\"%2\".")
+                        .arg(dangling.size())
+                        .arg(QString::fromStdString(dangling.front())),
+                    true);
+    }
+    setTargetStoreDirty(false);
+}
 
-    QList<QStringList> sourceRows;
-    if (!selectedPath.isEmpty()) {
-        QFile file(selectedPath);
-        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QTextStream stream(&file);
-            while (!stream.atEnd()) {
-                const QString line = stream.readLine();
-                if (line.trimmed().isEmpty()) continue;
-                const QStringList fields = parseCsvLine(line);
-                if (!fields.isEmpty() && fields.first().compare(QStringLiteral("Number"), Qt::CaseInsensitive) != 0)
-                    sourceRows.push_back(fields);
-            }
-        }
+void WorkflowWindow::refreshProtocolCombo(const QString& select) {
+    if (!treatmentProtocolCombo_ || targetStore_.protocols().empty()) return;
+    const QSignalBlocker blocker(treatmentProtocolCombo_);
+    treatmentProtocolCombo_->clear();
+    for (const beam::gui::TreatmentProtocolDefinition& definition : targetStore_.protocols())
+        treatmentProtocolCombo_->addItem(QString::fromStdString(definition.name));
+    const int index = treatmentProtocolCombo_->findText(select);
+    treatmentProtocolCombo_->setCurrentIndex(index >= 0 ? index : 0);
+}
+
+// The protocol grid is the authority while it is on screen; this pushes it
+// back so a create/delete/save sees the operator's edits.
+void WorkflowWindow::writeProtocolGridToStore() {
+    if (!protocolModel_ || !treatmentProtocolCombo_) return;
+    const std::string name = treatmentProtocolCombo_->currentText().toStdString();
+    if (targetStore_.findProtocol(name) == nullptr) return;
+    std::vector<beam::gui::TreatmentProtocolEntry> entries;
+    for (const beam::gui_qt::TreatmentProtocolRow& row : protocolModel_->rows()) {
+        beam::gui::TreatmentProtocolEntry entry;
+        entry.target = row.target.toStdString();
+        entry.amplitude = row.amplitude;
+        entry.durationSeconds = row.duration;
+        entries.push_back(std::move(entry));
     }
-    // Keep offline/release builds usable when the BeamV0 checkout is not
-    // beside the executable. These defaults mirror its table schema.
-    if (sourceRows.isEmpty()) {
-        const int rows = protocolName == QStringLiteral("Default")
-                             ? 1
-                             : ((protocolName == QStringLiteral("PainACC") ||
-                                 protocolName.contains(QStringLiteral("SCCandAMCC")) ||
-                                 protocolName.contains(QStringLiteral("AMCCandSCC")))
-                                    ? 12
-                                    : 6);
-        const bool amccFirst = protocolName.contains(QStringLiteral("AMCCandSCC"));
-        for (int row = 0; row < rows; ++row) {
-            const bool amcc = rows > 1 && ((row % 2 == 0) == amccFirst);
-            sourceRows.push_back({QString::number(row + 1),
-                                  QStringLiteral("%1%2").arg(amcc ? QStringLiteral("aMCC") : QStringLiteral("SCC"))
-                                      .arg(row / 2 + 1),
-                                  QStringLiteral("30"), QStringLiteral("0.75"),
-                                  QStringLiteral("X:0,Y:0,Z:0,0.03,0.7,0.005,0.010"), QStringLiteral("N"),
+    targetStore_.setProtocolEntries(name, std::move(entries));
+}
+
+void WorkflowWindow::saveTreatmentTargetStore() {
+    writeProtocolGridToStore();
+    const QString directory = treatmentDataDirectory();
+    try {
+        targetStore_.saveTargets(
+            QDir(directory).filePath(QStringLiteral("treatment_targets.csv")).toStdString());
+        targetStore_.saveProtocols(
+            QDir(directory).filePath(QStringLiteral("treatment_protocols.csv")).toStdString());
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("Could not save treatment data: %1").arg(error.what()), true);
+        return;
+    }
+    setTargetStoreDirty(false);
+    showMessage(QStringLiteral("Protocols saved to %1.").arg(directory), false);
+}
+
+void WorkflowWindow::setTargetStoreDirty(bool dirty) {
+    targetStoreDirty_ = dirty;
+    if (saveProtocolsButton_) saveProtocolsButton_->setEnabled(dirty);
+    if (treatmentProtocolLabel_) {
+        treatmentProtocolLabel_->setText(dirty ? QStringLiteral("Treatment protocol: *")
+                                               : QStringLiteral("Treatment protocol:"));
+    }
+}
+
+void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
+    // From BeamAI's own store, not BeamV0's TreatmentProtocols/*.csv. Each
+    // entry references a Target List member by name; the target's points own
+    // the burst/pulse parameters, the entry carries the schedule's duration.
+    const beam::gui::TreatmentProtocolDefinition* definition =
+        targetStore_.findProtocol(protocolName.toStdString());
+    QList<QStringList> sourceRows;
+    if (definition != nullptr) {
+        for (const beam::gui::TreatmentProtocolEntry& entry : definition->entries) {
+            const beam::gui::TreatmentTarget* target = targetStore_.findTarget(entry.target);
+            // Where the entry says nothing, the target's first point stands in
+            // -- it is the row the schedule would have been written from.
+            const beam::gui::TreatmentTargetPoint* first =
+                target != nullptr && !target->points.empty() ? &target->points.front() : nullptr;
+            const double amplitude =
+                entry.amplitude.value_or(first != nullptr ? first->amplitude : 0.75);
+            const double duration =
+                entry.durationSeconds.value_or(first != nullptr ? first->endTimeSeconds : 30.0);
+            sourceRows.push_back({QString::number(entry.order),
+                                  QString::fromStdString(entry.target),
+                                  QString::number(duration), QString::number(amplitude),
+                                  QStringLiteral("X:0,Y:0,Z:0"), QStringLiteral("N"),
                                   QStringLiteral("notes")});
         }
     }
-
     std::vector<beam::gui_qt::TreatmentProtocolRow> protocolRows;
     QStringList targetNames;
     protocolRows.reserve(static_cast<std::size_t>(sourceRows.size()));
@@ -680,14 +877,24 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
     targetSonications_.clear();
     currentTargetId_ = -1;
 
-    // The Target List keeps BeamV0's own fixed names; a protocol that names
-    // a target this build does not know about is appended rather than
-    // replacing the list, so the operator can still place it.
+    // The Target List is BeamV0's twelve and does not grow to fit a protocol.
+    // The BEAM protocol CSVs schedule NACC_*, VPL_* and T1-T6, which no Target
+    // List defines; a protocol naming them cannot be run, and saying so beats
+    // inventing a row that has no placement and no parameters.
+    QStringList undefined;
     for (const QString& name : targetNames) {
         bool known = false;
         for (int i = 0; i < targetListWidget_->count() && !known; ++i)
             known = targetListName(targetListWidget_->item(i)) == name;
-        if (!known) addTargetListRow(name);
+        if (!known) undefined.push_back(name);
+    }
+    if (!undefined.isEmpty()) {
+        showMessage(QStringLiteral("Protocol \"%1\" schedules %2 target(s) the Target List does not "
+                                   "define (%3); those sonications cannot be placed.")
+                        .arg(protocolName)
+                        .arg(undefined.size())
+                        .arg(undefined.join(QStringLiteral(", "))),
+                    true);
     }
     currentSonicationNumberEdit_->setRange(1, std::max<int>(1, static_cast<int>(stimParamModel_->rows().size())));
 
@@ -748,29 +955,60 @@ void WorkflowWindow::switchToSelectedTarget() {
     if (stored != targetSonications_.constEnd() && !stored.value().empty()) {
         stimParamModel_->setRows(stored.value());
     } else {
-        // First visit to this target: one sonication, carrying the protocol's
-        // own amplitude and duration for that target where it names one, and
-        // sitting at the array centre until the operator places it. That
+        // First visit to this target: every point the Target List defines for
+        // it, not just one. The grid is that target's own stimParamTable, and
+        // each row keeps its own parameters -- a target with three points must
+        // arrive with three rows or two of them are silently lost.
+        //
+        // Each sits at the array centre until the operator places it. That
         // centre is drawROIs.m's `centerArrayMM =
         // mean(arrayData.arrayTotal.rect(17:19,:),2)*1000`, which targetMm_ is
         // this application's copy of.
-        beam::gui_qt::StimParamRow row;
-        row.order = 1;
-        row.show = true;
-        row.amplitude = 0.75;
-        row.endTime = 30.0;
         const QString name = targetListName(item);
+
+        // The protocol contributes the duration and nothing else:
+        // updateSonicateSettingsForCurrentSonication.m sets startTime and
+        // endTime down the whole column and leaves Amplitude to the target.
+        std::optional<double> scheduledDuration;
         for (const beam::gui_qt::TreatmentProtocolRow& protocolRow : protocolModel_->rows()) {
             if (protocolRow.target == name) {
-                row.amplitude = protocolRow.amplitude;
-                row.endTime = protocolRow.duration;
+                scheduledDuration = protocolRow.duration;
                 break;
             }
         }
-        row.x = targetMm_.x();
-        row.y = targetMm_.y();
-        row.z = targetMm_.z();
-        stimParamModel_->setRows({row});
+
+        std::vector<beam::gui_qt::StimParamRow> rows;
+        for (const beam::gui::TreatmentTargetPoint& point :
+             targetStore_.pointsForSonication(name.toStdString(), scheduledDuration)) {
+            beam::gui_qt::StimParamRow row;
+            row.order = point.order;
+            row.show = point.show;
+            row.amplitude = point.amplitude;
+            row.startTime = point.startTimeSeconds;
+            row.endTime = point.endTimeSeconds;
+            row.bd = point.burstDurationSeconds;
+            row.bi = point.burstIntervalSeconds;
+            row.pd = point.pulseDurationSeconds;
+            row.pi = point.pulseIntervalSeconds;
+            row.x = targetMm_.x();
+            row.y = targetMm_.y();
+            row.z = targetMm_.z();
+            rows.push_back(row);
+        }
+        // A target the Target List does not define -- a protocol naming an
+        // undefined target already warned about it; one blank row keeps the
+        // grid usable rather than empty.
+        if (rows.empty()) {
+            beam::gui_qt::StimParamRow row;
+            row.order = 1;
+            row.show = true;
+            if (scheduledDuration) row.endTime = *scheduledDuration;
+            row.x = targetMm_.x();
+            row.y = targetMm_.y();
+            row.z = targetMm_.z();
+            rows.push_back(row);
+        }
+        stimParamModel_->setRows(std::move(rows));
     }
     // A target the operator has never placed follows the array centre, which
     // moves as registration and targeting proceed -- including from zero, when
@@ -778,9 +1016,13 @@ void WorkflowWindow::switchToSelectedTarget() {
     // (those carrying a position on their list item) keep their own.
     if (item && !item->data(Qt::UserRole).isValid() && !targetMm_.isZero()) {
         std::vector<beam::gui_qt::StimParamRow> rows = stimParamModel_->rows();
-        rows.front().x = targetMm_.x();
-        rows.front().y = targetMm_.y();
-        rows.front().z = targetMm_.z();
+        // Every point of an unplaced target, not just the first -- the list
+        // item carries one position, so they all start from the same centre.
+        for (beam::gui_qt::StimParamRow& row : rows) {
+            row.x = targetMm_.x();
+            row.y = targetMm_.y();
+            row.z = targetMm_.z();
+        }
         stimParamModel_->setRows(std::move(rows));
     }
     stimParamView_->selectRow(0);

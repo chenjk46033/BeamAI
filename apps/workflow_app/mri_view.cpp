@@ -493,6 +493,9 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
         QAction* line = menu.addAction(QStringLiteral("Measure distance"));
         connect(line, &QAction::triggered, this,
                 [this] { beginMeasurement(MeasureMode::Line); });
+        QAction* angle = menu.addAction(QStringLiteral("Measure angle"));
+        connect(angle, &QAction::triggered, this,
+                [this] { beginMeasurement(MeasureMode::Angle); });
         QAction* contour = menu.addAction(QStringLiteral("Measure area"));
         connect(contour, &QAction::triggered, this,
                 [this] { beginMeasurement(MeasureMode::Contour); });
@@ -626,6 +629,7 @@ const WorkflowMriView* WorkflowMriView::measurementOwner() const {
 std::size_t WorkflowMriView::pointsNeededFor(MeasureMode mode) {
     switch (mode) {
         case MeasureMode::Line: return 2;
+        case MeasureMode::Angle: return 3;
         case MeasureMode::Contour: return 3;
         case MeasureMode::None: break;
     }
@@ -714,7 +718,7 @@ bool WorkflowMriView::addMeasurementPoint(const QPointF& widgetPosition) {
 
     active.normalized.push_back(normalizedAtWidgetPosition(widgetPosition));
     active.rasMm.push_back(*ras);
-    // A line takes a fixed number of points and completes itself.
+    // Line and Angle take a fixed number of points and complete themselves.
     if (active.mode != MeasureMode::Contour && active.normalized.size() >= pointsNeededFor(active.mode)) {
         finishMeasurement();
         return true;
@@ -804,6 +808,19 @@ QString WorkflowMriView::summaryFor(const Measurement& measurement) const {
     if (measurement.mode == MeasureMode::Line)
         return QStringLiteral("%1 mm").arg((points[1] - points[0]).norm(), 0, 'f', 1);
 
+    if (measurement.mode == MeasureMode::Angle) {
+        // Points are clicked arm, vertex, arm: the angle opens at points[1].
+        if (points.size() < 3)
+            return QStringLiteral("%1 mm").arg((points[1] - points[0]).norm(), 0, 'f', 1);
+        const Eigen::Vector3d first = points[0] - points[1];
+        const Eigen::Vector3d second = points[2] - points[1];
+        const double lengths = first.norm() * second.norm();
+        if (lengths <= 0.0) return QString();
+        const double cosine = std::clamp(first.dot(second) / lengths, -1.0, 1.0);
+        const double degrees = std::acos(cosine) * 180.0 / 3.14159265358979323846;
+        return QStringLiteral("%1 deg").arg(degrees, 0, 'f', 1);
+    }
+
     if (points.size() < 3)
         return QStringLiteral("%1 mm").arg((points[1] - points[0]).norm(), 0, 'f', 1);
 
@@ -875,8 +892,14 @@ void WorkflowMriView::paintMeasurement(QPainter& painter, const QRectF& displaye
         const QString summary = summaryFor(measurement);
         if (summary.isEmpty()) continue;
         // While drawing the number rides with the cursor; once finished it
-        // settles on the measurement's own anchor so it stops moving.
-        const QPointF anchorPoint = drawing ? points.back() : points.front();
+        // settles on the measurement's own anchor so it stops moving. An angle
+        // labels its vertex, which is where the reader looks.
+        QPointF anchorPoint = points.front();
+        if (drawing) {
+            anchorPoint = points.back();
+        } else if (measurement.mode == MeasureMode::Angle && points.size() >= 2) {
+            anchorPoint = points[1];
+        }
         const QRectF box(anchorPoint + QPointF(10, -24),
                          QSizeF(metrics.horizontalAdvance(summary) + 12, 19));
         painter.fillRect(box, QColor(60, 45, 0, 225));

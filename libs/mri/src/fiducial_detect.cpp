@@ -40,6 +40,16 @@ std::vector<Annulus> buildAnnulusBank(const FiducialDetectOptions& options, doub
                 annulus.weights(a + annulus.half, b + annulus.half) = weight;
             }
         }
+        // Both lines are load-bearing further down, and in this order --
+        // centring changes the norm, scaling does not change a zero sum.
+        //   sum of weights == 0  lets correlateSide feed raw voxels in: the
+        //                        window's mean multiplies this sum and so
+        //                        cancels, which is why nothing centres the
+        //                        window at any of the tens of thousands of
+        //                        positions it is evaluated at.
+        //   sum of squares == 1  puts all six radii on one scale, so the
+        //                        per-position max across the bank compares
+        //                        like with like.
         annulus.weights.array() -= annulus.weights.mean();
         const double norm = annulus.weights.norm();
         if (norm > 0.0) annulus.weights /= norm;
@@ -156,7 +166,13 @@ SideMaps correlateSide(const Volume3D& volume, const std::vector<Annulus>& bank,
                     const double sumSquares =
                         integralSquares(r0 + span, c0 + span) - integralSquares(r0, c0 + span) -
                         integralSquares(r0 + span, c0) + integralSquares(r0, c0);
+                    // Sum of squared deviations, not a variance -- no /count.
+                    // It is the squared norm of the window after its mean is
+                    // removed, which is the only thing the denominator needs.
                     const double variance = sumSquares - sum * sum / count;
+                    // A flat window has no norm to divide by. Skipping says
+                    // "no answer" rather than emitting a 0 that would then
+                    // compete in localMaxima.
                     if (variance <= 1e-12) continue;
                     double dot = 0.0;
                     for (Eigen::Index b = 0; b < span; ++b) {
@@ -164,6 +180,12 @@ SideMaps correlateSide(const Volume3D& volume, const std::vector<Annulus>& bank,
                         const double* weights = &annulus.weights(0, b);
                         for (Eigen::Index a = 0; a < span; ++a) dot += pixels[a] * weights[a];
                     }
+                    // The full zero-mean normalised cross-correlation, in
+                    // [-1, 1], despite `pixels` being raw: the template's zero
+                    // sum removed the window's mean from the numerator, and
+                    // sqrt(variance) is the window's own norm. Invariant to
+                    // window brightness and contrast, so a faint marker scores
+                    // the same as a bright one.
                     const double ncc = dot / std::sqrt(variance);
                     if (ncc > best(j - jLo, k - kLo)) {
                         best(j - jLo, k - kLo) = ncc;

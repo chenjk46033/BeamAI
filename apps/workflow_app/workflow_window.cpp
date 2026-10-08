@@ -234,6 +234,12 @@ double normalizedAxisPosition(const Eigen::VectorXd& axis, double mm) {
 constexpr int kMinMriViewerHeight = 300;
 constexpr int kMaxMriViewerHeight = 900;
 
+// The two Registration columns are the same height above their next step: the
+// fiducial diagram (step 1) matches the marker table (step 2), each followed by
+// one 30px button row, so step 3 and step 4 line up. Changing one without the
+// other is what breaks that alignment.
+constexpr int kRegistrationColumnHeight = 186;
+
 // Calibrated on one subject: the five accurate markers score 0.78-0.85
 // (docs/known_gaps_mri.md).
 constexpr double kFiducialTrustThreshold = 0.75;
@@ -408,9 +414,30 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QSplitter::handle:horizontal { background: #8aa1aa; border-left: 1px solid #5e7882; "
         "border-right: 1px solid #5e7882; margin: 0; }"
         "QSplitter::handle:horizontal:hover { background: #2b91ad; }"));
+    // Both of step 1's buttons, built here so they can share the row under the
+    // diagram. Detect is not gated on the MRI being loaded: detectFiducials()
+    // already answers with "Load an MRI before detecting fiducials", which
+    // tells the operator more than a greyed-out button does.
+    const QString stepButtonStyle = QStringLiteral(
+        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; "
+        "border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
+        "QPushButton:hover { background: #2083a3; } "
+        "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }");
+    detectFiducialsButton_ = new QPushButton(QStringLiteral("Detect fiducials"), this);
+    detectFiducialsButton_->setObjectName(QStringLiteral("detectFiducialsButton"));
+    detectFiducialsButton_->setToolTip(QStringLiteral(
+        "Search the MRI for the six marker donuts. Each result carries a confidence; "
+        "anything below 75% is flagged and must be checked by hand."));
+    detectFiducialsButton_->setMinimumHeight(30);
+    detectFiducialsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    detectFiducialsButton_->setStyleSheet(stepButtonStyle);
+    connect(detectFiducialsButton_, &QPushButton::clicked, this, [this] { detectFiducials(); });
+
     ui_->registrationActions->removeWidget(ui_->resetRegistrationButton);
     ui_->resetRegistrationButton->setText(QStringLiteral("Restore fiducials"));
     ui_->resetRegistrationButton->setMinimumHeight(30);
+    ui_->resetRegistrationButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    ui_->resetRegistrationButton->setStyleSheet(stepButtonStyle);
     auto* markerDiagramPanel = new QWidget(markerSplitter);
     markerDiagramPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* markerDiagramLayout = new QVBoxLayout(markerDiagramPanel);
@@ -430,15 +457,24 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     registrationStep1Label_->show();
     registrationStep1Label_->raise();
     triangleColumn->addWidget(ui_->registrationFiducialLayout, 0, Qt::AlignTop);
-    triangleColumn->addWidget(ui_->resetRegistrationButton);
+    // One 30px row, matching the Confirm/Register row under the table opposite,
+    // so step 3 and step 4 stay on the same line.
+    auto* step1Buttons = new QHBoxLayout;
+    step1Buttons->setContentsMargins(0, 0, 0, 0);
+    step1Buttons->setSpacing(4);
+    step1Buttons->addWidget(detectFiducialsButton_, 1);
+    step1Buttons->addWidget(ui_->resetRegistrationButton, 1);
+    triangleColumn->addLayout(step1Buttons);
     markerDiagramLayout->addLayout(triangleColumn);
     markerSplitter->addWidget(markerDiagramPanel);
     ui_->registrationFiducialLayout->setMinimumWidth(300);
     ui_->registrationFiducialLayout->setMinimumHeight(0);
-    ui_->registrationFiducialLayout->setMaximumHeight(120);
     ui_->registrationFiducialLayout->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    ui_->registrationFiducialLayout->setFixedHeight(120);
-    markerDiagramPanel->setMinimumHeight(264);
+    // Matched to the marker table opposite it, so step 3 below this and step 4
+    // below the table start on the same line.
+    ui_->registrationFiducialLayout->setMaximumHeight(kRegistrationColumnHeight);
+    ui_->registrationFiducialLayout->setFixedHeight(kRegistrationColumnHeight);
+    markerDiagramPanel->setMinimumHeight(264 + kRegistrationColumnHeight - 120);
     markerDiagramPanel->setMaximumHeight(QWIDGETSIZE_MAX);
     // Every viewer column on every page is built the same way: tight margins
     // around the viewer, then the slider row, then a compact centred slice
@@ -509,15 +545,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QPushButton:hover { background: #3b4950; } "
         "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
-    detectFiducialsButton_ = new QPushButton(QStringLiteral("Detect fiducials"), this);
-    detectFiducialsButton_->setObjectName(QStringLiteral("detectFiducialsButton"));
-    detectFiducialsButton_->setToolTip(QStringLiteral(
-        "Search the MRI for the six marker donuts. Each result carries a confidence; "
-        "anything below 75% is flagged and must be checked by hand."));
-    detectFiducialsButton_->setMinimumHeight(26);
-    detectFiducialsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    detectFiducialsButton_->setStyleSheet(importFiducialsButton_->styleSheet());
-    connect(detectFiducialsButton_, &QPushButton::clicked, this, [this] { detectFiducials(); });
+    // detectFiducialsButton_ is built earlier, with step 1's button row.
     saveFiducialsButton_ = new QPushButton(QStringLiteral("Save fiducials..."), this);
     saveFiducialsButton_->setObjectName(QStringLiteral("saveFiducialsButton"));
     saveFiducialsButton_->setToolTip(
@@ -590,7 +618,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     importRow->setContentsMargins(0, 0, 0, 4);
     importRow->setSpacing(6);
     importRow->addWidget(importFiducialsButton_, 0);
-    importRow->addWidget(detectFiducialsButton_, 0);
     importRow->addStretch(1);
     ui_->registrationLayout->insertLayout(0, importRow);
     ui_->registrationResult->setMaximumHeight(28);
@@ -1558,8 +1585,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationTable->setColumnHidden(5, true);
     ui_->registrationTable->verticalHeader()->setDefaultSectionSize(25);
     ui_->registrationTable->verticalHeader()->setMinimumSectionSize(22);
-    // Six complete rows plus the header, without an oversized viewport.
-    ui_->registrationTable->setFixedHeight(186);
+    // Six complete rows plus the header, without an oversized viewport. Shared
+    // with the fiducial diagram opposite -- see kRegistrationColumnHeight.
+    ui_->registrationTable->setFixedHeight(kRegistrationColumnHeight);
     if (auto* fiducialHeader = ui_->registrationTable->horizontalHeaderItem(0))
         fiducialHeader->setText(QStringLiteral("Fiducial"));
     ui_->acceptRegistrationButton->setText(QStringLiteral("4  Accept registration and continue →"));
@@ -2841,7 +2869,8 @@ void WorkflowWindow::updateRegistrationAvailability() {
     // button/slider enablement independently.
     ui_->confirmFiducialButton->setEnabled(allLocated && hasPendingLocated);
     ui_->registerFiducialsButton->setEnabled(geometryReady && allMeasured && !fitApplied);
-    if (detectFiducialsButton_) detectFiducialsButton_->setEnabled(geometryReady);
+    // Deliberately not gated: detectFiducials() reports what is missing, which
+    // is more use to the operator than a button that cannot be pressed.
     if (registerCurrentPositionButton_)
         // Step 3 is intentionally repeatable.  Once the MRI-fiducial fit is
         // ready, the operator may adjust the four lock-position sliders and
@@ -3045,13 +3074,18 @@ void WorkflowWindow::showMriPreviews() {
         view->setCoordinatePasteOptions(markerNames);
     if (fiducials_.size() >= 6) {
         std::array<QString, 6> coordinateLabels;
+        std::array<QPointF, 6> markerApIsMm;
         for (std::size_t index = 0; index < 6; ++index) {
             const Eigen::Vector3d rasMm = fiducials_[index].position * 1000.0;
             coordinateLabels[index] = QStringLiteral("(%1, %2, %3)")
                 .arg(rasMm.x(), 0, 'f', 1).arg(rasMm.y(), 0, 'f', 1).arg(rasMm.z(), 0, 'f', 1);
+            // The diagram is a view down the LR axis, so it plots AP against IS.
+            markerApIsMm[index] = QPointF(rasMm.y(), rasMm.z());
         }
         ui_->imagingFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
         ui_->registrationFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
+        ui_->imagingFiducialLayout->setMarkerPositions(markerApIsMm);
+        ui_->registrationFiducialLayout->setMarkerPositions(markerApIsMm);
     }
     const int sagittal = ui_->sagittalSlider->value() + 1;
     const int coronal = ui_->coronalSlider->value() + 1;

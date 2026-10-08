@@ -56,18 +56,41 @@ int writeCsv(const beam::infra::mat::LegacyBeamMri& mri, const char* source, con
     return 0;
 }
 
+// Prints the plan index a session carries. The tables themselves are MATLAB
+// `table` objects and do not survive the read -- the printed note says so,
+// because an index that looks like a parity export would be worse than none.
+void printPlan(const beam::infra::mat::LegacyBeamPlan& plan) {
+    std::printf("targets=%zu\n", plan.targetNames.size());
+    for (std::size_t i = 0; i < plan.targetNames.size(); ++i)
+        std::printf("  %zu %s\n", i + 1, plan.targetNames[i].c_str());
+    std::printf("protocols=%zu\n", plan.protocols.size());
+    for (const auto& protocol : plan.protocols)
+        std::printf("  %s sessions=%zu\n", protocol.name.c_str(), protocol.sessionCount);
+    if (plan.tablePayloadsUnreadable)
+        std::printf("note: the stim/protocol table payloads are MATLAB table objects and were not"
+                    " readable; names and counts only\n");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2 && argc != 4) {
+    const std::string mode = argc >= 3 ? argv[2] : std::string();
+    if (argc < 2 || argc > 4 || (argc == 3 && mode != "--plan") ||
+        (argc == 4 && mode != "--csv")) {
         std::fprintf(stderr,
                      "usage: beam_mat_info <Beam-session.mat>\n"
-                     "       beam_mat_info <Beam-session.mat> --csv <out.csv>\n");
+                     "       beam_mat_info <Beam-session.mat> --csv <out.csv>\n"
+                     "       beam_mat_info <Beam-session.mat> --plan\n");
         return 2;
     }
     try {
+        // --plan skips the MRI deliberately: the volume is most of the file.
+        if (mode == "--plan") {
+            printPlan(beam::infra::mat::loadLegacyBeamPlan(argv[1]));
+            return 0;
+        }
         const auto mri = beam::infra::mat::loadLegacyBeamMri(argv[1]);
-        if (argc == 4 && std::string(argv[2]) == "--csv") return writeCsv(mri, argv[1], argv[3]);
+        if (mode == "--csv") return writeCsv(mri, argv[1], argv[3]);
         printSummary(mri);
         return 0;
     } catch (const std::exception& error) {

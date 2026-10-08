@@ -6,6 +6,7 @@
 #include <array>
 #include <memory>
 
+#include "gui/treatment_target_store.hpp"
 #include "gui/treatment_workflow.hpp"
 #include "array/array_types.hpp"
 #include "mri/slice.hpp"
@@ -134,6 +135,12 @@ private:
     void applyArrayCentreToAllTargets(const Eigen::Vector3d& centreMm);
     void updateStimGridHeight();
     void loadTreatmentProtocol(const QString& protocolName);
+    QString treatmentDataDirectory() const;
+    void loadTreatmentTargetStore();
+    void refreshProtocolCombo(const QString& select);
+    void writeProtocolGridToStore();
+    void saveTreatmentTargetStore();
+    void setTargetStoreDirty(bool dirty);
     void selectSonicationRow(int row);
     int selectedSonicationRow() const;
     void setSonicationTargetFromMri(const Eigen::Vector3d& positionMm);
@@ -240,6 +247,16 @@ private:
     QWidget* treatmentPlanBody_ = nullptr;
     beam::gui_qt::StimParamTableModel* stimParamModel_ = nullptr;
     beam::gui_qt::TreatmentProtocolTableModel* protocolModel_ = nullptr;
+    // BeamAI's own protocol/target library. Seeded from data/*.csv in the
+    // install, saved to the user's own copy -- see treatmentDataDirectory().
+    beam::gui::TreatmentTargetStore targetStore_;
+    bool targetStoreDirty_ = false;
+    QPushButton* newProtocolButton_ = nullptr;
+    QPushButton* renameProtocolButton_ = nullptr;
+    QPushButton* deleteProtocolButton_ = nullptr;
+    QPushButton* addProtocolEntryButton_ = nullptr;
+    QPushButton* removeProtocolEntryButton_ = nullptr;
+    QPushButton* saveProtocolsButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
     QTableView* protocolView_ = nullptr;
     QListWidget* targetListWidget_ = nullptr;

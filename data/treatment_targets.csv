@@ -1,0 +1,42 @@
+# BeamAI Target List: the parameter definition for each target.
+#
+# These twelve names in this order are BeamV0's own Target List, read from
+# sys.protocolTables in defaultSubjectMNIV1.mat and confirmed identical in a
+# real BeamV0 session and a Diadem one -- see tests/treatment_migration_tests.cpp.
+# The BEAM protocol CSVs also schedule NACC_*, VPL_* and T1-T6, which this list
+# does not define; those protocols cannot be run and report as dangling.
+#
+# The VALUES are createStimParamTable.m's default table, which is what the
+# shipped .mat actually holds: every target carries the same parameters, and
+# amplitude is 0.5 for all of them. Read off BeamV0's own grid for SCC1 and
+# SCC4 -- the per-target amplitudes an earlier migration took from the protocol
+# CSVs (0.75 for most targets, 60 s for SCC4-6) were never in protocolTables.
+#
+# The 0.75/0.5 and 30/60/90/180 variation belongs to the protocol SCHEDULE, in
+# treatment_protocols.csv. BeamV0 pushes only the duration from a schedule onto
+# a target's rows (updateSonicateSettingsForCurrentSonication.m sets startTime
+# and endTime down the whole column); the schedule's Amplitude is not applied,
+# because its one call site, setStimulationAmplitudeFromResponses, is commented
+# out. So a target sonicates at the amplitude below unless the operator edits it.
+#
+# One row per target POINT. A target's sonications are rows of its own
+# stimParamTable in BeamV0 (setProtocolTableWithStimParamTable.m stores the
+# whole grid per target; createSonicationUpdateTable.m appends a row by copying
+# the previous one), so each point carries its own parameters. The seed has one
+# point each, which is createStimParamTable.m's own N = 1.
+#
+# X/Y/Z are NOT here - placement is per-patient session data, and they are the
+# only columns BeamV0's grid makes read-only.
+name,point,show,amplitude,startTime,endTime,burstDuration,burstInterval,pulseDuration,pulseInterval
+SCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC2,1,1,0.5,0,30,0.06,1.1,0.005,0.01
+SCC3,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC4,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC5,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC6,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC2,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC3,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC4,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC5,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC6,1,1,0.5,0,30,0.03,0.7,0.005,0.01

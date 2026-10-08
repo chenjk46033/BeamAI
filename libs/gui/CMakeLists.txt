@@ -15,6 +15,7 @@ add_library(gui STATIC
     src/initial_placement_presenter.cpp
     src/sham_orchestrator.cpp
     src/treatment_session_store.cpp
+    src/treatment_target_store.cpp
     src/registration_check_presenter.cpp
     src/treatment_workflow.cpp
 )
