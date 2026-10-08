@@ -12,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineF>
+#include <QToolTip>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -395,7 +396,26 @@ void WorkflowMriView::mouseMoveEvent(QMouseEvent* event) {
         clampPan();
     }
     updateMouseCoordinate(event->position());
+    showMarkerTooltipAt(event->position(), event->globalPosition().toPoint());
     update();
+}
+
+// Hovering a marker names it and gives its position and confidence, so the
+// operator can identify one without going back to the table.
+void WorkflowMriView::showMarkerTooltipAt(const QPointF& widgetPosition,
+                                           const QPoint& globalPosition) {
+    if (image_.isNull()) return;
+    const QRectF displayed = imageRect();
+    for (const WorkflowMriMarker& marker : markers_) {
+        if (marker.tooltip.isEmpty()) continue;
+        const QPointF point(displayed.left() + marker.normalizedPosition.x() * displayed.width(),
+                            displayed.top() + marker.normalizedPosition.y() * displayed.height());
+        if (QLineF(point, widgetPosition).length() <= 14.0) {
+            QToolTip::showText(globalPosition, marker.tooltip, this);
+            return;
+        }
+    }
+    QToolTip::hideText();
 }
 
 void WorkflowMriView::mouseReleaseEvent(QMouseEvent* event) {

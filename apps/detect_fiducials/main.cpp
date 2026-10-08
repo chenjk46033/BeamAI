@@ -130,8 +130,9 @@ int main(int argc, char** argv) {
                     options.maxThreads);
 
         const auto started = std::chrono::steady_clock::now();
+        std::vector<beam::mri::FiducialDetection> rejected, suppressed;
         const std::vector<beam::mri::FiducialDetection> detections =
-            beam::mri::detectFiducialDonuts(volume, axes, priorMm, names, options);
+            beam::mri::detectFiducialDonuts(volume, axes, priorMm, names, options, &rejected, &suppressed);
         std::printf("detection took %.0f ms\n\n",
                     std::chrono::duration<double, std::milli>(
                         std::chrono::steady_clock::now() - started).count());
@@ -219,6 +220,47 @@ int main(int argc, char** argv) {
             std::printf("\nmean error %.2f mm over %d scored markers; %d flagged under 75%%\n",
                         total / scored, scored, flagged);
         }
+        // What the triangle passed over. The workflow app draws these as plain
+        // circles so an operator can see the alternatives to a weak result.
+        std::printf("\ncandidates the triangle did not choose: %zu\n", rejected.size());
+        for (std::size_t index = 0; index < rejected.size(); ++index) {
+            const auto& other = rejected[index];
+            double nearest = 1e30;
+            std::string nearestName;
+            for (std::size_t m = 0; m < detections.size(); ++m) {
+                if (!detections[m].found) continue;
+                const double distance = (other.positionMm - detections[m].positionMm).norm();
+                if (distance < nearest) {
+                    nearest = distance;
+                    nearestName = names[m];
+                }
+            }
+            std::printf("  %9.2f %9.2f %9.2f  corr %.3f  stab %.2f  r %.1f   %.1f mm from %s\n",
+                        other.positionMm.x(), other.positionMm.y(), other.positionMm.z(),
+                        other.response, other.stability, other.radiusMm, nearest,
+                        nearestName.c_str());
+        }
+
+        // What thinning removed, grouped under the marker it belongs to. These
+        // are the same donut on neighbouring slices: the alternatives an
+        // operator might prefer over the one the strongest response picked.
+        std::printf("\npeaks thinning suppressed: %zu\n", suppressed.size());
+        for (std::size_t m = 0; m < detections.size(); ++m) {
+            if (!detections[m].found) continue;
+            int shown = 0;
+            for (const auto& near : suppressed) {
+                const double d = (near.positionMm - detections[m].positionMm).norm();
+                if (d > 7.0) continue;
+                if (shown++ == 0)
+                    std::printf("  %-11s chosen %9.2f %9.2f %9.2f  corr %.3f\n", names[m].c_str(),
+                                detections[m].positionMm.x(), detections[m].positionMm.y(),
+                                detections[m].positionMm.z(), detections[m].response);
+                std::printf("      alt     %9.2f %9.2f %9.2f  corr %.3f  r %.1f  %.2f mm away\n",
+                            near.positionMm.x(), near.positionMm.y(), near.positionMm.z(),
+                            near.response, near.radiusMm, d);
+            }
+        }
+
         std::printf("\nprior (nominal placement, for reference):\n");
         for (std::size_t index = 0; index < priorMm.size(); ++index) {
             std::printf("  %-11s %9.2f %9.2f %9.2f\n", names[index].c_str(), priorMm[index].x(),

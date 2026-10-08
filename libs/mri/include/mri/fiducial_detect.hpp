@@ -50,11 +50,26 @@ struct FiducialDetectOptions {
 // priorMm: six nominal marker positions in mm, in setArrayFiducialMarkers
 // order. axes must be the ascending-normalised vectors the viewer uses.
 // Throws std::invalid_argument on a wrong count or a volume/axes mismatch.
+// rejected, when given, receives the candidates the triangle did not choose --
+// every peak that survived thresholding and clustering but is not one of the
+// six results. They carry a position, response, stability and radius but no
+// name, and are ordered strongest first within each panel. Useful for showing
+// an operator what else the search found before dismissing a weak result.
+// suppressed, when given, receives the peaks the 7 mm thinning removed -- the
+// weaker responses the same donut produces on neighbouring slices, plus any
+// peak past the candidate cap. These sit within clusterRadiusMm of a kept
+// candidate, so they are the alternatives for a marker the operator may want
+// to pick instead of the one chosen. Their stability field is not computed.
+//
+// Asking for them also carries the thinning walk to the end of the peak list
+// rather than stopping at the cap; without the pointer the walk is unchanged.
 std::vector<FiducialDetection> detectFiducialDonuts(
     const Volume3D& volume, const RasAxisVectors& axes,
     const std::vector<Eigen::Vector3d>& priorMm,
     const std::vector<std::string>& names,
-    const FiducialDetectOptions& options = {});
+    const FiducialDetectOptions& options = {},
+    std::vector<FiducialDetection>* rejected = nullptr,
+    std::vector<FiducialDetection>* suppressed = nullptr);
 
 // One marker: every donut-like response within searchRadiusMm of aroundMm,
 // strongest first, empty if none. No constellation constraint -- the caller

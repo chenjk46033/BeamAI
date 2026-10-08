@@ -5,10 +5,12 @@
 #include <QSize>
 #include <array>
 #include <memory>
+#include <vector>
 
 #include "gui/treatment_target_store.hpp"
 #include "gui/treatment_workflow.hpp"
 #include "array/array_types.hpp"
+#include "mri/fiducial_detect.hpp"
 #include "mri/slice.hpp"
 #include "mri/ras_transform.hpp"
 #include "registration/array_transform.hpp"
@@ -108,6 +110,7 @@ private:
     void updateRegistrationAvailability();
     void updateRegistrationStepIndicators();
     void refresh();
+    void setMriPathDisplay(const QString& path);
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
 
@@ -209,6 +212,10 @@ private:
     QLabel* registrationStep2Label_ = nullptr;
     QPushButton* importFiducialsButton_ = nullptr;
     QPushButton* detectFiducialsButton_ = nullptr;
+    // The loaded MRI path, at the top of the Registration page. Carries the
+    // same line as the Imaging page's mriPathLabel; it exists because the
+    // operator placing fiducials should not have to go back a tab to check.
+    QLabel* registrationMriPathLabel_ = nullptr;
     QPushButton* saveFiducialsButton_ = nullptr;
     QLabel* registrationStep3Label_ = nullptr;
     QLabel* arrayPositionLabel_ = nullptr;

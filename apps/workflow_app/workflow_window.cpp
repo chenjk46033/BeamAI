@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -433,8 +434,17 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     detectFiducialsButton_->setStyleSheet(stepButtonStyle);
     connect(detectFiducialsButton_, &QPushButton::clicked, this, [this] { detectFiducials(); });
 
+    importFiducialsButton_ = new QPushButton(QStringLiteral("Import fiducials..."), this);
+    importFiducialsButton_->setObjectName(QStringLiteral("importFiducialsButton"));
+    importFiducialsButton_->setToolTip(
+        QStringLiteral("Load six measured fiducials from a CSV saved earlier"));
+    importFiducialsButton_->setMinimumHeight(30);
+    importFiducialsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    importFiducialsButton_->setStyleSheet(stepButtonStyle);
+    connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
+
     ui_->registrationActions->removeWidget(ui_->resetRegistrationButton);
-    ui_->resetRegistrationButton->setText(QStringLiteral("Restore fiducials"));
+    ui_->resetRegistrationButton->setText(QStringLiteral("Restore Default"));
     ui_->resetRegistrationButton->setMinimumHeight(30);
     ui_->resetRegistrationButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     ui_->resetRegistrationButton->setStyleSheet(stepButtonStyle);
@@ -464,6 +474,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     step1Buttons->setSpacing(4);
     step1Buttons->addWidget(detectFiducialsButton_, 1);
     step1Buttons->addWidget(ui_->resetRegistrationButton, 1);
+    step1Buttons->addWidget(importFiducialsButton_, 1);
     triangleColumn->addLayout(step1Buttons);
     markerDiagramLayout->addLayout(triangleColumn);
     markerSplitter->addWidget(markerDiagramPanel);
@@ -514,10 +525,15 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     registrationStep2Label_->setStyleSheet(QStringLiteral(
         "QLabel { color: #dff7ff; background: rgba(15, 54, 68, 190); border-radius: 3px; font-size: 30px; font-weight: 700; }"));
     registrationStep2Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    registrationStep2Label_->setFixedSize(20, 20);
+    // Same 28x34 as steps 1, 3 and 4: the shared stylesheet asks for a 30px
+    // glyph, which a smaller box clips. Parented to the panel like step 1,
+    // not to the table's header -- a child of the ~25px header is clipped by
+    // it, and the header's coordinates are not the ones the table's geometry
+    // is expressed in.
+    registrationStep2Label_->setFixedSize(28, 34);
     registrationStep2Label_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    registrationStep2Label_->setParent(ui_->registrationTable->horizontalHeader());
-    registrationStep2Label_->move(0, 0);
+    registrationStep2Label_->setParent(markerTablePanel);
+    registrationStep2Label_->move(4, 4);
     registrationStep2Label_->show();
     registrationStep2Label_->raise();
     ui_->confirmFiducialButton->setText(QStringLiteral("Confirm all located fiducials"));
@@ -533,19 +549,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registerFiducialsButton->setStyleSheet(QStringLiteral(
         "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
         "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
-    importFiducialsButton_ = new QPushButton(QStringLiteral("Import fiducials..."), this);
-    importFiducialsButton_->setObjectName(QStringLiteral("importFiducialsButton"));
-    importFiducialsButton_->setToolTip(
-        QStringLiteral("Load six measured fiducials from a CSV saved earlier"));
-    importFiducialsButton_->setMinimumHeight(26);
-    importFiducialsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    importFiducialsButton_->setStyleSheet(QStringLiteral(
-        "QPushButton { background: #2f3b41; color: #d7e3e7; border: 1px solid #44555c; "
-        "border-radius: 4px; padding: 4px 12px; } "
-        "QPushButton:hover { background: #3b4950; } "
-        "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
-    connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
-    // detectFiducialsButton_ is built earlier, with step 1's button row.
+    // detectFiducialsButton_ and importFiducialsButton_ are built earlier, with
+    // step 1's button row.
     saveFiducialsButton_ = new QPushButton(QStringLiteral("Save fiducials..."), this);
     saveFiducialsButton_->setObjectName(QStringLiteral("saveFiducialsButton"));
     saveFiducialsButton_->setToolTip(
@@ -585,7 +590,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     registrationStep4Label_->raise();
     QTimer::singleShot(0, this, [this, markerTablePanel] {
         if (registrationStep2Label_ && ui_->registrationTable->parentWidget() == markerTablePanel) {
-            registrationStep2Label_->setGeometry(ui_->registrationTable->geometry().adjusted(2, 2, -2, -2));
+            // Top-left of the table, in the panel's coordinates -- the same
+            // corner step 1 sits in on the diagram. Position only: resizing it
+            // to the table's rect is what clipped the glyph.
+            registrationStep2Label_->move(ui_->registrationTable->geometry().topLeft() +
+                                           QPoint(4, 4));
             registrationStep2Label_->raise();
         }
         if (registrationStep4Label_ && ui_->acceptRegistrationButton->parentWidget() == markerTablePanel) {
@@ -612,14 +621,20 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationLayout->removeItem(ui_->registrationActions);
     ui_->registrationLayout->removeWidget(ui_->registrationResult);
     ui_->registrationLayout->setSpacing(0);
-    // Import opens the stage: it stands in for locating the fiducials by hand,
-    // so it belongs above the numbered steps rather than inside one.
-    auto* importRow = new QHBoxLayout;
-    importRow->setContentsMargins(0, 0, 0, 4);
-    importRow->setSpacing(6);
-    importRow->addWidget(importFiducialsButton_, 0);
-    importRow->addStretch(1);
-    ui_->registrationLayout->insertLayout(0, importRow);
+    // Same line as the Imaging page's mriPathLabel, and sized the same way:
+    // word-wrapped but height-capped, or the layout stretches it into a dark
+    // band above the instructions.
+    registrationMriPathLabel_ = new QLabel(QStringLiteral("No MRI loaded"), this);
+    registrationMriPathLabel_->setStyleSheet(QStringLiteral("color: #bdc7cb; padding: 6px 0;"));
+    registrationMriPathLabel_->setWordWrap(true);
+    registrationMriPathLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    registrationMriPathLabel_->setMinimumHeight(0);
+    registrationMriPathLabel_->setMaximumHeight(36);
+    registrationMriPathLabel_->setContentsMargins(0, 0, 0, 0);
+    ui_->registrationLayout->insertWidget(0, registrationMriPathLabel_);
+    // Import now sits in step 1's button row beside Detect and Restore Default:
+    // all three act on the same six fiducials, so they belong together rather
+    // than split between a header row and a step.
     ui_->registrationResult->setMaximumHeight(28);
     ui_->registrationResult->hide();
     ui_->registrationDetailsLayout->removeWidget(ui_->registrationResult);
@@ -1938,8 +1953,7 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     mriLoaded_ = true;
     mriPath_ = path;
     workflow_.change(beam::gui::WorkflowStage::Imaging, "MRI changed; registration and later approvals require review.");
-    ui_->mriPathLabel->setText(QStringLiteral("%1  ·  Loaded: %2")
-                                   .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate)));
+    setMriPathDisplay(path);
     const auto resolution = beam::mri::computeVoxelResolution(mriAxes_);
     ui_->mriMetadataLabel->setText(
         QStringLiteral("Volume: %1 x %2 x %3 voxels; spacing: %4 x %5 x %6 mm; legacy Beam session\n"
@@ -2032,8 +2046,7 @@ void WorkflowWindow::loadMri(const QString& path) {
         mriPath_ = path;
         workflow_.change(beam::gui::WorkflowStage::Imaging,
                          "MRI changed; registration and later approvals require review.");
-        ui_->mriPathLabel->setText(QStringLiteral("%1  ·  Loaded: %2")
-                                       .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate)));
+        setMriPathDisplay(path);
         const beam::mri::VoxelResolution resolution = beam::mri::computeVoxelResolution(mriAxes_);
         ui_->mriMetadataLabel->setText(
         QStringLiteral("Volume: %1 x %2 x %3 voxels; spacing: %4 x %5 x %6 mm; RAS oriented\n"
@@ -2199,7 +2212,7 @@ void WorkflowWindow::populateRegistrationTable() {
         name->setFlags(name->flags() & ~Qt::ItemIsEditable);
         ui_->registrationTable->setItem(row, 0, name);
         for (int axis = 0; axis < 3; ++axis) {
-            auto* coordinate = new QTableWidgetItem(QString::number(marker.position(axis) * 1000.0, 'f', 2));
+            auto* coordinate = new QTableWidgetItem(QString::number(marker.position(axis) * 1000.0, 'f', 1));
             coordinate->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
             ui_->registrationTable->setItem(row, axis + 1, coordinate);
         }
@@ -2285,7 +2298,7 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
         placed(heldAxis) = fiducials_[static_cast<std::size_t>(row)].position(heldAxis) * 1000.0;
     ui_->registrationTable->blockSignals(true);
     for (int axis = 0; axis < 3; ++axis)
-        ui_->registrationTable->item(row, axis + 1)->setText(QString::number(placed(axis), 'f', 2));
+        ui_->registrationTable->item(row, axis + 1)->setText(QString::number(placed(axis), 'f', 1));
     ui_->registrationTable->blockSignals(false);
     fiducialLocated_[static_cast<std::size_t>(row)] = true;
     fiducialConfirmed_[static_cast<std::size_t>(row)] = false;
@@ -2579,7 +2592,7 @@ void WorkflowWindow::detectSingleFiducial(int row) {
     ui_->registrationTable->blockSignals(true);
     for (int axis = 0; axis < 3; ++axis) {
         if (QTableWidgetItem* cell = ui_->registrationTable->item(row, axis + 1))
-            cell->setText(QString::number(found.positionMm(axis), 'f', 2));
+            cell->setText(QString::number(found.positionMm(axis), 'f', 1));
     }
     if (QTableWidgetItem* cell = ui_->registrationTable->item(row, 4))
         cell->setText(QStringLiteral("Detected"));
@@ -2626,6 +2639,10 @@ void WorkflowWindow::detectFiducials() {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     detectFiducialsButton_->setEnabled(false);
     try {
+        // The rejected and suppressed peaks are deliberately not requested: the
+        // views show only the six chosen markers. Drawing the alternatives put
+        // circles where no marker is, which read as detections. They remain
+        // available through detect_fiducials for diagnosis.
         detections = beam::mri::detectFiducialDonuts(mriVolume_, mriAxes_, priorMm, names);
     } catch (const std::exception& error) {
         detectFiducialsButton_->setEnabled(true);
@@ -2651,7 +2668,7 @@ void WorkflowWindow::detectFiducials() {
         fiducials_[index].position = found.positionMm / 1000.0;
         for (int axis = 0; axis < 3; ++axis) {
             if (QTableWidgetItem* cell = ui_->registrationTable->item(row, axis + 1))
-                cell->setText(QString::number(found.positionMm(axis), 'f', 2));
+                cell->setText(QString::number(found.positionMm(axis), 'f', 1));
         }
         // Located, deliberately not confirmed: Step 2 must still review it.
         fiducialLocated_[index] = true;
@@ -2805,7 +2822,7 @@ void WorkflowWindow::importFiducialsCsv() {
         const Eigen::Vector3d mm = byName.value(QString::fromStdString(fiducials_[index].name));
         fiducials_[index].position = mm / 1000.0;
         for (int axis = 0; axis < 3; ++axis)
-            ui_->registrationTable->item(row, axis + 1)->setText(QString::number(mm(axis), 'f', 2));
+            ui_->registrationTable->item(row, axis + 1)->setText(QString::number(mm(axis), 'f', 1));
         // Already confirmed once, so Step 2 is available immediately.
         fiducialLocated_[index] = true;
         fiducialConfirmed_[index] = true;
@@ -3188,11 +3205,24 @@ void WorkflowWindow::showMriPreviews() {
             const bool draggable = selectedStage_ == beam::gui::WorkflowStage::Registration;
             const Eigen::Vector3d mm = marker.position * 1000.0;
             const auto voxel = beam::gui::imagePositionToVoxelIndex(mm, mriAxes_);
+            const double markerConfidence = fiducialConfidence_[markerIndex];
+            const QString confidenceText =
+                fiducialTrustOf(markerConfidence) == FiducialTrust::Unscored
+                    ? QStringLiteral("not scored")
+                    : QStringLiteral("%1%").arg(markerConfidence * 100.0, 0, 'f', 0);
+            const QString markerTooltip =
+                QStringLiteral("%1\nLR %2  AP %3  IS %4 mm\nconfidence %5")
+                    .arg(QString::fromStdString(marker.name))
+                    .arg(mm.x(), 0, 'f', 1)
+                    .arg(mm.y(), 0, 'f', 1)
+                    .arg(mm.z(), 0, 'f', 1)
+                    .arg(confidenceText);
             if (voxel.i == sagittal - 1) {
                 const WorkflowMriMarker viewMarker{QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
                                                    markerLabel, QColor(230, 45, 55), false, draggable,
-                                                   static_cast<int>(markerIndex)};
+                                                   static_cast<int>(markerIndex),
+                                                   markerTooltip};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) sagMarkers.push_back(viewMarker);
                 if (ui_->showFiducialsCheckBox->isChecked()) imagingSagMarkers.push_back(viewMarker);
             }
@@ -3200,7 +3230,8 @@ void WorkflowWindow::showMriPreviews() {
                 const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
                                                    markerLabel, QColor(230, 45, 55), false, draggable,
-                                                   static_cast<int>(markerIndex)};
+                                                   static_cast<int>(markerIndex),
+                                                   markerTooltip};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) corMarkers.push_back(viewMarker);
                 if (ui_->showFiducialsCheckBox->isChecked()) imagingCorMarkers.push_back(viewMarker);
             }
@@ -3208,7 +3239,8 @@ void WorkflowWindow::showMriPreviews() {
                 const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
                                                    markerLabel, QColor(230, 45, 55), false, draggable,
-                                                   static_cast<int>(markerIndex)};
+                                                   static_cast<int>(markerIndex),
+                                                   markerTooltip};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) axialMarkers.push_back(viewMarker);
                 if (ui_->showFiducialsCheckBox->isChecked()) imagingAxialMarkers.push_back(viewMarker);
             }
@@ -3554,6 +3586,18 @@ void WorkflowWindow::refresh() {
     ui_->abortButton->setEnabled(workflow_.state(beam::gui::WorkflowStage::Treatment).status ==
                                   beam::gui::WorkflowStatus::InProgress);
     if (selectedStage_ == beam::gui::WorkflowStage::Treatment && !ready) showMessage(QString::fromStdString(reason), true);
+}
+
+// Both pages carry the same line, so the clock is read once rather than per
+// label -- two reads can straddle a second boundary and print two load times
+// for one load.
+void WorkflowWindow::setMriPathDisplay(const QString& path) {
+    const QString text = QStringLiteral("%1  ·  Loaded: %2")
+                             .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate));
+    ui_->mriPathLabel->setText(text);
+    if (registrationMriPathLabel_ == nullptr) return;
+    registrationMriPathLabel_->setText(text);
+    registrationMriPathLabel_->setToolTip(path);
 }
 
 void WorkflowWindow::showMessage(const QString& text, bool error) {

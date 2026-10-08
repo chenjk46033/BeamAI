@@ -19,6 +19,9 @@ struct WorkflowMriMarker {
     bool crosshair = false;
     bool draggable = false;
     int markerIndex = -1;
+    // Shown on hover. Last, so the existing aggregate initialisers that stop
+    // at markerIndex keep compiling with no tooltip.
+    QString tooltip;
 };
 
 // Native image interaction used by the new workflow UI. Kept independent
@@ -84,6 +87,7 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void showMarkerTooltipAt(const QPointF& widgetPosition, const QPoint& globalPosition);
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void leaveEvent(QEvent* event) override;

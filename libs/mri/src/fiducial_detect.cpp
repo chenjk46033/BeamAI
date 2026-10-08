@@ -322,7 +322,11 @@ std::vector<FiducialDetection> detectFiducialDonuts(const Volume3D& volume,
                                                     const RasAxisVectors& axes,
                                                     const std::vector<Eigen::Vector3d>& priorMm,
                                                     const std::vector<std::string>& names,
-                                                    const FiducialDetectOptions& options) {
+                                                    const FiducialDetectOptions& options,
+                                                    std::vector<FiducialDetection>* rejected,
+                                                    std::vector<FiducialDetection>* suppressed) {
+    if (rejected != nullptr) rejected->clear();
+    if (suppressed != nullptr) suppressed->clear();
     if (priorMm.size() != 6) {
         throw std::invalid_argument("detectFiducialDonuts needs 6 prior positions");
     }
@@ -390,12 +394,37 @@ std::vector<FiducialDetection> detectFiducialDonuts(const Volume3D& volume,
         // Collapse the responses one donut produces on neighbouring slices.
         std::vector<Peak> candidates;
         for (const Peak& peak : peaks) {
-            const bool duplicate =
-                std::any_of(candidates.begin(), candidates.end(), [&](const Peak& kept) {
-                    return (kept.positionMm - peak.positionMm).norm() < options.clusterRadiusMm;
-                });
-            if (!duplicate) candidates.push_back(peak);
-            if (static_cast<int>(candidates.size()) >= options.candidatesPerSide) break;
+            const bool capped =
+                static_cast<int>(candidates.size()) >= options.candidatesPerSide;
+            if (!capped) {
+                const bool duplicate =
+                    std::any_of(candidates.begin(), candidates.end(), [&](const Peak& kept) {
+                        return (kept.positionMm - peak.positionMm).norm() <
+                               options.clusterRadiusMm;
+                    });
+                if (!duplicate) {
+                    candidates.push_back(peak);
+                    continue;
+                }
+            }
+            // Dropped here: either a weaker response from a donut already kept,
+            // or past the cap. Recorded only when the caller asks, and only
+            // then is the walk carried past the cap -- otherwise it stops, as
+            // it always did.
+            if (suppressed == nullptr) {
+                if (capped) break;
+                continue;
+            }
+            FiducialDetection other;
+            other.positionMm = peak.positionMm;
+            other.response = peak.response;
+            other.confidence = peak.response;
+            other.radiusMm = peak.radiusMm;
+            // stability is left at 0: stabilityOf runs only for candidates, and
+            // computing it for every suppressed peak would cost a disc search
+            // per peak. Callers must not read it as a measurement.
+            other.found = false;
+            suppressed->push_back(other);
         }
         for (Peak& candidate : candidates) {
             candidate.stability = stabilityOf(maps, axes, candidate, options.clusterRadiusMm,
@@ -461,6 +490,24 @@ std::vector<FiducialDetection> detectFiducialDonuts(const Volume3D& volume,
             out.confidence = peak.response;
             out.radiusMm = peak.radiusMm;
             out.found = true;
+        }
+
+        if (rejected != nullptr) {
+            for (int index = 0; index < count; ++index) {
+                if (index == bestTriple[0] || index == bestTriple[1] || index == bestTriple[2])
+                    continue;
+                const Peak& peak = candidates[static_cast<std::size_t>(index)];
+                FiducialDetection other;
+                other.positionMm = peak.positionMm;
+                other.response = peak.response;
+                other.stability = peak.stability;
+                other.confidence = peak.response;
+                other.radiusMm = peak.radiusMm;
+                // Nameless and not found: it is a place the search looked at,
+                // not a marker. Callers must not treat it as one.
+                other.found = false;
+                rejected->push_back(other);
+            }
         }
     }
     return results;
