@@ -2281,13 +2281,13 @@ void WorkflowWindow::navigateToFiducialOnTreatment(int index) {
     ui_->coronalSlider->setValue(static_cast<int>(voxel.j));
     ui_->axialSlider->setValue(static_cast<int>(voxel.k));
     showMriPreviews();
-    treatmentSagittalPreview_->focusOn(
+    treatmentSagittalPreview_->revealAt(
         QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y()),
                 1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
-    treatmentCoronalPreview_->focusOn(
+    treatmentCoronalPreview_->revealAt(
         QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
                 1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
-    treatmentAxialPreview_->focusOn(
+    treatmentAxialPreview_->revealAt(
         QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
                 1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y())));
     showMessage(QStringLiteral("Showing fiducial %1. The planned target is unchanged.")
@@ -2297,9 +2297,8 @@ void WorkflowWindow::navigateToFiducialOnTreatment(int index) {
 }
 
 QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
-    std::array<QString, 6> labels;
     std::array<QPointF, 6> apIsMm;
-    if (!fiducialDiagramData(&labels, &apIsMm)) return nullptr;
+    if (!fiducialDiagramData(nullptr, &apIsMm)) return nullptr;
     auto* holder = new QWidget(menu);
     auto* layout = new QVBoxLayout(holder);
     // Match the menu's other embedded widgets.
@@ -2310,10 +2309,7 @@ QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
         "QLabel { background: #d8f1f6; color: #123d4b; border: 1px solid #63b7c9; "
         "border-radius: 3px; padding: 3px 4px; font-weight: 600; }"));
     auto* picker = new RegistrationFiducialLayout(holder);
-    // Wide enough that the right triangle's labels still fit to its right:
-    // that triangle is centred at three quarters of the width.
-    picker->setFixedSize(720, 250);
-    picker->setMarkerCoordinateLabels(labels);
+    picker->setFixedSize(320, 190);
     picker->setMarkerPositions(apIsMm);
     picker->setSelectedIndex(treatmentFiducialPick_);
     // No menu->close(): it would hide the blue selection just drawn.
@@ -2338,13 +2334,13 @@ void WorkflowWindow::navigateToRegistrationFiducial(int row) {
     ui_->coronalSlider->setValue(static_cast<int>(voxel.j));
     ui_->axialSlider->setValue(static_cast<int>(voxel.k));
     showMriPreviews();
-    ui_->registrationSagittalPreview->focusOn(
+    ui_->registrationSagittalPreview->revealAt(
         QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y()),
                 1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
-    ui_->registrationCoronalPreview->focusOn(
+    ui_->registrationCoronalPreview->revealAt(
         QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
                 1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
-    ui_->registrationAxialPreview->focusOn(
+    ui_->registrationAxialPreview->revealAt(
         QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
                 1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y())));
     showMessage(QStringLiteral("Showing %1: center its red marker on the corresponding MRI donut.")
@@ -3147,11 +3143,11 @@ void WorkflowWindow::showMriPreviews() {
                                   ui_->registrationCoronalPreview,
                                   ui_->registrationAxialPreview})
         view->setCoordinatePasteOptions(markerNames);
-    std::array<QString, 6> coordinateLabels;
+    // No coordinate text on the diagram: three two-line labels per triangle do
+    // not fit beside it in this column, and the registration table alongside
+    // carries the same LR/AP/IS numbers.
     std::array<QPointF, 6> markerApIsMm;
-    if (fiducialDiagramData(&coordinateLabels, &markerApIsMm)) {
-        ui_->imagingFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
-        ui_->registrationFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
+    if (fiducialDiagramData(nullptr, &markerApIsMm)) {
         ui_->imagingFiducialLayout->setMarkerPositions(markerApIsMm);
         ui_->registrationFiducialLayout->setMarkerPositions(markerApIsMm);
     }
@@ -3247,6 +3243,12 @@ void WorkflowWindow::showMriPreviews() {
             ui_->registrationAxialPreview->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
         }
 
+        // The marker diagram's selected blue, so one marker reads as current in
+        // both the diagram and the image.
+        const auto fiducialColor = [](bool selected) {
+            return selected ? QColor(92, 205, 229) : QColor(230, 45, 55);
+        };
+        const int selectedFiducialRow = ui_->registrationTable->currentRow();
         std::vector<WorkflowMriMarker> sagMarkers, corMarkers, axialMarkers;
         std::vector<WorkflowMriMarker> imagingSagMarkers, imagingCorMarkers, imagingAxialMarkers;
         for (std::size_t markerIndex = 0; markerIndex < fiducials_.size(); ++markerIndex) {
@@ -3271,7 +3273,10 @@ void WorkflowWindow::showMriPreviews() {
             if (voxel.i == sagittal - 1) {
                 const WorkflowMriMarker viewMarker{QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                                   markerLabel, QColor(230, 45, 55), false, draggable,
+                                                   markerLabel,
+                                                   fiducialColor(static_cast<int>(markerIndex) ==
+                                                                 selectedFiducialRow),
+                                                   false, draggable,
                                                    static_cast<int>(markerIndex),
                                                    markerTooltip};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) sagMarkers.push_back(viewMarker);
@@ -3280,7 +3285,10 @@ void WorkflowWindow::showMriPreviews() {
             if (voxel.j == coronal - 1) {
                 const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                                   markerLabel, QColor(230, 45, 55), false, draggable,
+                                                   markerLabel,
+                                                   fiducialColor(static_cast<int>(markerIndex) ==
+                                                                 selectedFiducialRow),
+                                                   false, draggable,
                                                    static_cast<int>(markerIndex),
                                                    markerTooltip};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) corMarkers.push_back(viewMarker);
@@ -3289,7 +3297,10 @@ void WorkflowWindow::showMriPreviews() {
             if (voxel.k == axial - 1) {
                 const WorkflowMriMarker viewMarker{QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                             1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
-                                                   markerLabel, QColor(230, 45, 55), false, draggable,
+                                                   markerLabel,
+                                                   fiducialColor(static_cast<int>(markerIndex) ==
+                                                                 selectedFiducialRow),
+                                                   false, draggable,
                                                    static_cast<int>(markerIndex),
                                                    markerTooltip};
                 if (ui_->registrationShowFiducialsCheckBox->isChecked()) axialMarkers.push_back(viewMarker);
@@ -3325,15 +3336,24 @@ void WorkflowWindow::showMriPreviews() {
                 if (markerVoxel.i == sagittal - 1)
                     treatmentSagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
                                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                                   label, QColor(230, 45, 55), false, false, static_cast<int>(markerIndex)});
+                                                   label,
+                                                   fiducialColor(static_cast<int>(markerIndex) ==
+                                                                 treatmentFiducialPick_),
+                                                   false, false, static_cast<int>(markerIndex)});
                 if (markerVoxel.j == coronal - 1)
                     treatmentCorMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
-                                                   label, QColor(230, 45, 55), false, false, static_cast<int>(markerIndex)});
+                                                   label,
+                                                   fiducialColor(static_cast<int>(markerIndex) ==
+                                                                 treatmentFiducialPick_),
+                                                   false, false, static_cast<int>(markerIndex)});
                 if (markerVoxel.k == axial - 1)
                     treatmentAxialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                              1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
-                                                     label, QColor(230, 45, 55), false, false, static_cast<int>(markerIndex)});
+                                                     label,
+                                                   fiducialColor(static_cast<int>(markerIndex) ==
+                                                                 treatmentFiducialPick_),
+                                                   false, false, static_cast<int>(markerIndex)});
             }
         }
         ui_->sagittalPreview->setMarkers(std::move(imagingSagMarkers));

@@ -48,7 +48,10 @@ public:
     void adjustContrast(double amount);
     void resetContrast();
     void resetView();
-    void focusOn(QPointF normalizedPosition, double zoom = 3.0);
+    // Brings a point into view, doing nothing when it is already comfortably
+    // inside it. Zoom is only ever raised, so the operator's own framing and
+    // pan survive a marker that is already on screen.
+    void revealAt(QPointF normalizedPosition, double minimumZoom = 3.0);
     void setPointPlacementEnabled(bool enabled);
     void setPointPickedHandler(std::function<void(const Eigen::Vector3d&)> handler);
     // The context menu's "Move fiducial ... to mouse point" is an explicit

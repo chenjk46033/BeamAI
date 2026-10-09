@@ -151,13 +151,30 @@ void WorkflowMriView::resetView() {
     update();
 }
 
-void WorkflowMriView::focusOn(QPointF normalizedPosition, double zoom) {
-    zoom_ = std::clamp(zoom, 1.0, 10.0);
-    pan_ = {};
-    const QRectF shown = imageRect();
-    const QPointF point(shown.left() + normalizedPosition.x() * shown.width(),
-                        shown.top() + normalizedPosition.y() * shown.height());
-    pan_ = QPointF(width() / 2.0, height() / 2.0) - point;
+void WorkflowMriView::revealAt(QPointF normalizedPosition, double minimumZoom) {
+    if (image_.isNull()) return;
+    // A point inside this fraction of the viewport needs no reframing.
+    constexpr double kAlreadyShown = 0.6;
+    const QPointF centre(width() / 2.0, height() / 2.0);
+    const auto pointAt = [this, normalizedPosition] {
+        const QRectF shown = imageRect();
+        return QPointF(shown.left() + normalizedPosition.x() * shown.width(),
+                       shown.top() + normalizedPosition.y() * shown.height());
+    };
+    if (zoom_ + 1e-9 < std::clamp(minimumZoom, 1.0, 10.0)) {
+        zoom_ = std::clamp(minimumZoom, 1.0, 10.0);
+        pan_ = {};
+        pan_ = centre - pointAt();
+        clampPan();
+        update();
+        return;
+    }
+    const QPointF point = pointAt();
+    const QRectF comfortable(width() * (1.0 - kAlreadyShown) / 2.0,
+                             height() * (1.0 - kAlreadyShown) / 2.0,
+                             width() * kAlreadyShown, height() * kAlreadyShown);
+    if (comfortable.contains(point)) return;
+    pan_ += centre - point;
     clampPan();
     update();
 }

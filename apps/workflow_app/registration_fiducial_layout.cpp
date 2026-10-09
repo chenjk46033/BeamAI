@@ -166,6 +166,68 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
     const QFontMetricsF labelMetrics(labelFont);
     const QFontMetricsF coordinateMetrics(coordinateFont);
     painter.setFont(labelFont);
+
+    // Place every label before drawing any, so overlaps can be resolved. Each
+    // one starts outward from its own triangle's centre and inside that
+    // triangle's half of the pane; without the half, the two inner vertices
+    // both write into the gap between the triangles.
+    struct Placement {
+        QRectF box;
+        Qt::Alignment alignment = Qt::AlignVCenter;
+        double nameHeight = 0.0;
+    };
+    std::array<Placement, 6> placements{};
+    for (int index = 0; index < 6; ++index) {
+        double textWidth = labelMetrics.horizontalAdvance(names[index]);
+        if (!coordinateLabels_[index].isEmpty())
+            textWidth = std::max(
+                textWidth, coordinateMetrics.horizontalAdvance(coordinateLabels_[index]));
+        const double nameHeight = labelMetrics.height();
+        const double blockHeight =
+            nameHeight +
+            (coordinateLabels_[index].isEmpty() ? 0.0 : coordinateMetrics.height());
+        const int base = (index / 3) * 3;
+        const QPointF centroid = (points[base] + points[base + 1] + points[base + 2]) / 3.0;
+        const double xLo = base == 0 ? 3.0 : width() / 2.0 + 3.0;
+        const double xHi = base == 0 ? width() / 2.0 - 3.0 : width() - 3.0;
+        bool toLeft = points[index].x() < centroid.x();
+        if (toLeft && points[index].x() - 10.0 - textWidth < xLo) toLeft = false;
+        if (!toLeft && points[index].x() + 10.0 + textWidth > xHi) toLeft = true;
+        const double labelX = std::clamp(toLeft ? points[index].x() - 10.0 - textWidth
+                                                : points[index].x() + 10.0,
+                                         xLo, std::max(xLo, xHi - textWidth));
+        const double labelY = points[index].y() < centroid.y()
+                                  ? points[index].y() - 9.0 - blockHeight
+                                  : points[index].y() + 9.0;
+        placements[index] = {QRectF(labelX, labelY, textWidth, blockHeight),
+                             Qt::AlignVCenter | (toLeft ? Qt::AlignRight : Qt::AlignLeft),
+                             nameHeight};
+    }
+
+    // Two vertices at nearly the same height -- markers 5 and 6 are 2 mm apart
+    // on some scans -- would otherwise land in one strip. Move the later block
+    // clear of the earlier, below it when the pane has room and above it when
+    // it does not.
+    for (int index = 1; index < 6; ++index) {
+        for (int pass = 0; pass < 3; ++pass) {
+            bool moved = false;
+            for (int other = 0; other < index; ++other) {
+                if (index / 3 != other / 3) continue;
+                if (!placements[index].box.intersects(placements[other].box)) continue;
+                const double below = placements[other].box.bottom() + 2.0;
+                if (below + placements[index].box.height() <= height() - 2.0)
+                    placements[index].box.moveTop(below);
+                else
+                    placements[index].box.moveBottom(placements[other].box.top() - 2.0);
+                moved = true;
+            }
+            if (!moved) break;
+        }
+        placements[index].box.moveTop(
+            std::clamp(placements[index].box.top(), 2.0,
+                       std::max(2.0, height() - placements[index].box.height() - 2.0)));
+    }
+
     for (int index = 0; index < 6; ++index) {
         const bool selected = index == selectedIndex_;
         painter.setPen(QPen(selected ? QColor(20, 112, 142) : QColor(190, 38, 52), selected ? 3.0 : 2.0));
@@ -173,26 +235,15 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         painter.drawEllipse(points[index], selected ? 8.0 : 6.0, selected ? 8.0 : 6.0);
         painter.setPen(selected ? QColor(13, 85, 109) : QColor(75, 48, 52));
 
-        // Flip inward rather than run off the pane edge.
-        double textWidth = labelMetrics.horizontalAdvance(names[index]);
-        if (!coordinateLabels_[index].isEmpty())
-            textWidth = std::max(
-                textWidth, coordinateMetrics.horizontalAdvance(coordinateLabels_[index]));
-        const bool flip = points[index].x() + 10.0 + textWidth > width() - 3.0;
-        const double labelX = flip ? std::max(3.0, points[index].x() - 10.0 - textWidth)
-                                   : points[index].x() + 10.0;
-        const double labelY = points[index].y() - 10.0;
-        const Qt::Alignment alignment =
-            Qt::AlignVCenter | (flip ? Qt::AlignRight : Qt::AlignLeft);
-
-        const double nameHeight = labelMetrics.height();
-        painter.drawText(QRectF(labelX, labelY, textWidth, nameHeight), alignment, names[index]);
+        const Placement& at = placements[index];
+        painter.drawText(QRectF(at.box.left(), at.box.top(), at.box.width(), at.nameHeight),
+                         at.alignment, names[index]);
         if (!coordinateLabels_[index].isEmpty()) {
             painter.setFont(coordinateFont);
             painter.setPen(QColor(95, 111, 120));
-            painter.drawText(QRectF(labelX, labelY + nameHeight, textWidth,
+            painter.drawText(QRectF(at.box.left(), at.box.top() + at.nameHeight, at.box.width(),
                                     coordinateMetrics.height()),
-                             alignment, coordinateLabels_[index]);
+                             at.alignment, coordinateLabels_[index]);
             painter.setFont(labelFont);
         }
     }
