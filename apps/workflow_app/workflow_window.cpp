@@ -72,6 +72,7 @@
 #include "mri/mri_loader.hpp"
 #include "mri/ras_transform.hpp"
 #include "mri_view.hpp"
+#include "registration_fiducial_layout.hpp"
 #include "registration/array_transform.hpp"
 #include "correction/receive_waveform.hpp"
 #include "correction/signal.hpp"
@@ -243,7 +244,7 @@ constexpr int kRegistrationColumnHeight = 186;
 
 // Calibrated on one subject: the five accurate markers score 0.78-0.85
 // (docs/known_gaps_mri.md).
-constexpr double kFiducialTrustThreshold = 0.75;
+constexpr double kFiducialTrustThreshold = 0.70;
 // Below this, reported as probably wrong rather than merely unverified.
 constexpr double kFiducialRejectThreshold = 0.50;
 
@@ -428,7 +429,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     detectFiducialsButton_->setObjectName(QStringLiteral("detectFiducialsButton"));
     detectFiducialsButton_->setToolTip(QStringLiteral(
         "Search the MRI for the six marker donuts. Each result carries a confidence; "
-        "anything below 75% is flagged and must be checked by hand."));
+        "anything below 70% is flagged and must be checked by hand."));
     detectFiducialsButton_->setMinimumHeight(30);
     detectFiducialsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     detectFiducialsButton_->setStyleSheet(stepButtonStyle);
@@ -621,9 +622,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationLayout->removeItem(ui_->registrationActions);
     ui_->registrationLayout->removeWidget(ui_->registrationResult);
     ui_->registrationLayout->setSpacing(0);
-    // Same line as the Imaging page's mriPathLabel, and sized the same way:
-    // word-wrapped but height-capped, or the layout stretches it into a dark
-    // band above the instructions.
     registrationMriPathLabel_ = new QLabel(QStringLiteral("No MRI loaded"), this);
     registrationMriPathLabel_->setStyleSheet(QStringLiteral("color: #bdc7cb; padding: 6px 0;"));
     registrationMriPathLabel_->setWordWrap(true);
@@ -1398,6 +1396,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
         view->setPointPickedHandler(treatmentPointPicked);
         view->setNavigationCrosshairVisible(false);
+        view->setContextWidgetFactory([this](QMenu* menu) { return buildFiducialPickerWidget(menu); });
     }
     connect(ui_->resetSagittalButton, &QToolButton::clicked, this, [this] {
         ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));
@@ -2258,6 +2257,75 @@ void WorkflowWindow::focusTreatmentViewsOn(const Eigen::Vector3d& positionMm) {
     showMriPreviews();
 }
 
+bool WorkflowWindow::fiducialDiagramData(std::array<QString, 6>* labels,
+                                         std::array<QPointF, 6>* apIsMm) const {
+    if (fiducials_.size() < 6) return false;
+    for (std::size_t index = 0; index < 6; ++index) {
+        const Eigen::Vector3d rasMm = fiducials_[index].position * 1000.0;
+        if (labels != nullptr)
+            (*labels)[index] = QStringLiteral("(%1, %2, %3)")
+                                   .arg(rasMm.x(), 0, 'f', 1)
+                                   .arg(rasMm.y(), 0, 'f', 1)
+                                   .arg(rasMm.z(), 0, 'f', 1);
+        // The diagram is a view down the LR axis, so it plots AP against IS.
+        if (apIsMm != nullptr) (*apIsMm)[index] = QPointF(rasMm.y(), rasMm.z());
+    }
+    return true;
+}
+
+void WorkflowWindow::navigateToFiducialOnTreatment(int index) {
+    if (!mriLoaded_ || index < 0 || index >= static_cast<int>(fiducials_.size())) return;
+    const Eigen::Vector3d markerMm = fiducials_[static_cast<std::size_t>(index)].position * 1000.0;
+    const auto voxel = beam::gui::imagePositionToVoxelIndex(markerMm, mriAxes_);
+    ui_->sagittalSlider->setValue(static_cast<int>(voxel.i));
+    ui_->coronalSlider->setValue(static_cast<int>(voxel.j));
+    ui_->axialSlider->setValue(static_cast<int>(voxel.k));
+    showMriPreviews();
+    treatmentSagittalPreview_->focusOn(
+        QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y()),
+                1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
+    treatmentCoronalPreview_->focusOn(
+        QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
+                1.0 - normalizedAxisPosition(mriAxes_.dimIS, markerMm.z())));
+    treatmentAxialPreview_->focusOn(
+        QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
+                1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y())));
+    showMessage(QStringLiteral("Showing fiducial %1. The planned target is unchanged.")
+                    .arg(QString::fromStdString(
+                        fiducials_[static_cast<std::size_t>(index)].name)),
+                false);
+}
+
+QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
+    std::array<QString, 6> labels;
+    std::array<QPointF, 6> apIsMm;
+    if (!fiducialDiagramData(&labels, &apIsMm)) return nullptr;
+    auto* holder = new QWidget(menu);
+    auto* layout = new QVBoxLayout(holder);
+    // Match the menu's other embedded widgets.
+    layout->setContentsMargins(10, 5, 10, 5);
+    layout->setSpacing(4);
+    auto* caption = new QLabel(QStringLiteral("Click a fiducial to show it."), holder);
+    caption->setStyleSheet(QStringLiteral(
+        "QLabel { background: #d8f1f6; color: #123d4b; border: 1px solid #63b7c9; "
+        "border-radius: 3px; padding: 3px 4px; font-weight: 600; }"));
+    auto* picker = new RegistrationFiducialLayout(holder);
+    // Wide enough that the right triangle's labels still fit to its right:
+    // that triangle is centred at three quarters of the width.
+    picker->setFixedSize(720, 250);
+    picker->setMarkerCoordinateLabels(labels);
+    picker->setMarkerPositions(apIsMm);
+    picker->setSelectedIndex(treatmentFiducialPick_);
+    // No menu->close(): it would hide the blue selection just drawn.
+    picker->setSelectionHandler([this](int markerIndex) {
+        treatmentFiducialPick_ = markerIndex;
+        navigateToFiducialOnTreatment(markerIndex);
+    });
+    layout->addWidget(caption);
+    layout->addWidget(picker);
+    return holder;
+}
+
 void WorkflowWindow::navigateToRegistrationFiducial(int row) {
     // Table population selects its first row. That must not move the shared
     // MRI sliders while the operator is still reviewing a newly loaded image.
@@ -2493,7 +2561,7 @@ void WorkflowWindow::applyFiducialConfidenceToTable() {
                                                 "this one by hand.");
                         break;
                     case FiducialTrust::Caution:
-                        advice = QStringLiteral("Between 50% and 75% — unverified, not necessarily "
+                        advice = QStringLiteral("Between 50% and 70% — unverified, not necessarily "
                                                 "wrong. Check it in all three planes.");
                         break;
                     default:
@@ -2694,32 +2762,22 @@ void WorkflowWindow::detectFiducials() {
     showMriPreviews();
     updateRegistrationAvailability();
 
-    // First marker the detector vouches for, else the first found at all.
-    int firstTrusted = -1;
-    int firstDetected = -1;
-    for (int row = 0; row < 6; ++row) {
-        if (!detections[static_cast<std::size_t>(row)].found) continue;
-        if (firstDetected < 0) firstDetected = row;
-        if (fiducialConfidence_[static_cast<std::size_t>(row)] >= kFiducialTrustThreshold &&
-            firstTrusted < 0)
-            firstTrusted = row;
-    }
-    const int openOn = firstTrusted >= 0 ? firstTrusted : firstDetected;
-    if (openOn >= 0) {
-        ui_->registrationTable->setCurrentCell(openOn, 0);
-        ui_->registrationTable->selectRow(openOn);
-        ui_->registrationFiducialLayout->setSelectedIndex(openOn);
-        // setCurrentCell only navigates via currentCellChanged when the row
-        // actually changes, and row 0 is already current after population.
-        navigateToRegistrationFiducial(openOn);
-    }
+    // Always marker 1, never the first marker to clear the threshold: that
+    // let the confidences decide where the view landed.
+    constexpr int openOn = 0;
+    ui_->registrationTable->setCurrentCell(openOn, 0);
+    ui_->registrationTable->selectRow(openOn);
+    ui_->registrationFiducialLayout->setSelectedIndex(openOn);
+    // setCurrentCell only navigates via currentCellChanged when the row
+    // actually changes, and row 0 is already current after population.
+    navigateToRegistrationFiducial(openOn);
 
     QString summary = QStringLiteral("Detected %1 of 6 fiducials.").arg(detected);
     if (rejected > 0)
         summary += QStringLiteral(" %1 below 50%% confidence, marked in red — place those by hand.")
                        .arg(rejected);
     if (caution > 0)
-        summary += QStringLiteral(" %1 between 50%% and 75%%, marked in amber — unverified, check "
+        summary += QStringLiteral(" %1 between 50%% and 70%%, marked in amber — unverified, check "
                                   "in all three planes.")
                        .arg(caution);
     if (rejected == 0 && caution == 0)
@@ -3089,16 +3147,9 @@ void WorkflowWindow::showMriPreviews() {
                                   ui_->registrationCoronalPreview,
                                   ui_->registrationAxialPreview})
         view->setCoordinatePasteOptions(markerNames);
-    if (fiducials_.size() >= 6) {
-        std::array<QString, 6> coordinateLabels;
-        std::array<QPointF, 6> markerApIsMm;
-        for (std::size_t index = 0; index < 6; ++index) {
-            const Eigen::Vector3d rasMm = fiducials_[index].position * 1000.0;
-            coordinateLabels[index] = QStringLiteral("(%1, %2, %3)")
-                .arg(rasMm.x(), 0, 'f', 1).arg(rasMm.y(), 0, 'f', 1).arg(rasMm.z(), 0, 'f', 1);
-            // The diagram is a view down the LR axis, so it plots AP against IS.
-            markerApIsMm[index] = QPointF(rasMm.y(), rasMm.z());
-        }
+    std::array<QString, 6> coordinateLabels;
+    std::array<QPointF, 6> markerApIsMm;
+    if (fiducialDiagramData(&coordinateLabels, &markerApIsMm)) {
         ui_->imagingFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
         ui_->registrationFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
         ui_->imagingFiducialLayout->setMarkerPositions(markerApIsMm);
@@ -3588,9 +3639,7 @@ void WorkflowWindow::refresh() {
     if (selectedStage_ == beam::gui::WorkflowStage::Treatment && !ready) showMessage(QString::fromStdString(reason), true);
 }
 
-// Both pages carry the same line, so the clock is read once rather than per
-// label -- two reads can straddle a second boundary and print two load times
-// for one load.
+// One clock read for both labels, or they can straddle a second boundary.
 void WorkflowWindow::setMriPathDisplay(const QString& path) {
     const QString text = QStringLiteral("%1  ·  Loaded: %2")
                              .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate));

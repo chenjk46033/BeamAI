@@ -75,6 +75,7 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
     view->setMinimumSize(kMinViewerSide, kMinViewerSide);
     view->mirrorFrom(*source);
     view->setMeasurementPeer(source);
+    view->setContextWidgetFactory(source->contextWidgetFactory());
     layout->addWidget(view, 1);
 
     // The control row drives the pane's own widgets, so this window never

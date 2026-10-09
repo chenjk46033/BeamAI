@@ -27,6 +27,8 @@ struct WorkflowMriMarker {
 // Native image interaction used by the new workflow UI. Kept independent
 // from Beam's work-in-progress MriSliceView so its behavior can be reviewed
 // and tested on its own.
+class QMenu;
+
 class WorkflowMriView final : public QWidget {
 public:
     explicit WorkflowMriView(QWidget* parent = nullptr);
@@ -43,6 +45,8 @@ public:
     void setNavigationCrosshairVisible(bool visible);
     void adjustBrightness(double amount);
     void resetBrightness();
+    void adjustContrast(double amount);
+    void resetContrast();
     void resetView();
     void focusOn(QPointF normalizedPosition, double zoom = 3.0);
     void setPointPlacementEnabled(bool enabled);
@@ -59,6 +63,10 @@ public:
     // itself is the caller's to build -- this view knows nothing about the
     // slider row that drives it.
     void setOpenViewerHandler(std::function<void()> handler);
+
+    // Widget placed at the top of the context menu; nullptr adds nothing.
+    void setContextWidgetFactory(std::function<QWidget*(QMenu*)> factory);
+    const std::function<QWidget*(QMenu*)>& contextWidgetFactory() const;
 
     // On-image measurement. Line takes two clicks; Contour collects vertices
     // until a double-click, Enter, or a click back on the first one. Escape
@@ -164,4 +172,5 @@ private:
     std::optional<Eigen::Vector3d> hoverRasMm_;
     QPointer<WorkflowMriView> measurementPeer_;
     std::function<void()> openViewerHandler_;
+    std::function<QWidget*(QMenu*)> contextWidgetFactory_;
 };

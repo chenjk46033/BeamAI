@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QHash>
+#include <QPointF>
 #include <QSize>
 #include <array>
 #include <memory>
@@ -23,6 +24,7 @@ namespace Ui { class WorkflowShell; }
 class QGroupBox;
 class QLabel;
 class QListWidget;
+class QMenu;
 class QPushButton;
 class QProgressBar;
 class QRadioButton;
@@ -83,6 +85,13 @@ private:
     void initializeRegistrationGeometry();
     void populateRegistrationTable();
     void navigateToRegistrationFiducial(int row);
+    // Not focusTreatmentViewsOn: that writes targetMm_, and looking at a
+    // marker must not edit the planned target.
+    void navigateToFiducialOnTreatment(int index);
+    // False when fewer than six fiducials exist.
+    bool fiducialDiagramData(std::array<QString, 6>* labels,
+                             std::array<QPointF, 6>* apIsMm) const;
+    QWidget* buildFiducialPickerWidget(QMenu* menu);
     void performFiducialRegistration();
     void performCurrentPositionRegistration();
     void acceptFiducialRegistration();
@@ -212,10 +221,9 @@ private:
     QLabel* registrationStep2Label_ = nullptr;
     QPushButton* importFiducialsButton_ = nullptr;
     QPushButton* detectFiducialsButton_ = nullptr;
-    // The loaded MRI path, at the top of the Registration page. Carries the
-    // same line as the Imaging page's mriPathLabel; it exists because the
-    // operator placing fiducials should not have to go back a tab to check.
     QLabel* registrationMriPathLabel_ = nullptr;
+    // The picker is rebuilt per right-click, so the pick is remembered here.
+    int treatmentFiducialPick_ = -1;
     QPushButton* saveFiducialsButton_ = nullptr;
     QLabel* registrationStep3Label_ = nullptr;
     QLabel* arrayPositionLabel_ = nullptr;

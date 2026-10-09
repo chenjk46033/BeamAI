@@ -53,6 +53,18 @@ void WorkflowMriView::resetBrightness() {
     update();
 }
 
+void WorkflowMriView::adjustContrast(double amount) {
+    contrast_ = std::clamp(contrast_ + amount, 0.5, 3.0);
+    rebuildImage();
+    update();
+}
+
+void WorkflowMriView::resetContrast() {
+    contrast_ = 1.0;
+    rebuildImage();
+    update();
+}
+
 void WorkflowMriView::setMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity,
                                      bool flipHorizontal) {
     if (mask.size() == 0) {
@@ -175,6 +187,14 @@ void WorkflowMriView::setOpenViewerHandler(std::function<void()> handler) {
     openViewerHandler_ = std::move(handler);
 }
 
+void WorkflowMriView::setContextWidgetFactory(std::function<QWidget*(QMenu*)> factory) {
+    contextWidgetFactory_ = std::move(factory);
+}
+
+const std::function<QWidget*(QMenu*)>& WorkflowMriView::contextWidgetFactory() const {
+    return contextWidgetFactory_;
+}
+
 void WorkflowMriView::mirrorFrom(const WorkflowMriView& source) {
     slice_ = source.slice_;
     image_ = source.image_;
@@ -282,14 +302,10 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
                              QPointF(point.x(), displayed.bottom()));
         } else {
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(marker.color, marker.draggable ? 2.5 : 1.5));
-            painter.drawEllipse(point, marker.draggable ? 8.0 : 5.0, marker.draggable ? 8.0 : 5.0);
-            if (marker.draggable) {
-                painter.drawLine(point + QPointF(-11, 0), point + QPointF(-4, 0));
-                painter.drawLine(point + QPointF(4, 0), point + QPointF(11, 0));
-                painter.drawLine(point + QPointF(0, -11), point + QPointF(0, -4));
-                painter.drawLine(point + QPointF(0, 4), point + QPointF(0, 11));
-            }
+            painter.setPen(QPen(marker.color, 1.5));
+            // draggable does not change the drawing: the grab radius below is
+            // a fixed 14 px, and a wider ring hid the donut underneath it.
+            painter.drawEllipse(point, 5.0, 5.0);
             if (!marker.label.isEmpty()) {
                 const QRectF labelRect(point + QPointF(7, -17), QSizeF(105, 18));
                 painter.fillRect(labelRect, QColor(150, 25, 35, 205));
@@ -452,6 +468,13 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
     // otherwise produce an empty or changed coordinate.
     const auto coordinateAtContext = rasAtWidgetPosition(event->pos());
     QMenu menu(this);
+    if (contextWidgetFactory_) {
+        if (QWidget* supplied = contextWidgetFactory_(&menu)) {
+            auto* suppliedAction = new QWidgetAction(&menu);
+            suppliedAction->setDefaultWidget(supplied);
+            menu.addAction(suppliedAction);
+        }
+    }
     if (markerPickedHandler_) {
         const QString coordinateText = coordinateAtContext
             ? QStringLiteral("Mouse point: X %1 mm, Y %2 mm, Z %3 mm")
@@ -575,25 +598,39 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
     auto* controlsAction = new QWidgetAction(&menu);
     controlsAction->setDefaultWidget(container);
     menu.addAction(controlsAction);
-    const auto redraw = [this] { rebuildImage(); update(); };
-    connect(brightnessDown, &QToolButton::clicked, this, [this, redraw] {
-        brightness_ = std::clamp(brightness_ - 0.1, 0.25, 2.5); redraw();
+    // Brightness and contrast belong to the pane, like measurements do, so a
+    // change made in a detached window shows in both.
+    WorkflowMriView* const display = measurementOwner();
+    const auto redraw = [this, display] { if (display != this) mirrorFrom(*display); };
+    connect(brightnessDown, &QToolButton::clicked, this, [display, redraw] {
+        display->adjustBrightness(-0.1); redraw();
     });
-    connect(brightnessUp, &QToolButton::clicked, this, [this, redraw] {
-        brightness_ = std::clamp(brightness_ + 0.1, 0.25, 2.5); redraw();
+    connect(brightnessUp, &QToolButton::clicked, this, [display, redraw] {
+        display->adjustBrightness(0.1); redraw();
     });
-    connect(brightnessReset, &QToolButton::clicked, this, [this, redraw] { brightness_ = 1.0; redraw(); });
-    connect(contrastDown, &QToolButton::clicked, this, [this, redraw] {
-        contrast_ = std::clamp(contrast_ - 0.1, 0.5, 3.0); redraw();
+    connect(brightnessReset, &QToolButton::clicked, this, [display, redraw] {
+        display->resetBrightness(); redraw();
     });
-    connect(contrastUp, &QToolButton::clicked, this, [this, redraw] {
-        contrast_ = std::clamp(contrast_ + 0.1, 0.5, 3.0); redraw();
+    connect(contrastDown, &QToolButton::clicked, this, [display, redraw] {
+        display->adjustContrast(-0.1); redraw();
     });
-    connect(contrastReset, &QToolButton::clicked, this, [this, redraw] { contrast_ = 1.0; redraw(); });
+    connect(contrastUp, &QToolButton::clicked, this, [display, redraw] {
+        display->adjustContrast(0.1); redraw();
+    });
+    connect(contrastReset, &QToolButton::clicked, this, [display, redraw] {
+        display->resetContrast(); redraw();
+    });
     menu.addSeparator();
     QAction* resetAll = menu.addAction(QStringLiteral("Reset zoom, pan, brightness, and contrast"));
     QAction* selected = menu.exec(event->globalPos());
-    if (selected == resetAll) resetView();
+    if (selected == resetAll) {
+        resetView();
+        if (display != this) {
+            display->resetBrightness();
+            display->resetContrast();
+            mirrorFrom(*display);
+        }
+    }
 }
 
 void WorkflowMriView::clampPan() {

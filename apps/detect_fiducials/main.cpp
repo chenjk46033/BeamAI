@@ -25,6 +25,9 @@
 
 namespace {
 
+// Must match kFiducialTrustThreshold in workflow_window.cpp.
+constexpr double kTrustThreshold = 0.70;
+
 Eigen::MatrixXd readRectCsv(const std::string& path) {
     std::ifstream file(path);
     if (!file) throw std::runtime_error("cannot open " + path);
@@ -152,11 +155,11 @@ int main(int argc, char** argv) {
                 total += distance;
                 ++scored;
             }
-            if (found.confidence < 0.75) ++flagged;
+            if (found.confidence < kTrustThreshold) ++flagged;
             std::printf("%-3zu %-11s %9.2f %9.2f %9.2f %6.1f%% %7.2f %7.1f %8s %s\n", index + 1,
                         found.name.c_str(), found.positionMm.x(), found.positionMm.y(),
                         found.positionMm.z(), 100.0 * found.confidence, found.stability,
-                        found.radiusMm, error, found.confidence < 0.75 ? " UNTRUSTED" : "");
+                        found.radiusMm, error, found.confidence < kTrustThreshold ? " UNTRUSTED" : "");
         }
         // What the per-row "Detect this fiducial" does, from three starts.
         std::printf("\nper-marker refine (12 mm radius), from three starting points:\n");
@@ -217,8 +220,8 @@ int main(int argc, char** argv) {
 
 
         if (scored > 0) {
-            std::printf("\nmean error %.2f mm over %d scored markers; %d flagged under 75%%\n",
-                        total / scored, scored, flagged);
+            std::printf("\nmean error %.2f mm over %d scored markers; %d flagged under %.0f%%\n",
+                        total / scored, scored, flagged, kTrustThreshold * 100.0);
         }
         // What the triangle passed over. The workflow app draws these as plain
         // circles so an operator can see the alternatives to a weak result.

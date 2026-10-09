@@ -2,6 +2,7 @@
 
 #include <QMouseEvent>
 #include <QPainter>
+#include <QFontMetricsF>
 #include <QPainterPath>
 
 #include <algorithm>
@@ -160,6 +161,10 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
     QFont labelFont = painter.font();
     labelFont.setBold(false);
     labelFont.setPointSizeF(std::max(8.0, labelFont.pointSizeF() - 1.0));
+    QFont coordinateFont = labelFont;
+    coordinateFont.setPointSizeF(std::max(7.0, labelFont.pointSizeF() - 1.0));
+    const QFontMetricsF labelMetrics(labelFont);
+    const QFontMetricsF coordinateMetrics(coordinateFont);
     painter.setFont(labelFont);
     for (int index = 0; index < 6; ++index) {
         const bool selected = index == selectedIndex_;
@@ -167,16 +172,27 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         painter.setBrush(selected ? QColor(92, 205, 229) : QColor(255, 245, 246));
         painter.drawEllipse(points[index], selected ? 8.0 : 6.0, selected ? 8.0 : 6.0);
         painter.setPen(selected ? QColor(13, 85, 109) : QColor(75, 48, 52));
-        const double labelX = points[index].x() + 10.0;
+
+        // Flip inward rather than run off the pane edge.
+        double textWidth = labelMetrics.horizontalAdvance(names[index]);
+        if (!coordinateLabels_[index].isEmpty())
+            textWidth = std::max(
+                textWidth, coordinateMetrics.horizontalAdvance(coordinateLabels_[index]));
+        const bool flip = points[index].x() + 10.0 + textWidth > width() - 3.0;
+        const double labelX = flip ? std::max(3.0, points[index].x() - 10.0 - textWidth)
+                                   : points[index].x() + 10.0;
         const double labelY = points[index].y() - 10.0;
-        painter.drawText(QRectF(labelX, labelY, width() / 2.0 - 55.0, 22.0), Qt::AlignVCenter, names[index]);
+        const Qt::Alignment alignment =
+            Qt::AlignVCenter | (flip ? Qt::AlignRight : Qt::AlignLeft);
+
+        const double nameHeight = labelMetrics.height();
+        painter.drawText(QRectF(labelX, labelY, textWidth, nameHeight), alignment, names[index]);
         if (!coordinateLabels_[index].isEmpty()) {
-            QFont coordinateFont = labelFont;
-            coordinateFont.setPointSizeF(std::max(7.0, labelFont.pointSizeF() - 1.0));
             painter.setFont(coordinateFont);
             painter.setPen(QColor(95, 111, 120));
-            painter.drawText(QRectF(labelX, labelY + 15.0, width() / 2.0 - 55.0, 18.0),
-                             Qt::AlignVCenter, coordinateLabels_[index]);
+            painter.drawText(QRectF(labelX, labelY + nameHeight, textWidth,
+                                    coordinateMetrics.height()),
+                             alignment, coordinateLabels_[index]);
             painter.setFont(labelFont);
         }
     }
