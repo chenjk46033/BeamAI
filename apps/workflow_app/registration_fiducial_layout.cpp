@@ -188,8 +188,8 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
             (coordinateLabels_[index].isEmpty() ? 0.0 : coordinateMetrics.ascent() + 3.0);
         const int base = (index / 3) * 3;
         const QPointF centroid = (points[base] + points[base + 1] + points[base + 2]) / 3.0;
-        const double xLo = base == 0 ? 3.0 : width() / 2.0 + 3.0;
-        const double xHi = base == 0 ? width() / 2.0 - 3.0 : width() - 3.0;
+        const double xLo = 3.0;
+        const double xHi = width() - 3.0;
         bool toLeft = points[index].x() < centroid.x();
         if (toLeft && points[index].x() - 10.0 - textWidth < xLo) toLeft = false;
         if (!toLeft && points[index].x() + 10.0 + textWidth > xHi) toLeft = true;
@@ -205,14 +205,14 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
     }
 
     // Two vertices at nearly the same height -- markers 5 and 6 are 2 mm apart
-    // on some scans -- would otherwise land in one strip. Move the later block
+    // on some scans -- would otherwise land in one strip. Compared across both
+    // triangles, since labels are no longer confined to one half. Move the later block
     // clear of the earlier, below it when the pane has room and above it when
     // it does not.
     for (int index = 1; index < 6; ++index) {
         for (int pass = 0; pass < 3; ++pass) {
             bool moved = false;
             for (int other = 0; other < index; ++other) {
-                if (index / 3 != other / 3) continue;
                 if (!placements[index].box.intersects(placements[other].box)) continue;
                 const double below = placements[other].box.bottom() + 2.0;
                 if (below + placements[index].box.height() <= height() - 2.0)

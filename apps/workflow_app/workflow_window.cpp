@@ -3188,12 +3188,11 @@ void WorkflowWindow::showMriPreviews() {
                                   ui_->registrationCoronalPreview,
                                   ui_->registrationAxialPreview})
         view->setCoordinatePasteOptions(markerNames);
-    // Names only in this column: three two-line labels per triangle force the
-    // triangle down to a size where the angle numbers collide. The table
-    // beside it carries the same LR/AP/IS values; the context-menu copy of
-    // the diagram has no table next to it, so that one shows them.
+    std::array<QString, 6> coordinateLabels;
     std::array<QPointF, 6> markerApIsMm;
-    if (fiducialDiagramData(nullptr, &markerApIsMm)) {
+    if (fiducialDiagramData(&coordinateLabels, &markerApIsMm)) {
+        ui_->imagingFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
+        ui_->registrationFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
         ui_->imagingFiducialLayout->setMarkerPositions(markerApIsMm);
         ui_->registrationFiducialLayout->setMarkerPositions(markerApIsMm);
     }
