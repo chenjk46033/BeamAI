@@ -223,9 +223,14 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
             }
             if (!moved) break;
         }
-        placements[index].box.moveTop(
-            std::clamp(placements[index].box.top(), 2.0,
-                       std::max(2.0, height() - placements[index].box.height() - 2.0)));
+    }
+
+    // Every label, marker 1 included: it is the top vertex, so its block is
+    // placed above the point and would otherwise sit on the pane border.
+    for (Placement& at : placements) {
+        constexpr double kInset = 10.0;
+        at.box.moveTop(std::clamp(at.box.top(), kInset,
+                                  std::max(kInset, height() - at.box.height() - kInset)));
     }
 
     for (int index = 0; index < 6; ++index) {

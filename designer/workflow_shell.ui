@@ -1570,7 +1570,7 @@
                                 <bool>true</bool>
                               </property>
                               <property name="styleSheet">
-                                <string>padding: 12px; background: #eef2f4; border-radius: 5px;</string>
+                                <string>padding: 9px 10px; background: #eef2f4; border-radius: 5px;</string>
                               </property>
                             </widget>
                           </item>

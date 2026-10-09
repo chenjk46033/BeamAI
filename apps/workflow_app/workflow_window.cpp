@@ -117,7 +117,10 @@ protected:
         const int handleHalf = style()->pixelMetric(QStyle::PM_SliderLength, &option, this) / 2;
         for (int value = low; value <= high; ++value) {
             const bool selected = (value == this->value());
-            painter.setPen(QPen(selected ? QColor("#ffe08a") : QColor("#b9cbd1"), 1));
+            const QColor ink = !isEnabled() ? QColor("#6a767c")
+                               : selected   ? QColor("#ffe08a")
+                                            : QColor("#b9cbd1");
+            painter.setPen(QPen(ink, 1));
             QFont labelFont(font().family(), 11);
             labelFont.setBold(selected);
             painter.setFont(labelFont);
@@ -487,6 +490,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationFiducialLayout->setMaximumHeight(kRegistrationColumnHeight);
     ui_->registrationFiducialLayout->setFixedHeight(kRegistrationColumnHeight);
     markerDiagramPanel->setMinimumHeight(264 + kRegistrationColumnHeight - 120);
+    // The Imaging tab shows the same diagram; give it the same box so the two
+    // tabs do not draw the triangles at different scales. The .ui pins it to
+    // 120, which is why they differed.
+    ui_->imagingFiducialLayout->setMinimumWidth(300);
+    ui_->imagingFiducialLayout->setMinimumHeight(0);
+    ui_->imagingFiducialLayout->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    ui_->imagingFiducialLayout->setMaximumHeight(kRegistrationColumnHeight);
+    ui_->imagingFiducialLayout->setFixedHeight(kRegistrationColumnHeight);
     markerDiagramPanel->setMaximumHeight(QWIDGETSIZE_MAX);
     // Every viewer column on every page is built the same way: tight margins
     // around the viewer, then the slider row, then a compact centred slice
@@ -684,7 +695,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             "QSlider::sub-page:horizontal { background: #1686a8; border-radius: 3px; } "
             "QSlider::groove:vertical { width: 7px; background: #24495a; border: 1px solid #39758e; border-radius: 3px; } "
             "QSlider::handle:vertical { height: 11px; margin: 0 -6px; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 2px; } "
-            "QSlider::add-page:vertical { background: #1686a8; border-radius: 3px; }"));
+            "QSlider::add-page:vertical { background: #1686a8; border-radius: 3px; } "
+            "QSlider::groove:disabled { background: #2b3338; border-color: #46525a; } "
+            "QSlider::handle:disabled { background: #5a656b; border-color: #78848a; } "
+            "QSlider::sub-page:disabled { background: #3b474e; } "
+            "QSlider::add-page:disabled { background: #3b474e; }"));
         // After setStyleSheet: a stylesheet installs QStyleSheetStyle and would
         // otherwise discard this proxy.
         slider->setStyle(new ClickToPositionStyle(slider->style()));
@@ -757,7 +772,17 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // Registration feedback belongs inside the Registration page, below its
     // acceptance action, rather than in the global footer line.
     ui_->registrationResult->show();
-    markerTableLayout->addWidget(ui_->registrationResult);
+    // Word-wrapped, so it needs room for two lines plus its padding; the
+    // column's other rows are Fixed and would otherwise leave it showing
+    // background only.
+    // Two wrapped lines plus padding, held at a fixed height. A content-
+    // sized label is not reliable here: the column carries a stretch, so a
+    // Minimum policy collapsed it to nothing, and an expanding one let it
+    // swallow the spare height and float the text inside it.
+    ui_->registrationResult->setWordWrap(true);
+    ui_->registrationResult->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    ui_->registrationResult->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    ui_->registrationResult->setFixedHeight(50);
     // BeamV0's drawROIs.m keeps a running readout of where the array actually
     // is:  app.TargetPosXYZLabel.Text = ['Array Pos X: ', ...]. Without it
     // there is nothing numeric on this page to check a registration against,
@@ -771,6 +796,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QLabel { font-family: 'Consolas','Courier New',monospace; font-size: 12px; color: #d7e3e7; "
         "background: #24323a; border: 1px solid #3c5059; border-radius: 4px; padding: 5px 8px; }"));
     markerTableLayout->addWidget(arrayPositionLabel_);
+    markerTableLayout->addWidget(ui_->registrationResult);
+    markerTableLayout->addStretch(1);
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
         connect(slider, &QSlider::valueChanged, this, [this] {
@@ -2369,12 +2396,18 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
     fiducialLocated_[static_cast<std::size_t>(row)] = true;
     fiducialConfirmed_[static_cast<std::size_t>(row)] = false;
     fiducials_[static_cast<std::size_t>(row)].position = placed / 1000.0;
+    const bool hadFit = registrationFitApplied();
     setRegistrationPhase(RegistrationPhase::Locating);
     ui_->registrationTable->item(row, 4)->setText(QStringLiteral("Located"));
     showMriPreviews();
     workflow_.change(beam::gui::WorkflowStage::Registration,
                      "Fiducial measurements changed; later approvals require review.");
-    showMessage(QStringLiteral("Fiducial located. Verify it in another plane, then confirm the selected fiducial."), false);
+    showMessage(hadFit ? QStringLiteral("Fiducial located. Moving it voided the MRI fit, so the Step 3 "
+                                        "lock-position sliders are disabled until you register to MRI "
+                                        "fiducials again.")
+                       : QStringLiteral("Fiducial located. Verify it in another plane, then confirm the "
+                                        "selected fiducial."),
+                hadFit);
     refresh();
     updateRegistrationAvailability();
 }
@@ -3077,7 +3110,17 @@ void WorkflowWindow::performCurrentPositionRegistration() {
     }
     if (leftHorizontalPositionSlider_->value() != rightHorizontalPositionSlider_->value() ||
         leftVerticalPositionSlider_->value() != rightVerticalPositionSlider_->value()) {
-        const QString message = QStringLiteral("Subject Left and Subject Right lock-position sliders must match before Step 3 can be registered.");
+        // Naming the four notches matters: the panels sit side by side and a
+        // one-notch difference is easy to miss, and this is the only reason a
+        // pressed Register button can leave Step 4 disabled.
+        const QString message =
+            QStringLiteral("Step 3 needs both panels on the same notches. Subject Left is at "
+                           "horizontal %1, vertical %2; Subject Right is at horizontal %3, "
+                           "vertical %4.")
+                .arg(leftHorizontalPositionSlider_->value())
+                .arg(leftVerticalPositionSlider_->value())
+                .arg(rightHorizontalPositionSlider_->value())
+                .arg(rightVerticalPositionSlider_->value());
         ui_->registrationResult->setText(message);
         showMessage(message, true);
         return;
@@ -3673,10 +3716,30 @@ void WorkflowWindow::setMriPathDisplay(const QString& path) {
 }
 
 void WorkflowWindow::showMessage(const QString& text, bool error) {
+    // An empty reason would paint a bare coloured box, which reads as a
+    // warning with the words missing.
+    if (text.trimmed().isEmpty()) return;
     ui_->workflowMessage->setText(text);
     ui_->workflowMessage->setStyleSheet(error
         ? QStringLiteral("padding: 10px; color: #845006; background: #fff4dc; border-radius: 5px;")
         : QStringLiteral("padding: 10px; color: #12663f; background: #e8f5ed; border-radius: 5px;"));
+    // selectStage hides the footer line on Registration, so a message raised
+    // there lands on a hidden widget. Mirror it onto the page's own result
+    // label, which is where the operator is already reading.
+    if (selectedStage_ != beam::gui::WorkflowStage::Registration || !ui_->registrationResult)
+        return;
+    if (error) {
+        ui_->registrationResult->setText(text);
+        ui_->registrationResult->setStyleSheet(
+            QStringLiteral("padding: 9px 10px; color: #845006; background: #fff4dc; "
+                           "border: 1px solid #e0b355; border-radius: 5px;"));
+        return;
+    }
+    // Success keeps whatever the caller wrote -- several paths put a longer
+    // instruction there than the footer line carries -- but must drop any
+    // warning styling left by the message before it.
+    ui_->registrationResult->setStyleSheet(
+        QStringLiteral("padding: 9px 10px; background: #eef2f4; border-radius: 5px;"));
 }
 
 }  // namespace beam::app
