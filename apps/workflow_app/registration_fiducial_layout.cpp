@@ -182,10 +182,10 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         if (!coordinateLabels_[index].isEmpty())
             textWidth = std::max(
                 textWidth, coordinateMetrics.horizontalAdvance(coordinateLabels_[index]));
-        const double nameHeight = labelMetrics.height();
+        const double nameHeight = labelMetrics.ascent() + 3.0;
         const double blockHeight =
             nameHeight +
-            (coordinateLabels_[index].isEmpty() ? 0.0 : coordinateMetrics.height());
+            (coordinateLabels_[index].isEmpty() ? 0.0 : coordinateMetrics.ascent() + 3.0);
         const int base = (index / 3) * 3;
         const QPointF centroid = (points[base] + points[base + 1] + points[base + 2]) / 3.0;
         const double xLo = base == 0 ? 3.0 : width() / 2.0 + 3.0;
@@ -242,7 +242,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
             painter.setFont(coordinateFont);
             painter.setPen(QColor(95, 111, 120));
             painter.drawText(QRectF(at.box.left(), at.box.top() + at.nameHeight, at.box.width(),
-                                    coordinateMetrics.height()),
+                                    coordinateMetrics.ascent() + 3.0),
                              at.alignment, coordinateLabels_[index]);
             painter.setFont(labelFont);
         }

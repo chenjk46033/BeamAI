@@ -2297,8 +2297,9 @@ void WorkflowWindow::navigateToFiducialOnTreatment(int index) {
 }
 
 QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
+    std::array<QString, 6> labels;
     std::array<QPointF, 6> apIsMm;
-    if (!fiducialDiagramData(nullptr, &apIsMm)) return nullptr;
+    if (!fiducialDiagramData(&labels, &apIsMm)) return nullptr;
     auto* holder = new QWidget(menu);
     auto* layout = new QVBoxLayout(holder);
     // Match the menu's other embedded widgets.
@@ -2309,7 +2310,8 @@ QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
         "QLabel { background: #d8f1f6; color: #123d4b; border: 1px solid #63b7c9; "
         "border-radius: 3px; padding: 3px 4px; font-weight: 600; }"));
     auto* picker = new RegistrationFiducialLayout(holder);
-    picker->setFixedSize(320, 190);
+    picker->setFixedSize(330, 230);
+    picker->setMarkerCoordinateLabels(labels);
     picker->setMarkerPositions(apIsMm);
     picker->setSelectedIndex(treatmentFiducialPick_);
     // No menu->close(): it would hide the blue selection just drawn.
@@ -3143,9 +3145,10 @@ void WorkflowWindow::showMriPreviews() {
                                   ui_->registrationCoronalPreview,
                                   ui_->registrationAxialPreview})
         view->setCoordinatePasteOptions(markerNames);
-    // No coordinate text on the diagram: three two-line labels per triangle do
-    // not fit beside it in this column, and the registration table alongside
-    // carries the same LR/AP/IS numbers.
+    // Names only in this column: three two-line labels per triangle force the
+    // triangle down to a size where the angle numbers collide. The table
+    // beside it carries the same LR/AP/IS values; the context-menu copy of
+    // the diagram has no table next to it, so that one shows them.
     std::array<QPointF, 6> markerApIsMm;
     if (fiducialDiagramData(nullptr, &markerApIsMm)) {
         ui_->imagingFiducialLayout->setMarkerPositions(markerApIsMm);
