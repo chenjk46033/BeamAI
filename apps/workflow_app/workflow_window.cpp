@@ -1270,6 +1270,43 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->loadNiftiButton, &QPushButton::clicked, this, [this] { chooseNifti(); });
     connect(ui_->loadDicomButton, &QPushButton::clicked, this, [this] { chooseDicomDirectory(); });
     connect(ui_->loadBeamSessionButton, &QPushButton::clicked, this, [this] { chooseBeamSession(); });
+    // The three stay as hidden drivers so their connections hold.
+    loadMriButton_ = new QToolButton(ui_->imagingGroup);
+    loadMriButton_->setPopupMode(QToolButton::MenuButtonPopup);
+    loadMriButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    loadMriButton_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    loadMriButton_->setMinimumHeight(ui_->loadDicomButton->sizeHint().height());
+    // The label centres across the whole button, menu section included, so
+    // without matching right padding it reads as pushed right.
+    loadMriButton_->setStyleSheet(ui_->loadDicomButton->styleSheet().replace(
+        QStringLiteral("QPushButton"), QStringLiteral("QToolButton")) +
+        QStringLiteral(""
+                       " QToolButton::menu-button { width: 18px; }"));
+    const auto loadAction = [this](QPushButton* driver) {
+        auto* action = new QAction(driver->text(), this);
+        action->setToolTip(driver->toolTip());
+        connect(action, &QAction::triggered, driver, &QPushButton::click);
+        return action;
+    };
+    auto* loadMenu = new QMenu(loadMriButton_);
+    QAction* dicomAction = loadAction(ui_->loadDicomButton);
+    loadMenu->addAction(dicomAction);
+    loadMenu->addSeparator();
+    loadMenu->addAction(loadAction(ui_->loadNiftiButton));
+    loadMenu->addAction(loadAction(ui_->loadBeamSessionButton));
+    loadMriButton_->setMenu(loadMenu);
+    loadMriButton_->setDefaultAction(dicomAction);
+    // Qt centres the label over the whole button and paints the menu section
+    // on top of its right end, so the text reads as pushed right. Neither
+    // padding-right nor text-align reaches a QToolButton's label; padding the
+    // string does. Set after setDefaultAction, which assigns the text.
+    loadMriButton_->setText(dicomAction->text() + QStringLiteral("    "));
+    for (QPushButton* driver : {ui_->loadDicomButton, ui_->loadNiftiButton,
+                                ui_->loadBeamSessionButton}) {
+        ui_->loadMriButtons->removeWidget(driver);
+        driver->hide();
+    }
+    ui_->loadMriButtons->insertWidget(0, loadMriButton_);
     connect(ui_->showFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->registrationShowFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showLinkedNavigationCheckBox, &QCheckBox::toggled, this, [this](bool visible) {
@@ -1864,6 +1901,7 @@ void WorkflowWindow::chooseBeamSession() {
     progress->setAutoReset(false);
     progress->show();
     ui_->loadBeamSessionButton->setEnabled(false);
+    if (loadMriButton_) loadMriButton_->setEnabled(false);
 
     using Import = beam::infra::mat::LegacyBeamMri;
     struct ImportState { std::optional<Import> value; std::exception_ptr error; };
@@ -1876,6 +1914,7 @@ void WorkflowWindow::chooseBeamSession() {
         progress->close();
         progress->deleteLater();
         ui_->loadBeamSessionButton->setEnabled(true);
+        if (loadMriButton_) loadMriButton_->setEnabled(true);
         try {
             if (state->error) std::rethrow_exception(state->error);
             auto imported = std::move(state->value.value());

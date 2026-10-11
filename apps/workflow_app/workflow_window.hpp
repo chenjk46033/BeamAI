@@ -220,6 +220,7 @@ private:
     QPushButton* importFiducialsButton_ = nullptr;
     QPushButton* detectFiducialsButton_ = nullptr;
     QToolButton* fiducialActionsButton_ = nullptr;
+    QToolButton* loadMriButton_ = nullptr;
     QLabel* registrationMriPathLabel_ = nullptr;
     // The picker is rebuilt per right-click, so the pick is remembered here.
     int treatmentFiducialPick_ = -1;
