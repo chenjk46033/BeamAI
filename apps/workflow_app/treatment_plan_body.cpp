@@ -1370,15 +1370,11 @@ void WorkflowWindow::openTreatmentLibrary() {
     if (!treatmentProtocolCombo_->currentText().isEmpty())
         loadTreatmentProtocol(treatmentProtocolCombo_->currentText());
     updateTreatmentPlanSummary();
-    // Save in the dialog has to mean saved. Leaving it in memory for the
-    // tab's Save protocols button meant edits vanished on restart.
     saveTreatmentTargetStore();
 }
 
 
-// The grid is the target's own stimParamTable; without this its rows live only
-// in targetSonications_ and are lost on restart. X/Y/Z stay out: placement is
-// per-patient session data, which the store deliberately does not hold.
+// X/Y/Z stay out: the store holds no placement.
 void WorkflowWindow::writeTargetPointsToStore() {
     if (targetListWidget_ == nullptr) return;
     saveCurrentTargetSonications();

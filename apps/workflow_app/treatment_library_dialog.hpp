@@ -13,10 +13,6 @@ QT_END_NAMESPACE
 
 namespace beam::app {
 
-// Editing the Target List and the protocols is configuration, shared across
-// patients, not part of treating one. It happens here rather than in the
-// Treatment plan body so a slip during a session cannot delete a target.
-//
 // Edits a copy; the caller takes store() only when the dialog is accepted.
 class TreatmentLibraryDialog final : public QDialog {
 public:

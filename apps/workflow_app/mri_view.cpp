@@ -135,7 +135,19 @@ void WorkflowMriView::setSlice(const Eigen::MatrixXd& slice, bool flipHorizontal
     flipHorizontal_ = flipHorizontal;
     if (slice_.size() > 0) {
         dataMin_ = slice_.minCoeff();
-        dataMax_ = slice_.maxCoeff();
+        const double sliceMax = slice_.maxCoeff();
+        const double floor = dataMin_ + (sliceMax - dataMin_) * 0.05;
+        std::vector<double> tissue;
+        tissue.reserve(static_cast<std::size_t>(slice_.size()) / 2);
+        for (Eigen::Index k = 0; k < slice_.size(); ++k)
+            if (slice_.data()[k] > floor) tissue.push_back(slice_.data()[k]);
+        if (tissue.size() > 200) {
+            const std::size_t hi = tissue.size() * 98 / 100;
+            std::nth_element(tissue.begin(), tissue.begin() + static_cast<std::ptrdiff_t>(hi), tissue.end());
+            dataMax_ = tissue[hi];
+        } else {
+            dataMax_ = sliceMax;
+        }
         if (dataMax_ <= dataMin_) dataMax_ = dataMin_ + 1.0;
     }
     rebuildImage();
@@ -253,7 +265,7 @@ void WorkflowMriView::mirrorFrom(const WorkflowMriView& source) {
     update();
 }
 
-constexpr double kDisplayGamma = 0.65;
+constexpr double kDisplayGamma = 0.80;
 
 void WorkflowMriView::rebuildImage() {
     if (slice_.size() == 0) {

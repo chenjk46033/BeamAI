@@ -120,8 +120,7 @@ void TreatmentTargetStore::loadProtocols(const std::string& path) {
             found = std::prev(loaded.end());
         }
 
-        // The placeholder saveProtocols writes for an empty protocol: it
-        // declares the name and schedules nothing.
+        // Placeholder row for a protocol with no entries.
         if (row[2].empty() && row[1] == "0") continue;
         TreatmentProtocolEntry entry;
         entry.order = static_cast<int>(toDouble(row[1], path, "order"));
@@ -228,8 +227,7 @@ void TreatmentTargetStore::saveProtocols(const std::string& path) const {
             "target's own.\n"
          << "protocol,order,target,amplitude,duration\n";
     for (const TreatmentProtocolDefinition& definition : protocols_) {
-        // A protocol with no entries still has to survive the round trip; a
-        // newly created one has none until targets are scheduled into it.
+        // An empty protocol must still round-trip.
         if (definition.entries.empty()) {
             file << definition.name << ",0,,," << '\n';
             continue;
