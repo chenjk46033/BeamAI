@@ -253,6 +253,8 @@ void WorkflowMriView::mirrorFrom(const WorkflowMriView& source) {
     update();
 }
 
+constexpr double kDisplayGamma = 0.65;
+
 void WorkflowMriView::rebuildImage() {
     if (slice_.size() == 0) {
         image_ = {};
@@ -267,8 +269,9 @@ void WorkflowMriView::rebuildImage() {
     for (int y = 0; y < result.height(); ++y) {
         auto* row = result.scanLine(y);
         for (int x = 0; x < result.width(); ++x) {
-            const double normalized = (slice_(y, x) - dataMin_) / range;
-            const double displayed = (normalized - 0.5) * contrast_ + 0.5 + brightnessOffset;
+            const double normalized = std::clamp((slice_(y, x) - dataMin_) / range, 0.0, 1.0);
+            const double toned = std::pow(normalized, kDisplayGamma);
+            const double displayed = (toned - 0.5) * contrast_ + 0.5 + brightnessOffset;
             row[x] = static_cast<unsigned char>(std::clamp(displayed * 255.0, 0.0, 255.0));
         }
     }
