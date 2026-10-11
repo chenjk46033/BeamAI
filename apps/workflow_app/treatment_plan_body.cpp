@@ -25,6 +25,8 @@
 
 #include "workflow_window.hpp"
 
+#include "treatment_library_dialog.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -195,55 +197,10 @@ void WorkflowWindow::addTargetListRow(const QString& name, int atRow) {
     row->installEventFilter(this);
     nameLabel->installEventFilter(this);
 
-    const auto addIcon = [&](QChar glyph, const QString& tip) {
-        auto* button = new QToolButton(row);
-        button->setText(QString(glyph));
-        button->setToolTip(tip);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setStyleSheet(QString::fromLatin1(kRowIconStyle));
-        // Pressing an icon also selects its row, so the icon and the grid
-        // below always refer to the same target.
-        button->installEventFilter(this);
-        rowLayout->addWidget(button);
-        return button;
-    };
-    QToolButton* renameButton = addIcon(QChar(0x270E), QStringLiteral("Rename this target"));
-    QToolButton* createButton = addIcon(QChar(0x002B), QStringLiteral("Create a new target below this one"));
-    QToolButton* deleteButton = addIcon(QChar(0x2715), QStringLiteral("Delete this target"));
 
     item->setSizeHint(row->sizeHint());
     targetListWidget_->setItemWidget(item, row);
 
-    connect(renameButton, &QToolButton::clicked, this, [this, item, nameLabel] {
-        bool ok = false;
-        const QString renamed = QInputDialog::getText(this, QStringLiteral("Rename target"),
-                                                       QStringLiteral("Name:"), QLineEdit::Normal,
-                                                       targetListName(item), &ok);
-        if (!ok || renamed.isEmpty()) return;
-        item->setData(kTargetNameRole, renamed);
-        nameLabel->setText(renamed);
-        updateTreatmentPlanSummary();
-    });
-    connect(createButton, &QToolButton::clicked, this, [this, item] {
-        std::vector<std::string> existing;
-        for (int i = 0; i < targetListWidget_->count(); ++i)
-            existing.push_back(targetListName(targetListWidget_->item(i)).toStdString());
-        const int insertAt = targetListWidget_->row(item) + 1;
-        addTargetListRow(QString::fromStdString(beam::gui::newProtocolName(existing)), insertAt);
-        targetListWidget_->setCurrentRow(insertAt);
-    });
-    connect(deleteButton, &QToolButton::clicked, this, [this, item] {
-        if (targetListWidget_->count() <= 1) {
-            showMessage(QStringLiteral("The last target cannot be deleted."), true);
-            return;
-        }
-        // Deferred: removing the item destroys the row widget this button
-        // lives in, which must not happen while its own signal is emitting.
-        QTimer::singleShot(0, this, [this, item] {
-            const int row = targetListWidget_->row(item);
-            if (row >= 0) delete targetListWidget_->takeItem(row);
-        });
-    });
 }
 
 void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
@@ -373,16 +330,14 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         return button;
     };
-    newProtocolButton_ = makeProtocolButton(QStringLiteral("New"), QStringLiteral("Create a new, empty protocol"));
-    renameProtocolButton_ = makeProtocolButton(QStringLiteral("Rename"), QStringLiteral("Rename the selected protocol"));
-    deleteProtocolButton_ = makeProtocolButton(QStringLiteral("Delete"), QStringLiteral("Delete the selected protocol"));
+    manageLibraryButton_ = makeProtocolButton(
+        QStringLiteral("Manage targets and protocols..."),
+        QStringLiteral("Edit the shared Target List and protocol schedules"));
     saveProtocolsButton_ = makeProtocolButton(QStringLiteral("Save protocols"),
                                                QStringLiteral("Write protocols and target parameters to your own copy"));
     protocolSelectorRow->addWidget(treatmentProtocolLabel_);
     protocolSelectorRow->addWidget(treatmentProtocolCombo_);
-    protocolSelectorRow->addWidget(newProtocolButton_);
-    protocolSelectorRow->addWidget(renameProtocolButton_);
-    protocolSelectorRow->addWidget(deleteProtocolButton_);
+    protocolSelectorRow->addWidget(manageLibraryButton_);
     protocolSelectorRow->addWidget(saveProtocolsButton_);
     protocolSelectorRow->addSpacing(18);
     protocolSelectorRow->addWidget(visitLabel);
@@ -425,15 +380,6 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     configureModelTable(protocolView_);
     protocolLayout->addWidget(protocolView_, 1);
 
-    auto* protocolEntryRow = new QHBoxLayout;
-    addProtocolEntryButton_ = makeProtocolButton(
-        QStringLiteral("Add Entry"), QStringLiteral("Append a sonication of the selected Target List target"));
-    removeProtocolEntryButton_ = makeProtocolButton(
-        QStringLiteral("Remove Selected Rows"), QStringLiteral("Delete the selected rows from this protocol"));
-    protocolEntryRow->addWidget(addProtocolEntryButton_);
-    protocolEntryRow->addWidget(removeProtocolEntryButton_);
-    protocolEntryRow->addStretch(1);
-    protocolLayout->addLayout(protocolEntryRow);
     treatmentTabs_->addTab(protocolTab, QStringLiteral("Treatment Protocol"));
 
     // Pulse Details tab: BeamV0's axPulseWaveformPlot / axBurstWaveformPlot
@@ -534,6 +480,7 @@ void WorkflowWindow::wireTreatmentPlanBody() {
             [this] { updateSonicationPlots(); });
     connect(stimParamModel_, &QAbstractItemModel::dataChanged, this, [this] {
         saveCurrentTargetSonications();
+        setTargetStoreDirty(true);
         updateSonicationPlots();
         updateTreatmentPlanSummary();
     });
@@ -576,105 +523,8 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     connect(treatmentProtocolCombo_, &QComboBox::currentTextChanged, this,
             [this](const QString& name) { loadTreatmentProtocol(name); });
 
-    connect(newProtocolButton_, &QPushButton::clicked, this, [this] {
-        bool ok = false;
-        const QString name = QInputDialog::getText(this, QStringLiteral("New protocol"),
-                                                    QStringLiteral("Name:"), QLineEdit::Normal,
-                                                    QString(), &ok);
-        if (!ok || name.trimmed().isEmpty()) return;
-        writeProtocolGridToStore();
-        if (!targetStore_.addProtocol(name.trimmed().toStdString())) {
-            showMessage(QStringLiteral("A protocol named \"%1\" already exists.").arg(name.trimmed()), true);
-            return;
-        }
-        setTargetStoreDirty(true);
-        refreshProtocolCombo(name.trimmed());
-        loadTreatmentProtocol(name.trimmed());
-        showMessage(QStringLiteral("Protocol \"%1\" created. Use Add Entry to schedule targets.")
-                        .arg(name.trimmed()), false);
-    });
 
-    connect(renameProtocolButton_, &QPushButton::clicked, this, [this] {
-        const QString current = treatmentProtocolCombo_->currentText();
-        if (current.isEmpty()) return;
-        bool ok = false;
-        const QString name = QInputDialog::getText(this, QStringLiteral("Rename protocol"),
-                                                    QStringLiteral("Name:"), QLineEdit::Normal,
-                                                    current, &ok);
-        if (!ok || name.trimmed().isEmpty() || name.trimmed() == current) return;
-        writeProtocolGridToStore();
-        if (!targetStore_.renameProtocol(current.toStdString(), name.trimmed().toStdString())) {
-            showMessage(QStringLiteral("Cannot rename to \"%1\"; that name is taken.").arg(name.trimmed()), true);
-            return;
-        }
-        setTargetStoreDirty(true);
-        refreshProtocolCombo(name.trimmed());
-        loadTreatmentProtocol(name.trimmed());
-    });
-
-    connect(deleteProtocolButton_, &QPushButton::clicked, this, [this] {
-        const QString current = treatmentProtocolCombo_->currentText();
-        if (current.isEmpty()) return;
-        if (targetStore_.protocols().size() <= 1) {
-            showMessage(QStringLiteral("The last protocol cannot be deleted."), true);
-            return;
-        }
-        if (QMessageBox::question(this, QStringLiteral("Delete protocol"),
-                                  QStringLiteral("Delete protocol \"%1\"? Its schedule is lost.")
-                                      .arg(current)) != QMessageBox::Yes)
-            return;
-        targetStore_.removeProtocol(current.toStdString());
-        setTargetStoreDirty(true);
-        refreshProtocolCombo(QString());
-        loadTreatmentProtocol(treatmentProtocolCombo_->currentText());
-        showMessage(QStringLiteral("Protocol \"%1\" deleted.").arg(current), false);
-    });
-
-    connect(addProtocolEntryButton_, &QPushButton::clicked, this, [this] {
-        const QString protocol = treatmentProtocolCombo_->currentText();
-        const QString target = targetListName(targetListWidget_->currentItem());
-        if (protocol.isEmpty() || target.isEmpty()) {
-            showMessage(QStringLiteral("Select a target in the Target List first."), true);
-            return;
-        }
-        writeProtocolGridToStore();
-        beam::gui::TreatmentProtocolEntry entry;
-        entry.target = target.toStdString();
-        if (!targetStore_.appendProtocolEntry(protocol.toStdString(), entry)) {
-            showMessage(QStringLiteral("Could not add \"%1\" to \"%2\".").arg(target, protocol), true);
-            return;
-        }
-        setTargetStoreDirty(true);
-        loadTreatmentProtocol(protocol);
-        if (protocolModel_->rowCount() > 0) protocolView_->selectRow(protocolModel_->rowCount() - 1);
-    });
-
-    connect(removeProtocolEntryButton_, &QPushButton::clicked, this, [this] {
-        const QString protocol = treatmentProtocolCombo_->currentText();
-        const QModelIndexList selected = protocolView_->selectionModel()->selectedRows();
-        if (protocol.isEmpty() || selected.isEmpty()) {
-            showMessage(QStringLiteral("Select one or more protocol rows to remove."), true);
-            return;
-        }
-        writeProtocolGridToStore();
-        const beam::gui::TreatmentProtocolDefinition* definition =
-            targetStore_.findProtocol(protocol.toStdString());
-        if (definition == nullptr) return;
-        std::vector<bool> drop(definition->entries.size(), false);
-        for (const QModelIndex& index : selected) {
-            if (index.row() >= 0 && index.row() < static_cast<int>(drop.size()))
-                drop[static_cast<std::size_t>(index.row())] = true;
-        }
-        std::vector<beam::gui::TreatmentProtocolEntry> kept;
-        for (std::size_t i = 0; i < definition->entries.size(); ++i)
-            if (!drop[i]) kept.push_back(definition->entries[i]);
-        const std::size_t removed = definition->entries.size() - kept.size();
-        targetStore_.setProtocolEntries(protocol.toStdString(), std::move(kept));
-        setTargetStoreDirty(true);
-        loadTreatmentProtocol(protocol);
-        showMessage(QStringLiteral("Removed %1 row(s) from \"%2\".").arg(removed).arg(protocol), false);
-    });
-
+    connect(manageLibraryButton_, &QPushButton::clicked, this, [this] { openTreatmentLibrary(); });
     connect(saveProtocolsButton_, &QPushButton::clicked, this, [this] { saveTreatmentTargetStore(); });
     connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
             [this] { setTargetStoreDirty(true); });
@@ -783,6 +633,7 @@ void WorkflowWindow::writeProtocolGridToStore() {
 
 void WorkflowWindow::saveTreatmentTargetStore() {
     writeProtocolGridToStore();
+    writeTargetPointsToStore();
     const QString directory = treatmentDataDirectory();
     try {
         targetStore_.saveTargets(
@@ -1496,6 +1347,62 @@ void WorkflowWindow::finishTreatmentStage() {
     showMessage(QStringLiteral("Sonication complete. Continuing to Report."), false);
     refresh();
     ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+}
+
+void WorkflowWindow::openTreatmentLibrary() {
+    writeProtocolGridToStore();
+    saveCurrentTargetSonications();
+    const QString protocol = treatmentProtocolCombo_->currentText();
+    TreatmentLibraryDialog dialog(targetStore_, this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    targetStore_ = dialog.store();
+    setTargetStoreDirty(true);
+
+    targetListWidget_->clear();
+    targetSonications_.clear();
+    currentTargetId_ = -1;
+    for (const beam::gui::TreatmentTarget& target : targetStore_.targets())
+        addTargetListRow(QString::fromStdString(target.name));
+    if (targetListWidget_->count() > 0) targetListWidget_->setCurrentRow(0);
+
+    const bool kept = targetStore_.findProtocol(protocol.toStdString()) != nullptr;
+    refreshProtocolCombo(kept ? protocol : QString());
+    if (!treatmentProtocolCombo_->currentText().isEmpty())
+        loadTreatmentProtocol(treatmentProtocolCombo_->currentText());
+    updateTreatmentPlanSummary();
+    // Save in the dialog has to mean saved. Leaving it in memory for the
+    // tab's Save protocols button meant edits vanished on restart.
+    saveTreatmentTargetStore();
+}
+
+
+// The grid is the target's own stimParamTable; without this its rows live only
+// in targetSonications_ and are lost on restart. X/Y/Z stay out: placement is
+// per-patient session data, which the store deliberately does not hold.
+void WorkflowWindow::writeTargetPointsToStore() {
+    if (targetListWidget_ == nullptr) return;
+    saveCurrentTargetSonications();
+    for (int row = 0; row < targetListWidget_->count(); ++row) {
+        const QListWidgetItem* item = targetListWidget_->item(row);
+        const auto cached = targetSonications_.constFind(targetListId(item));
+        if (cached == targetSonications_.constEnd() || cached.value().empty()) continue;
+        std::vector<beam::gui::TreatmentTargetPoint> points;
+        points.reserve(cached.value().size());
+        for (const beam::gui_qt::StimParamRow& grid : cached.value()) {
+            beam::gui::TreatmentTargetPoint point;
+            point.order = grid.order;
+            point.show = grid.show;
+            point.amplitude = grid.amplitude;
+            point.startTimeSeconds = grid.startTime;
+            point.endTimeSeconds = grid.endTime;
+            point.burstDurationSeconds = grid.bd;
+            point.burstIntervalSeconds = grid.bi;
+            point.pulseDurationSeconds = grid.pd;
+            point.pulseIntervalSeconds = grid.pi;
+            points.push_back(point);
+        }
+        targetStore_.setTargetPoints(targetListName(item).toStdString(), std::move(points));
+    }
 }
 
 }  // namespace beam::app

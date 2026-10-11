@@ -120,6 +120,9 @@ void TreatmentTargetStore::loadProtocols(const std::string& path) {
             found = std::prev(loaded.end());
         }
 
+        // The placeholder saveProtocols writes for an empty protocol: it
+        // declares the name and schedules nothing.
+        if (row[2].empty() && row[1] == "0") continue;
         TreatmentProtocolEntry entry;
         entry.order = static_cast<int>(toDouble(row[1], path, "order"));
         entry.target = row[2];
@@ -225,6 +228,12 @@ void TreatmentTargetStore::saveProtocols(const std::string& path) const {
             "target's own.\n"
          << "protocol,order,target,amplitude,duration\n";
     for (const TreatmentProtocolDefinition& definition : protocols_) {
+        // A protocol with no entries still has to survive the round trip; a
+        // newly created one has none until targets are scheduled into it.
+        if (definition.entries.empty()) {
+            file << definition.name << ",0,,," << '\n';
+            continue;
+        }
         for (const TreatmentProtocolEntry& entry : definition.entries) {
             file << definition.name << ',' << entry.order << ',' << entry.target << ',';
             if (entry.amplitude) file << *entry.amplitude;
@@ -255,6 +264,19 @@ bool TreatmentTargetStore::removeTarget(const std::string& name) {
     targets_.erase(targets_.begin() + static_cast<std::ptrdiff_t>(found->second));
     targetIndex_.clear();
     for (std::size_t i = 0; i < targets_.size(); ++i) targetIndex_.emplace(targets_[i].name, i);
+    return true;
+}
+
+bool TreatmentTargetStore::renameTarget(const std::string& from, const std::string& to) {
+    if (to.empty() || from == to || targetIndex_.count(to) != 0) return false;
+    const auto found = targetIndex_.find(from);
+    if (found == targetIndex_.end()) return false;
+    targets_[found->second].name = to;
+    targetIndex_.clear();
+    for (std::size_t i = 0; i < targets_.size(); ++i) targetIndex_.emplace(targets_[i].name, i);
+    for (TreatmentProtocolDefinition& protocol : protocols_)
+        for (TreatmentProtocolEntry& entry : protocol.entries)
+            if (entry.target == from) entry.target = to;
     return true;
 }
 

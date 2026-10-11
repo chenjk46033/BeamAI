@@ -81,6 +81,8 @@ if(Qt6_FOUND AND TARGET gui_qt)
         # re-homed into this workflow's stage model). Its own translation unit
         # so the shell's constructor does not grow another several hundred
         # lines.
+        workflow_app/treatment_library_dialog.cpp
+        workflow_app/treatment_library_dialog.hpp
         workflow_app/treatment_plan_body.cpp
         # "Open viewer in a new window": a larger, Escape-closable window for
         # one MRI plane, driving that pane's own slice controls.

@@ -152,6 +152,8 @@ private:
     void refreshProtocolCombo(const QString& select);
     void writeProtocolGridToStore();
     void saveTreatmentTargetStore();
+    void writeTargetPointsToStore();
+    void openTreatmentLibrary();
     void setTargetStoreDirty(bool dirty);
     void selectSonicationRow(int row);
     int selectedSonicationRow() const;
@@ -264,12 +266,8 @@ private:
     // install, saved to the user's own copy -- see treatmentDataDirectory().
     beam::gui::TreatmentTargetStore targetStore_;
     bool targetStoreDirty_ = false;
-    QPushButton* newProtocolButton_ = nullptr;
-    QPushButton* renameProtocolButton_ = nullptr;
-    QPushButton* deleteProtocolButton_ = nullptr;
-    QPushButton* addProtocolEntryButton_ = nullptr;
-    QPushButton* removeProtocolEntryButton_ = nullptr;
     QPushButton* saveProtocolsButton_ = nullptr;
+    QPushButton* manageLibraryButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
     QTableView* protocolView_ = nullptr;
     QListWidget* targetListWidget_ = nullptr;

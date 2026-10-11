@@ -106,6 +106,9 @@ public:
 
     bool addTarget(const TreatmentTarget& target);
     bool removeTarget(const std::string& name);
+    // Renames the target and every protocol entry that refers to it, so a
+    // rename cannot strand a schedule. Refuses an empty or taken name.
+    bool renameTarget(const std::string& from, const std::string& to);
 
     const TreatmentProtocolDefinition* findProtocol(const std::string& name) const;
     // The protocol's targets in schedule order, each name once. Empty if the

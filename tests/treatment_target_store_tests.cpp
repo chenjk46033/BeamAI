@@ -300,3 +300,108 @@ TEST(TreatmentTargetStore, CommentsAndBlankLinesAreIgnored) {
     EXPECT_EQ(store.targets().size(), 1u);
     EXPECT_EQ(store.targets().front().name, "SCC1");
 }
+
+TEST(TreatmentTargetStore, RenamingATargetCarriesTheSchedulesWithIt) {
+    beam::gui::TreatmentTargetStore store;
+    const std::string targets = writeTemp("rn_targets.csv",
+                                          "name,point,show,amplitude,startTime,endTime,bd,bi,pd,pi\n"
+                                          "SCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01\n"
+                                          "SCC2,1,1,0.5,0,30,0.03,0.7,0.005,0.01\n");
+    const std::string protocols = writeTemp("rn_protocols.csv",
+                                            "protocol,order,target,amplitude,duration\n"
+                                            "PainSCC,1,SCC1,,30\n"
+                                            "PainSCC,2,SCC2,,30\n"
+                                            "PainSCC,3,SCC1,,45\n");
+    ASSERT_NO_THROW(store.loadTargets(targets));
+    ASSERT_NO_THROW(store.loadProtocols(protocols));
+    ASSERT_TRUE(store.renameTarget("SCC1", "SCC1b"));
+    EXPECT_EQ(store.findTarget("SCC1"), nullptr);
+    ASSERT_NE(store.findTarget("SCC1b"), nullptr);
+    const auto* protocol = store.findProtocol("PainSCC");
+    ASSERT_NE(protocol, nullptr);
+    EXPECT_EQ(protocol->entries[0].target, "SCC1b");
+    EXPECT_EQ(protocol->entries[2].target, "SCC1b");
+    EXPECT_EQ(protocol->entries[1].target, "SCC2");
+    EXPECT_TRUE(store.danglingTargetNames().empty());
+}
+
+TEST(TreatmentTargetStore, RenameRefusesACollisionWithoutSideEffects) {
+    beam::gui::TreatmentTargetStore store;
+    const std::string targets = writeTemp("rn_collide.csv",
+                                          "name,point,show,amplitude,startTime,endTime,bd,bi,pd,pi\n"
+                                          "SCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01\n"
+                                          "SCC2,1,1,0.5,0,30,0.03,0.7,0.005,0.01\n");
+    ASSERT_NO_THROW(store.loadTargets(targets));
+    EXPECT_FALSE(store.renameTarget("SCC1", "SCC2"));
+    EXPECT_FALSE(store.renameTarget("SCC1", ""));
+    EXPECT_FALSE(store.renameTarget("nope", "SCC3"));
+    EXPECT_EQ(store.targets().size(), 2u);
+    ASSERT_NE(store.findTarget("SCC1"), nullptr);
+    ASSERT_NE(store.findTarget("SCC2"), nullptr);
+}
+
+TEST(TreatmentTargetStore, EditedPointsSurviveASaveAndReload) {
+    beam::gui::TreatmentTargetStore store;
+    const std::string path = writeTemp("points_round.csv",
+                                       "name,point,show,amplitude,startTime,endTime,bd,bi,pd,pi\n"
+                                       "SCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01\n");
+    ASSERT_NO_THROW(store.loadTargets(path));
+
+    // What the grid hands back after an operator edits it: a second row, and
+    // changed parameters on the first.
+    std::vector<beam::gui::TreatmentTargetPoint> edited;
+    beam::gui::TreatmentTargetPoint first;
+    first.amplitude = 0.82;
+    first.endTimeSeconds = 45.0;
+    first.burstDurationSeconds = 0.06;
+    edited.push_back(first);
+    beam::gui::TreatmentTargetPoint second;
+    second.amplitude = 0.33;
+    second.show = false;
+    edited.push_back(second);
+    ASSERT_TRUE(store.setTargetPoints("SCC1", edited));
+
+    const std::string out = writeTemp("points_round_out.csv", "");
+    ASSERT_NO_THROW(store.saveTargets(out));
+
+    beam::gui::TreatmentTargetStore reloaded;
+    ASSERT_NO_THROW(reloaded.loadTargets(out));
+    const auto* target = reloaded.findTarget("SCC1");
+    ASSERT_NE(target, nullptr);
+    ASSERT_EQ(target->points.size(), 2u);
+    EXPECT_DOUBLE_EQ(target->points[0].amplitude, 0.82);
+    EXPECT_DOUBLE_EQ(target->points[0].endTimeSeconds, 45.0);
+    EXPECT_DOUBLE_EQ(target->points[0].burstDurationSeconds, 0.06);
+    EXPECT_EQ(target->points[0].order, 1);
+    EXPECT_DOUBLE_EQ(target->points[1].amplitude, 0.33);
+    EXPECT_FALSE(target->points[1].show);
+    EXPECT_EQ(target->points[1].order, 2);
+}
+
+TEST(TreatmentTargetStore, AnEmptyProtocolSurvivesASaveAndReload) {
+    beam::gui::TreatmentTargetStore store;
+    const std::string targets = writeTemp("empty_targets.csv",
+                                          "name,point,show,amplitude,startTime,endTime,bd,bi,pd,pi\n"
+                                          "SCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01\n");
+    ASSERT_NO_THROW(store.loadTargets(targets));
+    ASSERT_TRUE(store.addProtocol("Fresh"));
+    ASSERT_TRUE(store.addProtocol("Scheduled"));
+    beam::gui::TreatmentProtocolEntry entry;
+    entry.target = "SCC1";
+    entry.durationSeconds = 30.0;
+    ASSERT_TRUE(store.appendProtocolEntry("Scheduled", entry));
+
+    const std::string out = writeTemp("empty_protocols_out.csv", "");
+    ASSERT_NO_THROW(store.saveProtocols(out));
+
+    beam::gui::TreatmentTargetStore reloaded;
+    ASSERT_NO_THROW(reloaded.loadProtocols(out));
+    ASSERT_EQ(reloaded.protocols().size(), 2u);
+    const auto* fresh = reloaded.findProtocol("Fresh");
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_TRUE(fresh->entries.empty());
+    const auto* scheduled = reloaded.findProtocol("Scheduled");
+    ASSERT_NE(scheduled, nullptr);
+    ASSERT_EQ(scheduled->entries.size(), 1u);
+    EXPECT_EQ(scheduled->entries[0].target, "SCC1");
+}
