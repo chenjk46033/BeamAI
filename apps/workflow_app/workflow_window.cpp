@@ -14,6 +14,7 @@
 #include <utility>
 
 #include <QListWidgetItem>
+#include <QFile>
 #include <QFileDialog>
 #include <QHash>
 #include <QRegularExpression>
@@ -23,8 +24,6 @@
 #include <QProxyStyle>
 #include <QStyleOptionSlider>
 #include <QToolTip>
-#include <QFile>
-#include <QTextStream>
 #include <QSet>
 #include <QApplication>
 #include <QCoreApplication>
@@ -41,7 +40,7 @@
 #include <QProgressDialog>
 #include <QResizeEvent>
 #include <QScrollArea>
-#include <QSplitter>
+#include <QTextStream>
 #include <QThread>
 #include <QTimer>
 #include <QStyle>
@@ -410,15 +409,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // deliberately on the left, while the table remains on the right.
     ui_->registrationDetailsLayout->removeWidget(ui_->registrationFiducialLayout);
     ui_->registrationDetailsLayout->removeWidget(ui_->registrationTable);
-    auto* markerSplitter = new QSplitter(Qt::Horizontal, this);
-    markerSplitter->setChildrenCollapsible(false);
-    markerSplitter->setHandleWidth(12);
+    auto* markerSplitter = new QWidget(this);
+    auto* markerSplitterLayout = new QHBoxLayout(markerSplitter);
+    markerSplitterLayout->setContentsMargins(0, 0, 0, 0);
+    markerSplitterLayout->setSpacing(8);
     markerSplitter->setMinimumHeight(196);
-    markerSplitter->setToolTip(QStringLiteral("Drag the divider left or right to resize the fiducial diagram and marker table"));
-    markerSplitter->setStyleSheet(QStringLiteral(
-        "QSplitter::handle:horizontal { background: #8aa1aa; border-left: 1px solid #5e7882; "
-        "border-right: 1px solid #5e7882; margin: 0; }"
-        "QSplitter::handle:horizontal:hover { background: #2b91ad; }"));
     // Both of step 1's buttons, built here so they can share the row under the
     // diagram. Detect is not gated on the MRI being loaded: detectFiducials()
     // already answers with "Load an MRI before detecting fiducials", which
@@ -460,28 +455,47 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* triangleColumn = new QVBoxLayout;
     triangleColumn->setContentsMargins(0, 0, 4, 0);
     triangleColumn->setSpacing(0);
-    registrationStep1Label_ = new QLabel(QStringLiteral("1"), markerDiagramPanel);
-    registrationStep1Label_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #dff7ff; background: rgba(15, 54, 68, 190); border-radius: 3px; font-size: 30px; font-weight: 700; }"));
-    registrationStep1Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    registrationStep1Label_->setFixedSize(28, 34);
-    registrationStep1Label_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    registrationStep1Label_->setParent(markerDiagramPanel);
-    registrationStep1Label_->move(4, 4);
-    registrationStep1Label_->show();
-    registrationStep1Label_->raise();
     triangleColumn->addWidget(ui_->registrationFiducialLayout, 0, Qt::AlignTop);
     // One 30px row, matching the Confirm/Register row under the table opposite,
     // so step 3 and step 4 stay on the same line.
     auto* step1Buttons = new QHBoxLayout;
     step1Buttons->setContentsMargins(0, 0, 0, 0);
     step1Buttons->setSpacing(4);
-    step1Buttons->addWidget(detectFiducialsButton_, 1);
-    step1Buttons->addWidget(ui_->resetRegistrationButton, 1);
-    step1Buttons->addWidget(importFiducialsButton_, 1);
+    // The three buttons stay as hidden drivers so their connections hold.
+    fiducialActionsButton_ = new QToolButton(markerDiagramPanel);
+    fiducialActionsButton_->setPopupMode(QToolButton::MenuButtonPopup);
+    fiducialActionsButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    fiducialActionsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    fiducialActionsButton_->setMinimumHeight(detectFiducialsButton_->minimumHeight());
+    fiducialActionsButton_->setStyleSheet(QStringLiteral(
+        "QToolButton { background: #176b87; color: white; border: 1px solid #0f5269; "
+        "border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
+        "QToolButton:hover { background: #2083a3; } "
+        "QToolButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; } "
+        "QToolButton::menu-button { width: 18px; border-left: 1px solid #0f5269; "
+        "border-top-right-radius: 4px; border-bottom-right-radius: 4px; }"));
+    const auto fiducialAction = [this](QPushButton* driver) {
+        auto* action = new QAction(driver->text(), this);
+        action->setToolTip(driver->toolTip());
+        connect(action, &QAction::triggered, driver, &QPushButton::click);
+        return action;
+    };
+    auto* fiducialMenu = new QMenu(fiducialActionsButton_);
+    QAction* detectAction = fiducialAction(detectFiducialsButton_);
+    fiducialMenu->addAction(detectAction);
+    fiducialMenu->addSeparator();
+    fiducialMenu->addAction(fiducialAction(ui_->resetRegistrationButton));
+    fiducialMenu->addAction(fiducialAction(importFiducialsButton_));
+    fiducialActionsButton_->setMenu(fiducialMenu);
+    fiducialActionsButton_->setDefaultAction(detectAction);
+    for (QPushButton* driver : {detectFiducialsButton_, ui_->resetRegistrationButton,
+                                importFiducialsButton_})
+        driver->hide();
+    step1Buttons->addWidget(fiducialActionsButton_, 1);
     triangleColumn->addLayout(step1Buttons);
     markerDiagramLayout->addLayout(triangleColumn);
-    markerSplitter->addWidget(markerDiagramPanel);
+    markerDiagramLayout->addStretch(1);
+    markerSplitterLayout->addWidget(markerDiagramPanel, 3);
     ui_->registrationFiducialLayout->setMinimumWidth(300);
     ui_->registrationFiducialLayout->setMinimumHeight(0);
     ui_->registrationFiducialLayout->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -533,21 +547,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerTableLayout->setContentsMargins(0, 0, 0, 0);
     markerTableLayout->setSpacing(0);
     ui_->registrationActions->removeWidget(ui_->registerFiducialsButton);
-    registrationStep2Label_ = new QLabel(QStringLiteral("2"), markerTablePanel);
-    registrationStep2Label_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #dff7ff; background: rgba(15, 54, 68, 190); border-radius: 3px; font-size: 30px; font-weight: 700; }"));
-    registrationStep2Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    // Same 28x34 as steps 1, 3 and 4: the shared stylesheet asks for a 30px
-    // glyph, which a smaller box clips. Parented to the panel like step 1,
-    // not to the table's header -- a child of the ~25px header is clipped by
-    // it, and the header's coordinates are not the ones the table's geometry
-    // is expressed in.
-    registrationStep2Label_->setFixedSize(28, 34);
-    registrationStep2Label_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    registrationStep2Label_->setParent(markerTablePanel);
-    registrationStep2Label_->move(4, 4);
-    registrationStep2Label_->show();
-    registrationStep2Label_->raise();
     ui_->confirmFiducialButton->setText(QStringLiteral("Confirm all located fiducials"));
     ui_->confirmFiducialButton->setToolTip(QStringLiteral(
         "Confirm every fiducial currently marked Located after reviewing the MRI views"));
@@ -591,42 +590,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerTableLayout->setAlignment(markerActions, Qt::AlignTop);
     ui_->registrationLayout->removeWidget(ui_->acceptRegistrationButton);
     ui_->acceptRegistrationButton->setMinimumHeight(30);
-    registrationStep4Label_ = new QLabel(QStringLiteral("4"), markerTablePanel);
-    registrationStep4Label_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #dff7ff; background: rgba(15, 54, 68, 190); border-radius: 3px; font-size: 30px; font-weight: 700; }"));
-    registrationStep4Label_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    registrationStep4Label_->setFixedSize(28, 34);
-    registrationStep4Label_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    registrationStep4Label_->setParent(ui_->acceptRegistrationButton);
-    registrationStep4Label_->show();
-    registrationStep4Label_->raise();
-    QTimer::singleShot(0, this, [this, markerTablePanel] {
-        if (registrationStep2Label_ && ui_->registrationTable->parentWidget() == markerTablePanel) {
-            // Top-left of the table, in the panel's coordinates -- the same
-            // corner step 1 sits in on the diagram. Position only: resizing it
-            // to the table's rect is what clipped the glyph.
-            registrationStep2Label_->move(ui_->registrationTable->geometry().topLeft() +
-                                           QPoint(4, 4));
-            registrationStep2Label_->raise();
-        }
-        if (registrationStep4Label_ && ui_->acceptRegistrationButton->parentWidget() == markerTablePanel) {
-            registrationStep4Label_->setGeometry(ui_->acceptRegistrationButton->geometry().adjusted(2, 0, -2, 0));
-            registrationStep4Label_->raise();
-        }
-    });
     // Import is where the stage starts, Save where it ends: nothing is worth
     // saving until the fiducials have been measured and registered.
-    auto* acceptRow = new QHBoxLayout;
-    acceptRow->setContentsMargins(0, 0, 0, 0);
-    acceptRow->setSpacing(4);
-    acceptRow->addWidget(ui_->acceptRegistrationButton, 1);
-    acceptRow->addWidget(saveFiducialsButton_, 1);
-    markerTableLayout->addLayout(acceptRow);
-    markerSplitter->addWidget(markerTablePanel);
-    markerSplitter->setStretchFactor(0, 1);
-    markerSplitter->setStretchFactor(1, 1);
-    markerSplitter->setSizes({600, 600});
-    ui_->registrationDetailsLayout->addWidget(markerSplitter);
+    markerSplitterLayout->addWidget(markerTablePanel, 2);
+    auto* step1Group = new QGroupBox(QStringLiteral("1    Locate and review the six fiducials"), this);
+    auto* step1GroupLayout = new QVBoxLayout(step1Group);
+    step1GroupLayout->setContentsMargins(6, 4, 6, 6);
+    step1GroupLayout->addWidget(markerSplitter);
+    ui_->registrationDetailsLayout->addWidget(step1Group, 3);
     // The Designer action row is now empty because its buttons were moved into
     // the two splitter panes. Remove that empty layout so it cannot leave a
     // blank band before the final Accept Registration button.
@@ -663,24 +634,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     calibrationControls->setSpacing(8);
     calibrationControls->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     calibrationLayout->addLayout(calibrationControls);
-    registrationStep3Label_ = new QLabel(QStringLiteral("3"), calibrationGroup);
-    registrationStep3Label_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #dff7ff; background: rgba(15, 54, 68, 190); border-radius: 3px; font-size: 30px; font-weight: 700; }"));
-    registrationStep3Label_->setAlignment(Qt::AlignCenter);
-    registrationStep3Label_->setFixedWidth(28);
-    registrationStep3Label_->setFixedSize(28, 34);
-    registrationStep3Label_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    registrationStep3Label_->setParent(calibrationGroup);
-    // Keep the step indicator in the content area.  Placing it at the
-    // group's top edge overlaps the QGroupBox title (for example, turning
-    // "Subject Left" into "bject Left"), especially when the pane is narrow.
-    // The calibration panels begin below the group title, so keep the
-    // indicator well inside the content area rather than over either panel's
-    // title.  The previous position still intersected the child group-box
-    // title after layout margins were applied.
-    registrationStep3Label_->move(4, 112);
-    registrationStep3Label_->show();
-    registrationStep3Label_->raise();
     auto makePositionSlider = [](QWidget* parent, Qt::Orientation orientation) {
         auto* slider = new NumberedSlider(orientation, parent);
         slider->setRange(1, 4);
@@ -749,26 +702,29 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     registerCurrentPositionButton_->setToolTip(QStringLiteral(
         "Apply the BeamV0 lock-position offset after registering the array to MRI fiducials"));
-    calibrationLayout->addWidget(registerCurrentPositionButton_);
     // Without this the spare height lands between the panels and the button,
     // pushing it off the bottom of a non-maximised window.
+    auto* step2Buttons = new QVBoxLayout;
+    step2Buttons->setContentsMargins(0, 0, 0, 0);
+    step2Buttons->setSpacing(4);
+    step2Buttons->addWidget(registerCurrentPositionButton_);
+    step2Buttons->addWidget(ui_->acceptRegistrationButton);
+    step2Buttons->addWidget(saveFiducialsButton_);
+    calibrationLayout->addLayout(step2Buttons);
+    calibrationLayout->addWidget(ui_->registrationResult);
+    // Slack belongs below the buttons; above them it walks them down the
+    // column as the page grows, and off it.
     calibrationLayout->addStretch(1);
     calibrationGroup->setMinimumHeight(0);
     calibrationGroup->setMaximumHeight(QWIDGETSIZE_MAX);
     calibrationGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    markerDiagramLayout->addWidget(calibrationGroup, 1);
+    calibrationGroup->setTitle(QStringLiteral("2    Set the transducer lock position and accept"));
+    ui_->registrationDetailsLayout->addWidget(calibrationGroup, 1);
     // Calibration sliders use their own sliderPressed/valueChanged handlers
     // below. Do not install a parent mouse filter here: re-entering
     // updateRegistrationAvailability() from a slider mouse event can change
     // the enabled state while Qt is dispatching that same drag, leaving the
     // calibration pane apparently locked.
-    // Child views/tables are added after the step labels are created; raise
-    // the overlays once the pane hierarchy is complete so they remain visible
-    // even before any MRI or fiducial data exists.
-    registrationStep1Label_->raise();
-    registrationStep2Label_->raise();
-    registrationStep3Label_->raise();
-    registrationStep4Label_->raise();
     // Registration feedback belongs inside the Registration page, below its
     // acceptance action, rather than in the global footer line.
     ui_->registrationResult->show();
@@ -782,7 +738,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationResult->setWordWrap(true);
     ui_->registrationResult->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     ui_->registrationResult->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    ui_->registrationResult->setFixedHeight(50);
+    // Two wrapped lines plus padding; at 50 the second line was clipped.
+    ui_->registrationResult->setFixedHeight(62);
     // BeamV0's drawROIs.m keeps a running readout of where the array actually
     // is:  app.TargetPosXYZLabel.Text = ['Array Pos X: ', ...]. Without it
     // there is nothing numeric on this page to check a registration against,
@@ -796,7 +753,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QLabel { font-family: 'Consolas','Courier New',monospace; font-size: 12px; color: #d7e3e7; "
         "background: #24323a; border: 1px solid #3c5059; border-radius: 4px; padding: 5px 8px; }"));
     markerTableLayout->addWidget(arrayPositionLabel_);
-    markerTableLayout->addWidget(ui_->registrationResult);
     markerTableLayout->addStretch(1);
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
@@ -1632,11 +1588,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     if (auto* fiducialHeader = ui_->registrationTable->horizontalHeaderItem(0))
         fiducialHeader->setText(QStringLiteral("Fiducial"));
     ui_->acceptRegistrationButton->setText(QStringLiteral("4  Accept registration and continue →"));
-    // The large translucent Step 4 badge is separate from the action text;
-    // remove the duplicated numeral from the button caption.
     ui_->acceptRegistrationButton->setText(ui_->acceptRegistrationButton->text().mid(3));
-    registrationStep2Label_->hide();
-    registrationStep4Label_->hide();
     ui_->registrationTable->setStyleSheet(
         QStringLiteral("QTableWidget { color: #17313f; background: #ffffff; } "
                        "QTableWidget::item { color: #17313f; background: #ffffff; } "
@@ -2402,7 +2354,7 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
     showMriPreviews();
     workflow_.change(beam::gui::WorkflowStage::Registration,
                      "Fiducial measurements changed; later approvals require review.");
-    showMessage(hadFit ? QStringLiteral("Fiducial located. Moving it voided the MRI fit, so the Step 3 "
+    showMessage(hadFit ? QStringLiteral("Fiducial located. Moving it voided the MRI fit, so the Step 2 "
                                         "lock-position sliders are disabled until you register to MRI "
                                         "fiducials again.")
                        : QStringLiteral("Fiducial located. Verify it in another plane, then confirm the "
@@ -2737,6 +2689,7 @@ void WorkflowWindow::detectFiducials() {
     std::vector<beam::mri::FiducialDetection> detections;
     QApplication::setOverrideCursor(Qt::WaitCursor);
     detectFiducialsButton_->setEnabled(false);
+    if (fiducialActionsButton_) fiducialActionsButton_->setEnabled(false);
     try {
         // The rejected and suppressed peaks are deliberately not requested: the
         // views show only the six chosen markers. Drawing the alternatives put
@@ -2745,11 +2698,13 @@ void WorkflowWindow::detectFiducials() {
         detections = beam::mri::detectFiducialDonuts(mriVolume_, mriAxes_, priorMm, names);
     } catch (const std::exception& error) {
         detectFiducialsButton_->setEnabled(true);
+        if (fiducialActionsButton_) fiducialActionsButton_->setEnabled(true);
         QApplication::restoreOverrideCursor();
         showMessage(QStringLiteral("Fiducial detection failed: %1").arg(error.what()), true);
         return;
     }
     detectFiducialsButton_->setEnabled(true);
+    if (fiducialActionsButton_) fiducialActionsButton_->setEnabled(true);
     QApplication::restoreOverrideCursor();
     int detected = 0;
     int rejected = 0;
@@ -2996,24 +2951,7 @@ void WorkflowWindow::updateRegistrationAvailability() {
     updateRegistrationStepIndicators();
 }
 
-void WorkflowWindow::updateRegistrationStepIndicators() {
-    const auto apply = [this](QLabel* label, bool active, const QString& activeColor) {
-        if (!label) return;
-        label->setStyleSheet(QStringLiteral(
-            "QLabel { color: %1; background: rgba(18, 43, 53, 220); border-radius: 3px; "
-            "font-size: %2px; font-weight: 700; }")
-                                 .arg(active ? activeColor : QStringLiteral("rgba(230, 240, 244, 150)"))
-                                 .arg(label == registrationStep2Label_ ? 20 : 30));
-    };
-    const bool registrationStarted = registrationGeometryLoaded_;
-    apply(registrationStep1Label_, registrationStarted, QStringLiteral("#58d9f2"));
-    apply(registrationStep2Label_, registrationStarted, QStringLiteral("#ffd166"));
-    apply(registrationStep3Label_, registrationFitApplied(), QStringLiteral("#72e6a1"));
-    // Step 4 becomes available as soon as the lock-position registration has
-    // completed; accepting the overall Registration stage is a separate
-    // action that follows this step.
-    apply(registrationStep4Label_, registrationLockPositionRegistered(), QStringLiteral("#d6a5ff"));
-}
+void WorkflowWindow::updateRegistrationStepIndicators() {}
 
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
     arrayData_ = std::move(result.arrayData);
@@ -3077,7 +3015,7 @@ void WorkflowWindow::performFiducialRegistration() {
 
 void WorkflowWindow::acceptFiducialRegistration() {
     if (registrationPhase_ != RegistrationPhase::LockPositionRegistered) {
-        const QString message = QStringLiteral("Complete the Step 3 transducer lock-position registration before accepting.");
+        const QString message = QStringLiteral("Complete the Step 2 transducer lock-position registration before accepting.");
         ui_->registrationResult->setText(message);
         showMessage(message, true);
         return;
@@ -3114,7 +3052,7 @@ void WorkflowWindow::performCurrentPositionRegistration() {
         // one-notch difference is easy to miss, and this is the only reason a
         // pressed Register button can leave Step 4 disabled.
         const QString message =
-            QStringLiteral("Step 3 needs both panels on the same notches. Subject Left is at "
+            QStringLiteral("Step 2 needs both panels on the same notches. Subject Left is at "
                            "horizontal %1, vertical %2; Subject Right is at horizontal %3, "
                            "vertical %4.")
                 .arg(leftHorizontalPositionSlider_->value())
@@ -3147,7 +3085,7 @@ void WorkflowWindow::performCurrentPositionRegistration() {
         setRegistrationPhase(RegistrationPhase::LockPositionRegistered);
         updateRegistrationStepIndicators();
         ui_->acceptRegistrationButton->setFocus(Qt::OtherFocusReason);
-        ui_->registrationResult->setText(QStringLiteral("Array registered to the current lock position. Step 3 complete; review and accept Registration."));
+        ui_->registrationResult->setText(QStringLiteral("Array registered to the current lock position. Step 2 complete; review and accept Registration."));
         showMessage(QStringLiteral("Array registered to current lock position."), false);
         refresh();
     } catch (const std::exception& error) {
@@ -3617,13 +3555,6 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         ui_->axialPreview->setMarkers({});
     }
     if (stage == beam::gui::WorkflowStage::Registration) {
-        for (QLabel* label : {registrationStep1Label_, registrationStep2Label_,
-                              registrationStep3Label_, registrationStep4Label_}) {
-            if (label) {
-                label->show();
-                label->raise();
-            }
-        }
         if (registrationPhase_ == RegistrationPhase::Accepted) {
             // Returning to a completed Registration page is a review state;
             // do not present Step 3/4 as if they still require action.

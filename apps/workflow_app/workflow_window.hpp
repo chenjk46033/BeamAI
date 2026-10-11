@@ -217,17 +217,14 @@ private:
     QSlider* rightHorizontalPositionSlider_ = nullptr;
     QSlider* rightVerticalPositionSlider_ = nullptr;
     QPushButton* registerCurrentPositionButton_ = nullptr;
-    QLabel* registrationStep1Label_ = nullptr;
-    QLabel* registrationStep2Label_ = nullptr;
     QPushButton* importFiducialsButton_ = nullptr;
     QPushButton* detectFiducialsButton_ = nullptr;
+    QToolButton* fiducialActionsButton_ = nullptr;
     QLabel* registrationMriPathLabel_ = nullptr;
     // The picker is rebuilt per right-click, so the pick is remembered here.
     int treatmentFiducialPick_ = -1;
     QPushButton* saveFiducialsButton_ = nullptr;
-    QLabel* registrationStep3Label_ = nullptr;
     QLabel* arrayPositionLabel_ = nullptr;
-    QLabel* registrationStep4Label_ = nullptr;
     QLabel* couplingStatusLabel_ = nullptr;
     QLabel* couplingTitleLabel_ = nullptr;
     QLabel* couplingDescriptionLabel_ = nullptr;
