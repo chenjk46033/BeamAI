@@ -90,7 +90,8 @@ private:
     void navigateToFiducialOnTreatment(int index);
     // False when fewer than six fiducials exist.
     bool fiducialDiagramData(std::array<QString, 6>* labels,
-                             std::array<QPointF, 6>* apIsMm) const;
+                             std::array<QPointF, 6>* apIsMm,
+                             std::array<double, 6>* lrMm = nullptr) const;
     QWidget* buildFiducialPickerWidget(QMenu* menu);
     void performFiducialRegistration();
     void performCurrentPositionRegistration();

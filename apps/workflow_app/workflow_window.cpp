@@ -2276,7 +2276,8 @@ void WorkflowWindow::focusTreatmentViewsOn(const Eigen::Vector3d& positionMm) {
 }
 
 bool WorkflowWindow::fiducialDiagramData(std::array<QString, 6>* labels,
-                                         std::array<QPointF, 6>* apIsMm) const {
+                                         std::array<QPointF, 6>* apIsMm,
+                                         std::array<double, 6>* lrMm) const {
     if (fiducials_.size() < 6) return false;
     for (std::size_t index = 0; index < 6; ++index) {
         const Eigen::Vector3d rasMm = fiducials_[index].position * 1000.0;
@@ -2287,6 +2288,7 @@ bool WorkflowWindow::fiducialDiagramData(std::array<QString, 6>* labels,
                                    .arg(rasMm.z(), 0, 'f', 1);
         // The diagram is a view down the LR axis, so it plots AP against IS.
         if (apIsMm != nullptr) (*apIsMm)[index] = QPointF(rasMm.y(), rasMm.z());
+        if (lrMm != nullptr) (*lrMm)[index] = rasMm.x();
     }
     return true;
 }
@@ -2317,7 +2319,8 @@ void WorkflowWindow::navigateToFiducialOnTreatment(int index) {
 QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
     std::array<QString, 6> labels;
     std::array<QPointF, 6> apIsMm;
-    if (!fiducialDiagramData(&labels, &apIsMm)) return nullptr;
+    std::array<double, 6> lrMm;
+    if (!fiducialDiagramData(&labels, &apIsMm, &lrMm)) return nullptr;
     auto* holder = new QWidget(menu);
     auto* layout = new QVBoxLayout(holder);
     // Match the menu's other embedded widgets.
@@ -2331,6 +2334,7 @@ QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
     picker->setFixedSize(330, 230);
     picker->setMarkerCoordinateLabels(labels);
     picker->setMarkerPositions(apIsMm);
+    picker->setMarkerDepthsMm(lrMm);
     picker->setSelectedIndex(treatmentFiducialPick_);
     // No menu->close(): it would hide the blue selection just drawn.
     picker->setSelectionHandler([this](int markerIndex) {
@@ -3167,11 +3171,14 @@ void WorkflowWindow::showMriPreviews() {
         view->setCoordinatePasteOptions(markerNames);
     std::array<QString, 6> coordinateLabels;
     std::array<QPointF, 6> markerApIsMm;
-    if (fiducialDiagramData(&coordinateLabels, &markerApIsMm)) {
+    std::array<double, 6> markerLrMm;
+    if (fiducialDiagramData(&coordinateLabels, &markerApIsMm, &markerLrMm)) {
         ui_->imagingFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
         ui_->registrationFiducialLayout->setMarkerCoordinateLabels(coordinateLabels);
         ui_->imagingFiducialLayout->setMarkerPositions(markerApIsMm);
         ui_->registrationFiducialLayout->setMarkerPositions(markerApIsMm);
+        ui_->imagingFiducialLayout->setMarkerDepthsMm(markerLrMm);
+        ui_->registrationFiducialLayout->setMarkerDepthsMm(markerLrMm);
     }
     const int sagittal = ui_->sagittalSlider->value() + 1;
     const int coronal = ui_->coronalSlider->value() + 1;

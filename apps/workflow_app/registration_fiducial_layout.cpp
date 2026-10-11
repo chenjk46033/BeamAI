@@ -27,6 +27,21 @@ void RegistrationFiducialLayout::setSelectionHandler(std::function<void(int)> ha
     selectionHandler_ = std::move(handler);
 }
 
+double RegistrationFiducialLayout::sideLengthMm(int from, int to) const {
+    if (!hasPositions_) {
+        // The nominal plate: a 22.5 mm front-to-back arm and a 20.0 mm one.
+        const bool vertical = (from % 3 == 0 && to % 3 == 1) || (from % 3 == 1 && to % 3 == 0);
+        const bool horizontal = (from % 3 == 1 && to % 3 == 2) || (from % 3 == 2 && to % 3 == 1);
+        if (vertical) return 20.0;
+        if (horizontal) return 22.5;
+        return std::hypot(20.0, 22.5);
+    }
+    const double ap = positionsApIsMm_[from].x() - positionsApIsMm_[to].x();
+    const double is = positionsApIsMm_[from].y() - positionsApIsMm_[to].y();
+    const double lr = hasDepths_ ? depthsMm_[from] - depthsMm_[to] : 0.0;
+    return std::sqrt(ap * ap + is * is + lr * lr);
+}
+
 std::array<QPointF, 6> RegistrationFiducialLayout::markerCenters() const {
     const double half = width() / 2.0;
     const double budgetWidth = std::min(120.0, std::max(56.0, half - 72.0));
@@ -90,6 +105,12 @@ std::array<QPointF, 6> RegistrationFiducialLayout::markerCenters() const {
             QPointF(right, bottom)};
 }
 
+void RegistrationFiducialLayout::setMarkerDepthsMm(std::array<double, 6> lrMm) {
+    depthsMm_ = lrMm;
+    hasDepths_ = true;
+    update();
+}
+
 void RegistrationFiducialLayout::setMarkerPositions(std::array<QPointF, 6> positionsApIsMm) {
     positionsApIsMm_ = positionsApIsMm;
     hasPositions_ = true;
@@ -118,6 +139,33 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         triangle.lineTo(points[base + 2]);
         triangle.closeSubpath();
         painter.drawPath(triangle);
+    }
+
+    {
+        QFont lengthFont = painter.font();
+        lengthFont.setPointSizeF(std::max(7.0, lengthFont.pointSizeF() - 1.5));
+        lengthFont.setBold(true);
+        painter.setFont(lengthFont);
+        const QFontMetricsF lengthMetrics(lengthFont);
+        for (int base : {0, 3}) {
+            for (int k = 0; k < 3; ++k) {
+                const int from = base + k;
+                const int to = base + (k + 1) % 3;
+                const double mm = sideLengthMm(from, to);
+                if (mm <= 0.0) continue;
+                const QString text = QStringLiteral("%1").arg(mm, 0, 'f', 1);
+                const QPointF middle = (points[from] + points[to]) / 2.0;
+                const QRectF box(middle.x() - lengthMetrics.horizontalAdvance(text) / 2.0 - 3.0,
+                                 middle.y() - lengthMetrics.height() / 2.0,
+                                 lengthMetrics.horizontalAdvance(text) + 6.0,
+                                 lengthMetrics.height());
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(248, 250, 251));
+                painter.drawRect(box);
+                painter.setPen(QColor(200, 30, 40));
+                painter.drawText(box, Qt::AlignCenter, text);
+            }
+        }
     }
 
     // The corner angles, drawn just inside each vertex. Worth showing because
