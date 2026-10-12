@@ -604,14 +604,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationLayout->removeItem(ui_->registrationActions);
     ui_->registrationLayout->removeWidget(ui_->registrationResult);
     ui_->registrationLayout->setSpacing(0);
-    registrationMriPathLabel_ = new QLabel(QStringLiteral("No MRI loaded"), this);
-    registrationMriPathLabel_->setStyleSheet(QStringLiteral("color: #bdc7cb; padding: 6px 0;"));
-    registrationMriPathLabel_->setWordWrap(true);
-    registrationMriPathLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    registrationMriPathLabel_->setMinimumHeight(0);
-    registrationMriPathLabel_->setMaximumHeight(36);
-    registrationMriPathLabel_->setContentsMargins(0, 0, 0, 0);
-    ui_->registrationLayout->insertWidget(0, registrationMriPathLabel_);
     // Import now sits in step 1's button row beside Detect and Restore Default:
     // all three act on the same six fiducials, so they belong together rather
     // than split between a header row and a step.
@@ -1307,6 +1299,16 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         driver->hide();
     }
     ui_->loadMriButtons->insertWidget(0, loadMriButton_);
+
+    // The loaded path reads better beside the button that loaded it than on
+    // a line of its own.
+    for (int i = ui_->loadMriButtons->count() - 1; i >= 0; --i)
+        if (ui_->loadMriButtons->itemAt(i)->spacerItem())
+            delete ui_->loadMriButtons->takeAt(i);
+    ui_->imagingBox->removeWidget(ui_->mriPathLabel);
+    ui_->mriPathLabel->setWordWrap(false);
+    ui_->mriPathLabel->setStyleSheet(QStringLiteral("color: #bdc7cb; padding-left: 10px;"));
+    ui_->loadMriButtons->addWidget(ui_->mriPathLabel, 1);
     connect(ui_->showFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->registrationShowFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showLinkedNavigationCheckBox, &QCheckBox::toggled, this, [this](bool visible) {
@@ -3681,14 +3683,10 @@ void WorkflowWindow::refresh() {
     if (selectedStage_ == beam::gui::WorkflowStage::Treatment && !ready) showMessage(QString::fromStdString(reason), true);
 }
 
-// One clock read for both labels, or they can straddle a second boundary.
 void WorkflowWindow::setMriPathDisplay(const QString& path) {
-    const QString text = QStringLiteral("%1  ·  Loaded: %2")
-                             .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate));
-    ui_->mriPathLabel->setText(text);
-    if (registrationMriPathLabel_ == nullptr) return;
-    registrationMriPathLabel_->setText(text);
-    registrationMriPathLabel_->setToolTip(path);
+    ui_->mriPathLabel->setText(QStringLiteral("%1  ·  Loaded: %2")
+                                   .arg(path, QDateTime::currentDateTime().toString(Qt::ISODate)));
+    ui_->mriPathLabel->setToolTip(path);
 }
 
 void WorkflowWindow::showMessage(const QString& text, bool error) {
