@@ -179,11 +179,14 @@ private:
     // Height the Treatment plan body is guaranteed under the MRI viewers; it
     // scrolls below that rather than squeezing them. syncMriViewerHeights
     // reserves it so the viewers stay the same size as on the other stages.
-    static constexpr int kTreatmentBodyMinHeight = 420;
+    static constexpr int kTreatmentBodyMinHeight = 300;
     // Fixed viewer height for the Treatment plan stage, which shares its page
     // with the whole Sonicate body. Small enough that the body fits under it
     // on an ordinary screen, large enough to place a target in.
-    static constexpr int kTreatmentViewerHeight = 360;
+    // A fixed ceiling, not one derived from the page: these viewers are
+    // Fixed, so a page that asks for more than the window holds grows the
+    // window, which raises the budget, which asks for more again.
+    static constexpr int kTreatmentViewerHeight = 485;
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
