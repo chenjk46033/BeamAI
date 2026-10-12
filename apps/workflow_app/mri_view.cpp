@@ -396,9 +396,14 @@ void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
         event->accept();
         return;
     }
-    if (event->button() == Qt::LeftButton && pointPlacementEnabled_) {
-        if (const auto ras = rasAtWidgetPosition(event->position()); ras && pointPickedHandler_)
-            pointPickedHandler_(*ras);
+    if (event->button() == Qt::LeftButton && pointPlacementEnabled_ && !image_.isNull()) {
+        // Decide on release: a drag pans, a click places. Placing on press
+        // consumed every left press, which left these views unpannable.
+        pendingPlacement_ = true;
+        panning_ = true;
+        lastMousePosition_ = event->pos();
+        pressPosition_ = event->pos();
+        setCursor(Qt::SizeAllCursor);
         event->accept();
         return;
     }
@@ -442,6 +447,9 @@ void WorkflowMriView::mouseMoveEvent(QMouseEvent* event) {
         pan_ += event->pos() - lastMousePosition_;
         lastMousePosition_ = event->pos();
         clampPan();
+        if (pendingPlacement_ &&
+            (event->pos() - pressPosition_).manhattanLength() > 4)
+            pendingPlacement_ = false;
     }
     updateMouseCoordinate(event->position());
     showMarkerTooltipAt(event->position(), event->globalPosition().toPoint());
@@ -473,6 +481,12 @@ void WorkflowMriView::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     if (event->button() == Qt::LeftButton) {
+        if (pendingPlacement_) {
+            if (const auto ras = rasAtWidgetPosition(event->position());
+                ras && pointPickedHandler_)
+                pointPickedHandler_(*ras);
+        }
+        pendingPlacement_ = false;
         draggingMarker_ = false;
         panning_ = false;
         setCursor(Qt::ArrowCursor);

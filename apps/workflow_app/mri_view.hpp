@@ -149,6 +149,8 @@ private:
     QPointF pan_;
     QPoint lastMousePosition_;
     bool panning_ = false;
+    bool pendingPlacement_ = false;
+    QPoint pressPosition_;
     bool draggingMarker_ = false;
     QPointF crosshair_ = QPointF(0.5, 0.5);
     bool navigationCrosshairVisible_ = false;
