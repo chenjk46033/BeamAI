@@ -495,7 +495,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     triangleColumn->addLayout(step1Buttons);
     markerDiagramLayout->addLayout(triangleColumn);
     markerDiagramLayout->addStretch(1);
-    markerSplitterLayout->addWidget(markerDiagramPanel, 3);
+    markerSplitterLayout->addWidget(markerDiagramPanel, 2);
     ui_->registrationFiducialLayout->setMinimumWidth(300);
     ui_->registrationFiducialLayout->setMinimumHeight(0);
     ui_->registrationFiducialLayout->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -562,22 +562,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
     // detectFiducialsButton_ and importFiducialsButton_ are built earlier, with
     // step 1's button row.
-    saveFiducialsButton_ = new QPushButton(QStringLiteral("Save fiducials..."), this);
-    saveFiducialsButton_->setObjectName(QStringLiteral("saveFiducialsButton"));
-    saveFiducialsButton_->setToolTip(
-        QStringLiteral("Save the six measured fiducials beside the MRI, for Import... to read back"));
-    // A peer of the step-4 button, so take its metrics rather than guessing.
-    saveFiducialsButton_->setMinimumHeight(
-        std::max(ui_->acceptRegistrationButton->minimumHeight(),
-                 ui_->acceptRegistrationButton->sizeHint().height()));
-    saveFiducialsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    saveFiducialsButton_->setStyleSheet(QStringLiteral(
-        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; "
-        "border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
-        "QPushButton:hover { background: #2083a3; } "
-        "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
-    connect(saveFiducialsButton_, &QPushButton::clicked, this, [this] { saveFiducialsCsv(); });
-
 
     auto* markerActions = new QHBoxLayout;
     markerActions->setContentsMargins(0, 0, 0, 0);
@@ -597,7 +581,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* step1GroupLayout = new QVBoxLayout(step1Group);
     step1GroupLayout->setContentsMargins(6, 4, 6, 6);
     step1GroupLayout->addWidget(markerSplitter);
-    ui_->registrationDetailsLayout->addWidget(step1Group, 3);
+    ui_->registrationDetailsLayout->addWidget(step1Group, 2);
     // The Designer action row is now empty because its buttons were moved into
     // the two splitter panes. Remove that empty layout so it cannot leave a
     // blank band before the final Accept Registration button.
@@ -701,9 +685,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     step2Buttons->setSpacing(4);
     step2Buttons->addWidget(registerCurrentPositionButton_);
     step2Buttons->addWidget(ui_->acceptRegistrationButton);
-    step2Buttons->addWidget(saveFiducialsButton_);
-    calibrationLayout->addLayout(step2Buttons);
+    // Above the buttons, not below: most of these messages are preconditions
+    // on the buttons ("Step 2 needs both panels on the same notches"), so they
+    // read as the reason a button is refused. Its height is fixed, so the
+    // buttons do not move as messages come and go.
     calibrationLayout->addWidget(ui_->registrationResult);
+    calibrationLayout->addLayout(step2Buttons);
     // Slack belongs below the buttons; above them it walks them down the
     // column as the page grows, and off it.
     calibrationLayout->addStretch(1);
@@ -2409,6 +2396,9 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
     updateRegistrationAvailability();
 }
 
+// No caller: the Save fiducials button was removed, and writing the six
+// measured points belongs to session saving when that is built. Kept because
+// it is the only definition of the CSV layout importFiducialsCsv() reads.
 void WorkflowWindow::saveFiducialsCsv() {
     if (fiducials_.size() < 6) {
         showMessage(QStringLiteral("Load an MRI before saving fiducials."), true);
@@ -3695,7 +3685,7 @@ void WorkflowWindow::showMessage(const QString& text, bool error) {
     if (text.trimmed().isEmpty()) return;
     ui_->workflowMessage->setText(text);
     ui_->workflowMessage->setStyleSheet(error
-        ? QStringLiteral("padding: 10px; color: #845006; background: #fff4dc; border-radius: 5px;")
+        ? QStringLiteral("padding: 10px; color: #a32018; background: #fdeceb; border-radius: 5px;")
         : QStringLiteral("padding: 10px; color: #12663f; background: #e8f5ed; border-radius: 5px;"));
     // selectStage hides the footer line on Registration, so a message raised
     // there lands on a hidden widget. Mirror it onto the page's own result
@@ -3705,15 +3695,15 @@ void WorkflowWindow::showMessage(const QString& text, bool error) {
     if (error) {
         ui_->registrationResult->setText(text);
         ui_->registrationResult->setStyleSheet(
-            QStringLiteral("padding: 9px 10px; color: #845006; background: #fff4dc; "
-                           "border: 1px solid #e0b355; border-radius: 5px;"));
+            QStringLiteral("padding: 9px 10px; color: #a32018; background: #fdeceb; "
+                           "border: 1px solid #e3a49c; border-radius: 5px;"));
         return;
     }
     // Success keeps whatever the caller wrote -- several paths put a longer
     // instruction there than the footer line carries -- but must drop any
     // warning styling left by the message before it.
     ui_->registrationResult->setStyleSheet(
-        QStringLiteral("padding: 9px 10px; background: #eef2f4; border-radius: 5px;"));
+        QStringLiteral("padding: 9px 10px; color: #17313f; background: #eef2f4; border-radius: 5px;"));
 }
 
 }  // namespace beam::app

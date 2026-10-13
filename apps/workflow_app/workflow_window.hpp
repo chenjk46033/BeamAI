@@ -231,7 +231,6 @@ private:
     QToolButton* loadMriButton_ = nullptr;
     // The picker is rebuilt per right-click, so the pick is remembered here.
     int treatmentFiducialPick_ = -1;
-    QPushButton* saveFiducialsButton_ = nullptr;
     QLabel* arrayPositionLabel_ = nullptr;
     QLabel* couplingStatusLabel_ = nullptr;
     QLabel* couplingTitleLabel_ = nullptr;

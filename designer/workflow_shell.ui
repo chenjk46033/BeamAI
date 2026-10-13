@@ -1570,7 +1570,7 @@
                                 <bool>true</bool>
                               </property>
                               <property name="styleSheet">
-                                <string>padding: 9px 10px; background: #eef2f4; border-radius: 5px;</string>
+                                <string>padding: 9px 10px; color: #17313f; background: #eef2f4; border-radius: 5px;</string>
                               </property>
                             </widget>
                           </item>
@@ -1711,7 +1711,7 @@
                         <string>Complete the required fields to continue.</string>
                       </property>
                       <property name="styleSheet">
-                        <string>padding: 10px; color: #845006; background: #fff4dc; border-radius: 5px;</string>
+                        <string>padding: 10px; color: #a32018; background: #fdeceb; border-radius: 5px;</string>
                       </property>
                       <property name="wordWrap">
                         <bool>true</bool>

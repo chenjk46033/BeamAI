@@ -141,6 +141,9 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         painter.drawPath(triangle);
     }
 
+    // Kept so the name labels below can treat them as obstacles: at a narrow
+    // pane width an edge midpoint lands right where a name wants to sit.
+    std::array<QRectF, 6> lengthBoxes{};
     {
         QFont lengthFont = painter.font();
         lengthFont.setPointSizeF(std::max(7.0, lengthFont.pointSizeF() - 1.5));
@@ -159,6 +162,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
                                  middle.y() - lengthMetrics.height() / 2.0,
                                  lengthMetrics.horizontalAdvance(text) + 6.0,
                                  lengthMetrics.height());
+                lengthBoxes[static_cast<std::size_t>(from)] = box;
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(248, 250, 251));
                 painter.drawRect(box);
@@ -260,6 +264,19 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
     for (int index = 1; index < 6; ++index) {
         for (int pass = 0; pass < 3; ++pass) {
             bool moved = false;
+            const auto clearOf = [&](const QRectF& blocker) {
+                if (blocker.isEmpty() || !placements[index].box.intersects(blocker))
+                    return false;
+                const double below = blocker.bottom() + 2.0;
+                if (below + placements[index].box.height() <= height() - 2.0)
+                    placements[index].box.moveTop(below);
+                else
+                    placements[index].box.moveBottom(blocker.top() - 2.0);
+                return true;
+            };
+            // The red side lengths are drawn already and do not move, so a name
+            // that lands on one steps aside rather than overprinting it.
+            for (const QRectF& length : lengthBoxes) moved = clearOf(length) || moved;
             for (int other = 0; other < index; ++other) {
                 if (!placements[index].box.intersects(placements[other].box)) continue;
                 const double below = placements[other].box.bottom() + 2.0;
