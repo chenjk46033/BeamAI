@@ -74,6 +74,12 @@
 #include "registration_fiducial_layout.hpp"
 #include "registration/array_transform.hpp"
 #include "correction/receive_waveform.hpp"
+#include "safety/checks.hpp"
+#include <QScrollBar>
+#include "gui_qt/correction_tab_chart.hpp"
+#include <QtCharts/QChartView>
+#include <QtCharts/QAbstractAxis>
+#include <QtCharts/QLegend>
 #include "correction/signal.hpp"
 #include "serialcom/serial_port.hpp"
 
@@ -860,6 +866,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // gate; keep its workflow state internally but do not present a duplicate
     // navigation tab to the operator.
     ui_->stageList->item(static_cast<int>(beam::gui::WorkflowStage::Correction))->setHidden(true);
+    // Safety review and treatment delivery are folded into the Treatment
+    // tab: its Accept completes them, and the Sonicate controls sit on the
+    // same page as the plan they fire, as BeamV0's Sonicate tab does.
+    ui_->stageList->item(static_cast<int>(beam::gui::WorkflowStage::SafetyReview))->setHidden(true);
+    ui_->stageList->item(static_cast<int>(beam::gui::WorkflowStage::Treatment))->setHidden(true);
 
     // Coupling is kept as a real Qt page (rather than the former generic
     // placeholder) so the operator can measure, review, and accept acoustic
@@ -897,7 +908,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // alignment on a top-level layout would be ignored, so do not add one.)
     ui_->placeholderLayout->addWidget(couplingTitleLabel_);
     ui_->placeholderLayout->addWidget(couplingDescriptionLabel_);
-    ui_->placeholderLayout->addSpacing(12);
+    couplingStatusLabel_->setContentsMargins(0, 12, 0, 0);
     ui_->placeholderLayout->addWidget(couplingStatusLabel_);
     ui_->placeholderLayout->addWidget(couplingProgressBar_);
     ui_->placeholderLayout->addWidget(runCouplingCheckButton_);
@@ -931,9 +942,40 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     acceptCorrectionButton_->setStyleSheet(acceptButtonStyle);
     ui_->placeholderLayout->addWidget(correctionTitleLabel_);
     ui_->placeholderLayout->addWidget(correctionDescriptionLabel_);
-    ui_->placeholderLayout->addSpacing(12);
+    correctionStatusLabel_->setContentsMargins(0, 12, 0, 0);
     ui_->placeholderLayout->addWidget(correctionStatusLabel_);
     ui_->placeholderLayout->addWidget(correctionProgressBar_);
+    // updateAttenuationPlots.m draws the raw and filtered receive waveform per
+    // array; setAvgTransmissionDataBars.m draws current transmission against
+    // the stored average. Hidden until a measurement exists -- an empty axis
+    // reads as a measurement of zero.
+    couplingChartsRow_ = new QWidget(ui_->placeholderPage);
+    auto* couplingChartsLayout = new QHBoxLayout(couplingChartsRow_);
+    couplingChartsLayout->setContentsMargins(0, 0, 0, 0);
+    couplingChartsLayout->setSpacing(8);
+    for (QChartView** view : {&couplingCh0ChartView_, &couplingCh1ChartView_, &couplingBarChartView_}) {
+        *view = new QChartView(couplingChartsRow_);
+        (*view)->setRenderHint(QPainter::Antialiasing, true);
+        (*view)->setMinimumHeight(210);
+    }
+    couplingChartsLayout->addWidget(couplingCh0ChartView_, 2);
+    couplingChartsLayout->addWidget(couplingCh1ChartView_, 2);
+    couplingChartsLayout->addWidget(couplingBarChartView_, 1);
+    // Without a device there are no waveforms to draw. Say so in the space the
+    // plots occupy rather than leaving the page looking unchanged.
+    couplingChartsPlaceholder_ = new QLabel(
+        QStringLiteral("Receive waveforms are drawn here once a measurement is read from the "
+                       "device. No Beam device is connected, so this run has no waveform data."),
+        couplingChartsRow_);
+    couplingChartsPlaceholder_->setWordWrap(true);
+    couplingChartsPlaceholder_->setAlignment(Qt::AlignCenter);
+    couplingChartsPlaceholder_->setMinimumHeight(210);
+    couplingChartsPlaceholder_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #9fb3ba; background: #16323b; border: 1px dashed #2b6172; "
+        "border-radius: 5px; padding: 12px; }"));
+    couplingChartsLayout->addWidget(couplingChartsPlaceholder_, 5);
+    couplingChartsRow_->hide();
+    ui_->placeholderLayout->addWidget(couplingChartsRow_);
     ui_->placeholderLayout->addWidget(runCorrectionButton_);
     ui_->placeholderLayout->addWidget(acceptCorrectionButton_);
 
@@ -1144,6 +1186,16 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 const auto split = beam::correction::splitAndFilterReceiveWaveform(raw);
                 const auto measured = beam::correction::throughTransmitAmplitude(split.ch0rcv, split.ch1rcv);
                 transmission = measured.amp;
+                // Kept for the plots updateAttenuationPlots.m draws, and for
+                // the peak-to-peak setAvgTransmissionDataBars compares against
+                // the coupling threshold.
+                couplingCh0Raw_ = split.ch0rcv;
+                couplingCh1Raw_ = split.ch1rcv;
+                couplingCh0Filtered_ = beam::correction::filterTransmitSignal(split.ch0rcv).filtWave;
+                couplingCh1Filtered_ = beam::correction::filterTransmitSignal(split.ch1rcv).filtWave;
+                couplingPeakToPeak_ =
+                    std::max(beam::correction::txRxSignalAmplitude(couplingCh0Filtered_).peak2peak,
+                             beam::correction::txRxSignalAmplitude(couplingCh1Filtered_).peak2peak);
                 simulated = false;
             } catch (const std::exception&) {
                 // A stale or unrelated COM port should not prevent offline
@@ -1153,17 +1205,31 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             }
         }
         const int percent = std::clamp(static_cast<int>(std::lround(transmission * 100.0)), 0, 100);
-        correctionCheckPassed_ = transmission >= 0.07;
+        // checkCouplingSafety.m's own test, at its own 0.1 -- not a threshold
+        // of this application's choosing.
+        const beam::safety::SafetyReport coupling = beam::safety::checkCouplingSafety(transmission);
+        correctionCheckPassed_ = coupling.pass;
         // Keep the measurement itself, not only its verdict: the Treatment
         // stage feeds it to prepareSonication, which re-checks it against
         // kCouplingThreshold before any command is sent.
         transmissionAmplitude_ = transmission;
         correctionProgressBar_->setValue(percent);
-        correctionStatusLabel_->setText(QStringLiteral(
-            "Correction measurement %1: current transmission %2%. The through-transmit level is %3 the safety threshold.")
-                .arg(simulated ? QStringLiteral("(simulated)") : QStringLiteral("from device"))
-                .arg(percent)
-                .arg(correctionCheckPassed_ ? QStringLiteral("above") : QStringLiteral("below")));
+        // checkCouplingSafety.m's own wording, including the line it appends
+        // when the report is not empty.
+        QStringList lines;
+        lines << QStringLiteral("Through-transmit %1: transmission %2%.")
+                     .arg(simulated ? QStringLiteral("(simulated, no device connected)")
+                                    : QStringLiteral("measured"))
+                     .arg(percent);
+        if (coupling.pass) {
+            lines << QStringLiteral("Coupling Online");
+        } else {
+            for (const std::string& message : coupling.messages)
+                lines << QString::fromStdString(message);
+            lines << QStringLiteral("Readjust coupling or add coupling gel over uncoupled elements");
+        }
+        correctionStatusLabel_->setText(lines.join(QChar('\n')));
+        updateCouplingCharts(transmission);
         workflow_.change(beam::gui::WorkflowStage::Correction,
                          "Correction measured; awaiting operator acceptance.");
         acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
@@ -1194,10 +1260,17 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             showMessage(QString::fromStdString(reason), true);
             return;
         }
+        // Safety review has no tab of its own any more -- accepting the plan
+        // is the review, and it is what unlocks Sonicate below. Delivery is
+        // left open deliberately: "Finish treatment and continue" completes it
+        // and moves to Report. Navigating here would land on a hidden row.
+        if (!workflow_.complete(beam::gui::WorkflowStage::SafetyReview, &reason)) {
+            showMessage(QString::fromStdString(reason), true);
+            return;
+        }
         acceptTreatmentPlanButton_->setEnabled(false);
-        showMessage(QStringLiteral("Treatment plan accepted. Continuing to Safety Review."), false);
+        showMessage(QStringLiteral("Treatment plan accepted. Sonication is now enabled."), false);
         refresh();
-        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
     });
     connect(acceptSafetyReviewButton_, &QPushButton::clicked, this, [this] {
         std::string reason;
@@ -1817,7 +1890,9 @@ void WorkflowWindow::syncMriViewerHeights() {
     // because the viewers are Fixed and so raise the window's own minimum,
     // which raises the leftover space, which raises the height again (the
     // window grew ~60px per tab switch until it outgrew the screen).
-    const int treatmentHeight = std::min(height, kTreatmentViewerHeight);
+    // 80% of the shared height: this page carries the plan and the execution
+    // controls as well, so its viewers give up the difference.
+    const int treatmentHeight = std::min(height * 4 / 5, kTreatmentViewerHeight);
     if (height == ui_->sagittalPreview->minimumHeight() &&
         height == ui_->sagittalPreview->maximumHeight() &&
         treatmentHeight == treatmentSagittalPreview_->minimumHeight() &&
@@ -3494,7 +3569,8 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
     }
     const bool treatmentPlanPage = stage == beam::gui::WorkflowStage::TreatmentPlan;
-    const bool treatmentExecutionPage = stage == beam::gui::WorkflowStage::Treatment;
+    const bool treatmentExecutionPage = stage == beam::gui::WorkflowStage::Treatment ||
+                                        stage == beam::gui::WorkflowStage::TreatmentPlan;
     const bool safetyReviewPage = stage == beam::gui::WorkflowStage::SafetyReview;
     if (ui_->treatmentMriPage) ui_->treatmentMriPage->setVisible(treatmentPlanPage);
     // The Treatment plan and Treatment stages each own one container, so
@@ -3513,6 +3589,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                             static_cast<QWidget*>(couplingProgressBar_),
                             static_cast<QWidget*>(runCouplingCheckButton_),
                             static_cast<QWidget*>(acceptCouplingButton_),
+                            static_cast<QWidget*>(couplingChartsRow_),
                             static_cast<QWidget*>(correctionTitleLabel_),
                             static_cast<QWidget*>(correctionDescriptionLabel_),
                             static_cast<QWidget*>(correctionStatusLabel_),
@@ -3557,7 +3634,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         shamButton_->setEnabled(ready && !sonicationCountdownTimer_->isActive());
         if (!ready)
             treatmentExecutionStatusLabel_->setText(
-                QStringLiteral("Complete Safety Review before sonicating."));
+                QStringLiteral("Accept the treatment plan before sonicating."));
     }
     if (safetyReviewPage) {
         const auto complete = [this](beam::gui::WorkflowStage checkStage) {
@@ -3671,6 +3748,47 @@ void WorkflowWindow::refresh() {
     ui_->abortButton->setEnabled(workflow_.state(beam::gui::WorkflowStage::Treatment).status ==
                                   beam::gui::WorkflowStatus::InProgress);
     if (selectedStage_ == beam::gui::WorkflowStage::Treatment && !ready) showMessage(QString::fromStdString(reason), true);
+}
+
+// updateAttenuationPlots.m's two RF plots and setAvgTransmissionDataBars.m's
+// bar pair, from the already-ported builders. Only drawn for a real
+// measurement: with no device there are no waveforms, and an axis of zeros
+// would read as a measured zero rather than as nothing measured.
+void WorkflowWindow::updateCouplingCharts(double transmissionAmp) {
+    if (!couplingChartsRow_) return;
+    const bool haveWaveforms = couplingCh0Raw_.size() > 0 && couplingCh1Raw_.size() > 0;
+    couplingChartsPlaceholder_->setVisible(!haveWaveforms);
+    for (QChartView* view : {couplingCh0ChartView_, couplingCh1ChartView_, couplingBarChartView_})
+        view->setVisible(haveWaveforms);
+    couplingChartsRow_->show();
+    if (!haveWaveforms) return;
+    // The builders are shared with beam_app's light tab, so the dark theme is
+    // applied here rather than in them.
+    // setTheme() repaints the series, which would discard plotAttBars.m's
+    // red/green verdict on the Current bar -- that colour is the result, not
+    // decoration. So the bar chart gets the dark ground without the theme.
+    const auto show = [](QChartView* view, QChart* chart, bool theme) {
+        if (theme) chart->setTheme(QChart::ChartThemeDark);
+        chart->setBackgroundBrush(QColor(24, 57, 68));
+        chart->setPlotAreaBackgroundBrush(QColor(18, 44, 53));
+        chart->setPlotAreaBackgroundVisible(true);
+        chart->setTitleBrush(QColor(220, 235, 239));
+        for (QAbstractAxis* axis : chart->axes()) {
+            axis->setLabelsBrush(QColor(200, 219, 225));
+            axis->setTitleBrush(QColor(220, 235, 239));
+        }
+        if (chart->legend()) chart->legend()->setLabelBrush(QColor(220, 235, 239));
+        view->setChart(chart);
+    };
+    const double yLimit = beam::gui::computeRfPlotYLimit(couplingCh0Filtered_, couplingCh1Filtered_);
+    show(couplingCh0ChartView_, beam::gui_qt::buildRfWaveformChart(
+        couplingCh0Raw_, couplingCh0Filtered_, yLimit, QStringLiteral("First array")), true);
+    show(couplingCh1ChartView_, beam::gui_qt::buildRfWaveformChart(
+        couplingCh1Raw_, couplingCh1Filtered_, yLimit, QStringLiteral("Second array")), true);
+    show(couplingBarChartView_, beam::gui_qt::buildTransmissionBarChart(
+        beam::gui::computeAvgTransmissionBars(transmissionAmp, couplingPeakToPeak_, kCouplingThreshold)),
+         false);
+    couplingChartsRow_->show();
 }
 
 void WorkflowWindow::setMriPathDisplay(const QString& path) {

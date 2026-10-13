@@ -21,6 +21,8 @@
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class WorkflowShell; }
+class QChartView;
+class QHBoxLayout;
 class QGroupBox;
 class QLabel;
 class QListWidget;
@@ -121,6 +123,7 @@ private:
     void updateRegistrationStepIndicators();
     void refresh();
     void setMriPathDisplay(const QString& path);
+    void updateCouplingCharts(double transmissionAmp);
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
 
@@ -188,7 +191,10 @@ private:
     // A fixed ceiling, not one derived from the page: these viewers are
     // Fixed, so a page that asks for more than the window holds grows the
     // window, which raises the budget, which asks for more again.
-    static constexpr int kTreatmentViewerHeight = 485;
+    // 80% of the shared Imaging/Registration height: the Treatment page also
+    // carries the plan body and the execution controls below these viewers, and
+    // at the full height the Sonicate row fell off the bottom of a 1080p screen.
+    static constexpr int kTreatmentViewerHeight = 388;
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
@@ -276,10 +282,18 @@ private:
     QTableView* protocolView_ = nullptr;
     QListWidget* targetListWidget_ = nullptr;
     QPushButton* moveToTargetButton_ = nullptr;
-    QPushButton* sortByOrderButton_ = nullptr;
-    QPushButton* addSonicationButton_ = nullptr;
-    QPushButton* removeSonicationButton_ = nullptr;
     QComboBox* visitNumberCombo_ = nullptr;
+    QHBoxLayout* treatmentBodyRow_ = nullptr;
+    Eigen::VectorXd couplingCh0Raw_;
+    Eigen::VectorXd couplingCh1Raw_;
+    Eigen::VectorXd couplingCh0Filtered_;
+    Eigen::VectorXd couplingCh1Filtered_;
+    double couplingPeakToPeak_ = 0.0;
+    QWidget* couplingChartsRow_ = nullptr;
+    QLabel* couplingChartsPlaceholder_ = nullptr;
+    QChartView* couplingCh0ChartView_ = nullptr;
+    QChartView* couplingCh1ChartView_ = nullptr;
+    QChartView* couplingBarChartView_ = nullptr;
     QLabel* sonicationScopeLabel_ = nullptr;
     QPushButton* newVisitButton_ = nullptr;
     QRadioButton* hydrogelSmallRadio_ = nullptr;

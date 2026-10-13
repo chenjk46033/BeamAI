@@ -101,8 +101,11 @@ if(Qt6_FOUND AND TARGET gui_qt)
         ../designer/resources/example_targets.qrc
     )
     target_include_directories(workflow_app PRIVATE workflow_app)
-    target_link_libraries(workflow_app PRIVATE gui gui_qt_models gui_qt_views mri correction stimulation sham
-                                                serialcom infra_dicom infra_mat Qt6::Widgets)
+    # gui_qt + Charts: the Coupling page draws updateAttenuationPlots.m's two RF
+    # plots and setAvgTransmissionDataBars.m's bar pair, both already ported there.
+    target_link_libraries(workflow_app PRIVATE gui gui_qt gui_qt_models gui_qt_views mri correction
+                                                stimulation sham safety serialcom infra_dicom infra_mat
+                                                Qt6::Widgets Qt6::Charts)
     set_target_properties(workflow_app PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
         AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../designer")
     beam_deploy_qt_platform(workflow_app)

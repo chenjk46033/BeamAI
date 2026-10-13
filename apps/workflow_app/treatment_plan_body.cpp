@@ -239,6 +239,15 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     auto* targetListLabel = new QLabel(QStringLiteral("Target List"), targetPanel);
     targetListLabel->setStyleSheet(QString::fromLatin1(kSectionLabelStyle));
     targetPanelLayout->addWidget(targetListLabel);
+    // Above the list, not below it: the body scrolls, and a button under a
+    // 430-pixel list sits past the bottom of the visible area -- reachable
+    // only by scrolling, which is no use for something you press while
+    // looking at the MRI views.
+    moveToTargetButton_ = new QPushButton(QStringLiteral("Move to Selected Target"), targetPanel);
+    moveToTargetButton_->setToolTip(
+        QStringLiteral("Centre all three MRI planes on the shown sonication's position"));
+    moveToTargetButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
+    targetPanelLayout->addWidget(moveToTargetButton_);
     targetListWidget_ = new QListWidget(targetPanel);
     applyItemViewPalette(targetListWidget_);
     // Each row carries its own rename / create / delete icons, so beam_app's
@@ -255,44 +264,30 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
             addTargetListRow(QString::fromStdString(target.name));
     }
     targetListWidget_->setCurrentRow(0);
-    // Bounded, so the button below sits directly under the list instead of at
-    // the foot of a panel as tall as the whole (scrolling) body, where it was
-    // off-screen. Sized to show most of the twelve targets at once while
-    // leaving the button inside the body's own height; the list scrolls past it.
-    targetListWidget_->setFixedHeight(430);
+    // Shorter than its own contents on purpose: the body that holds this panel
+    // is around 300 px, so a list tall enough for every target pushed its own
+    // bottom off the page and made the whole body scroll to reach it. Bounded
+    // here, the list scrolls itself and the page does not.
+    targetListWidget_->setFixedHeight(220);
+    targetListWidget_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    targetListWidget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     targetPanelLayout->addWidget(targetListWidget_);
-    moveToTargetButton_ = new QPushButton(QStringLiteral("Move to Selected Target"), targetPanel);
-    // Unlike beam_app's, this one is connected: the MRI views give each
-    // target a real position to move to.
-    moveToTargetButton_->setToolTip(
-        QStringLiteral("Centre all three MRI planes on the selected target's placed position"));
-    targetPanelLayout->addWidget(moveToTargetButton_);
     targetPanelLayout->addStretch(1);
-    moveToTargetButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
     bodyLayout->addWidget(targetPanel);
+    treatmentBodyRow_ = bodyLayout;
 
     // ---- app.stimParamTable and its button row --------------------------
     auto* rightColumn = new QVBoxLayout;
     rightColumn->setSpacing(6);
-    sortByOrderButton_ = new QPushButton(QStringLiteral("Sort by #"), bodyContent);
-    addSonicationButton_ = new QPushButton(QStringLiteral("Add Sonication"), bodyContent);
-    removeSonicationButton_ = new QPushButton(QStringLiteral("Remove Marked"), bodyContent);
-    removeSonicationButton_->setToolTip(
-        QStringLiteral("Removes every sonication whose Show box is ticked. Row 1 is never removed -- "
-                       "BeamV0's own removeSonicationUpdateTable.m clears its flag first."));
-    for (QPushButton* button : {sortByOrderButton_, addSonicationButton_, removeSonicationButton_})
-        button->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
+    // No Sort / Add / Remove buttons: BeamV0 has one sonication row per target
+    // and no UI to change that. createSonicationUpdateTable.m and
+    // removeSonicationUpdateTable.m are unreferenced there, and
+    // sortSonicationTable.m runs on its own rather than from a button. Several
+    // rows per target is DiademV0's behaviour, which is a separate application.
     sonicationScopeLabel_ = new QLabel(bodyContent);
     sonicationScopeLabel_->setWordWrap(true);
     sonicationScopeLabel_->setStyleSheet(QStringLiteral("color: #9fb3ba;"));
     rightColumn->addWidget(sonicationScopeLabel_);
-
-    auto* gridButtonRow = new QHBoxLayout;
-    gridButtonRow->addWidget(sortByOrderButton_);
-    gridButtonRow->addWidget(addSonicationButton_);
-    gridButtonRow->addWidget(removeSonicationButton_);
-    gridButtonRow->addStretch(1);
-    rightColumn->addLayout(gridButtonRow);
 
     stimParamModel_ = new beam::gui_qt::StimParamTableModel(this);
     stimParamView_ = new QTableView(bodyContent);
@@ -383,7 +378,18 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolView_ = new QTableView(protocolTab);
     protocolView_->setModel(protocolModel_);
     configureModelTable(protocolView_);
-    protocolLayout->addWidget(protocolView_, 1);
+    // A protocol is 24-odd entries; at the default row height only a handful
+    // fit and the rest pushed the page taller. Compact rows plus the table's
+    // own scrollbar keep the schedule readable without growing the page.
+    protocolView_->verticalHeader()->setDefaultSectionSize(22);
+    protocolView_->verticalHeader()->setMinimumSectionSize(18);
+    protocolView_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    protocolView_->setMaximumHeight(240);
+    // No stretch on the table, and the slack collected below it: capped as it
+    // is, a stretch here cannot be spent on the table, so the layout spread it
+    // between the rows above and left bands of empty space.
+    protocolLayout->addWidget(protocolView_);
+    protocolLayout->addStretch(1);
 
     treatmentTabs_->addTab(protocolTab, QStringLiteral("Treatment Protocol"));
 
@@ -464,23 +470,6 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
 
 void WorkflowWindow::wireTreatmentPlanBody() {
     // ---- the sonication grid -------------------------------------------
-    connect(sortByOrderButton_, &QPushButton::clicked, this, [this] {
-        stimParamModel_->sortByOrderColumn();
-        updateSonicationPlots();
-    });
-    connect(addSonicationButton_, &QPushButton::clicked, this, [this] {
-        if (stimParamModel_->rows().empty()) {
-            // addSonicationRow duplicates the last row, so seed the first.
-            stimParamModel_->setRows({beam::gui_qt::StimParamRow{}});
-        } else {
-            stimParamModel_->addSonicationRow();
-        }
-        selectSonicationRow(static_cast<int>(stimParamModel_->rows().size()) - 1);
-    });
-    connect(removeSonicationButton_, &QPushButton::clicked, this, [this] {
-        stimParamModel_->removeMarkedRows();
-        selectSonicationRow(0);
-    });
     connect(stimParamModel_, &beam::gui_qt::StimParamTableModel::showFlagsChanged, this,
             [this] { updateSonicationPlots(); });
     connect(stimParamModel_, &QAbstractItemModel::dataChanged, this, [this] {
@@ -507,9 +496,13 @@ void WorkflowWindow::wireTreatmentPlanBody() {
                         true);
             return;
         }
-        const QList<QVariant> ras = item->data(Qt::UserRole).toList();
-        if (ras.size() != 3) return;
-        focusTreatmentViewsOn(Eigen::Vector3d(ras.at(0).toDouble(), ras.at(1).toDouble(), ras.at(2).toDouble()));
+        // BeamV0 moves to the sonication getCurrentShownSonication.m picks --
+        // the last row with Show ticked -- not to a position held per target.
+        const std::vector<beam::gui_qt::StimParamRow>& rows = stimParamModel_->rows();
+        if (rows.empty()) return;
+        const std::size_t shown = static_cast<std::size_t>(
+            std::clamp(stimParamModel_->currentShownRow(), 1, static_cast<int>(rows.size()))) - 1;
+        focusTreatmentViewsOn(Eigen::Vector3d(rows[shown].x, rows[shown].y, rows[shown].z));
     });
     // The grid row belongs to whichever target is selected, so switching
     // target loads that target's placed coordinates into X/Y/Z (zeros if it
@@ -1157,6 +1150,10 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
 
     // Right: the .mlapp's own narrow control column.
     auto* controlColumn = new QVBoxLayout;
+    // Tight, so the whole column clears the body that holds it: at the
+    // default spacing Abort sonication fell past the bottom edge.
+    controlColumn->setSpacing(4);
+    controlColumn->setContentsMargins(0, 0, 0, 0);
     auto* controlPanel = new QWidget(treatmentExecutionBody_);
     controlPanel->setMaximumWidth(220);
     controlPanel->setLayout(controlColumn);
@@ -1205,13 +1202,25 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     controlColumn->addLayout(connectedRow);
     controlColumn->addWidget(columnLabel(QStringLiteral("Trigger:")));
     controlColumn->addWidget(triggerModeCombo_);
-    controlColumn->addSpacing(10);
+    controlColumn->addSpacing(6);
     controlColumn->addWidget(shamButton_);
     controlColumn->addWidget(startTreatmentButton_);
     controlColumn->addWidget(abortTreatmentButton_);
+    // Slack below, or the box layout spreads the controls apart.
     controlColumn->addStretch(1);
-    controlColumn->addWidget(finishTreatmentButton_);
-    row->addWidget(controlPanel);
+    // Finish is not a firing control and it is what made this column taller
+    // than the body that holds it, clipping Abort. It belongs with the status
+    // readout below, where the operator looks once the plan has been run.
+    statusColumn->addWidget(finishTreatmentButton_);
+    // Beside the plan rather than under it. Stacked below, this column began
+    // around 1150 px down a maximised window -- off the bottom of a 1080p
+    // screen, so the operator could not see Sonicate at all.
+    if (treatmentBodyRow_) {
+        controlPanel->setParent(nullptr);
+        treatmentBodyRow_->addWidget(controlPanel);
+    } else {
+        row->addWidget(controlPanel);
+    }
     outer->addLayout(row, 1);
     treatmentExecutionBody_->setVisible(false);
 

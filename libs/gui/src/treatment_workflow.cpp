@@ -90,7 +90,7 @@ WorkflowStage TreatmentWorkflow::nextStage() const {
 std::string_view workflowStageName(WorkflowStage stage) {
     constexpr std::array<std::string_view, toIndex(WorkflowStage::Count)> names = {
         "Case setup",       "System check",  "Imaging",   "Registration", "Coupling",
-        "Correction",       "Treatment plan", "Safety review", "Treatment",    "Report"};
+        "Correction",       "Treatment",      "Safety review", "Treatment delivery", "Report"};
     if (stage == WorkflowStage::Count) return "Unknown";
     return names[toIndex(stage)];
 }
