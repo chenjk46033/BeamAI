@@ -75,7 +75,6 @@
 #include "registration/array_transform.hpp"
 #include "correction/receive_waveform.hpp"
 #include "safety/checks.hpp"
-#include <QScrollBar>
 #include "gui_qt/correction_tab_chart.hpp"
 #include <QtCharts/QChartView>
 #include <QtCharts/QAbstractAxis>
@@ -1092,7 +1091,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // split across the two workflow stages it spans. See treatment_plan_body.cpp.
     buildTreatmentPlanBody(acceptButtonStyle);
     buildTreatmentExecutionBody(acceptButtonStyle);
-    ui_->placeholderLayout->addWidget(treatmentPlanBody_, 1);
+    // The plan takes the lion's share: it holds the target list, the grid and
+    // the schedule, all of which can use the height. The execution block below
+    // is a status readout and a progress bar, and an even split left most of
+    // its half empty while the schedule showed three rows.
+    ui_->placeholderLayout->addWidget(treatmentPlanBody_, 4);
     ui_->placeholderLayout->addWidget(treatmentExecutionBody_, 1);
 
     safetyReviewTitleLabel_ = new QLabel(QStringLiteral("Safety Review"), ui_->placeholderPage);
@@ -1892,7 +1895,7 @@ void WorkflowWindow::syncMriViewerHeights() {
     // window grew ~60px per tab switch until it outgrew the screen).
     // 80% of the shared height: this page carries the plan and the execution
     // controls as well, so its viewers give up the difference.
-    const int treatmentHeight = std::min(height * 4 / 5, kTreatmentViewerHeight);
+    const int treatmentHeight = std::min(height * 65 / 100, kTreatmentViewerHeight);
     if (height == ui_->sagittalPreview->minimumHeight() &&
         height == ui_->sagittalPreview->maximumHeight() &&
         treatmentHeight == treatmentSagittalPreview_->minimumHeight() &&
@@ -3429,27 +3432,43 @@ void WorkflowWindow::showMriPreviews() {
                 const auto markerVoxel = beam::gui::imagePositionToVoxelIndex(mm, mriAxes_);
                 const QString label = QStringLiteral("%1. %2").arg(markerIndex + 1)
                     .arg(QString::fromStdString(fiducials_[markerIndex].name));
+                // The same hover text the Registration views carry: a marker
+                // that names itself on one page and says nothing on another is
+                // the kind of difference an operator reads as a fault.
+                const double markerConfidence = fiducialConfidence_[markerIndex];
+                const QString markerTooltip =
+                    QStringLiteral("%1\nLR %2  AP %3  IS %4 mm\nconfidence %5")
+                        .arg(QString::fromStdString(fiducials_[markerIndex].name))
+                        .arg(mm.x(), 0, 'f', 1)
+                        .arg(mm.y(), 0, 'f', 1)
+                        .arg(mm.z(), 0, 'f', 1)
+                        .arg(fiducialTrustOf(markerConfidence) == FiducialTrust::Unscored
+                                 ? QStringLiteral("not scored")
+                                 : QStringLiteral("%1%").arg(markerConfidence * 100.0, 0, 'f', 0));
                 if (markerVoxel.i == sagittal - 1)
                     treatmentSagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
                                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
                                                    label,
                                                    fiducialColor(static_cast<int>(markerIndex) ==
                                                                  treatmentFiducialPick_),
-                                                   false, false, static_cast<int>(markerIndex)});
+                                                   false, false, static_cast<int>(markerIndex),
+                                                   markerTooltip});
                 if (markerVoxel.j == coronal - 1)
                     treatmentCorMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
                                                    label,
                                                    fiducialColor(static_cast<int>(markerIndex) ==
                                                                  treatmentFiducialPick_),
-                                                   false, false, static_cast<int>(markerIndex)});
+                                                   false, false, static_cast<int>(markerIndex),
+                                                   markerTooltip});
                 if (markerVoxel.k == axial - 1)
                     treatmentAxialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, mm.x()),
                                                              1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y())),
                                                      label,
-                                                   fiducialColor(static_cast<int>(markerIndex) ==
-                                                                 treatmentFiducialPick_),
-                                                   false, false, static_cast<int>(markerIndex)});
+                                                     fiducialColor(static_cast<int>(markerIndex) ==
+                                                                   treatmentFiducialPick_),
+                                                     false, false, static_cast<int>(markerIndex),
+                                                     markerTooltip});
             }
         }
         ui_->sagittalPreview->setMarkers(std::move(imagingSagMarkers));
@@ -3632,9 +3651,8 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
             workflow_.state(beam::gui::WorkflowStage::SafetyReview).status == beam::gui::WorkflowStatus::Complete;
         startTreatmentButton_->setEnabled(ready && !sonicationCountdownTimer_->isActive());
         shamButton_->setEnabled(ready && !sonicationCountdownTimer_->isActive());
-        if (!ready)
-            treatmentExecutionStatusLabel_->setText(
-                QStringLiteral("Accept the treatment plan before sonicating."));
+        // The disabled Sonicate button already says the plan is not accepted;
+        // a panel repeating it occupied the page for the whole session.
     }
     if (safetyReviewPage) {
         const auto complete = [this](beam::gui::WorkflowStage checkStage) {

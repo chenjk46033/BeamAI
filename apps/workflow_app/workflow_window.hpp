@@ -124,6 +124,7 @@ private:
     void refresh();
     void setMriPathDisplay(const QString& path);
     void updateCouplingCharts(double transmissionAmp);
+    void setExecutionStatus(const QString& text);
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
 
@@ -184,7 +185,9 @@ private:
     // Height the Treatment plan body is guaranteed under the MRI viewers; it
     // scrolls below that rather than squeezing them. syncMriViewerHeights
     // reserves it so the viewers stay the same size as on the other stages.
-    static constexpr int kTreatmentBodyMinHeight = 300;
+    // Raised in step with the Treatment viewers shrinking: the page is at its
+    // minimum height, so the plan body can only grow by taking from them.
+    static constexpr int kTreatmentBodyMinHeight = 360;
     // Fixed viewer height for the Treatment plan stage, which shares its page
     // with the whole Sonicate body. Small enough that the body fits under it
     // on an ordinary screen, large enough to place a target in.
@@ -296,9 +299,7 @@ private:
     QChartView* couplingBarChartView_ = nullptr;
     QLabel* sonicationScopeLabel_ = nullptr;
     QPushButton* newVisitButton_ = nullptr;
-    QRadioButton* hydrogelSmallRadio_ = nullptr;
-    QRadioButton* hydrogelMediumRadio_ = nullptr;
-    QRadioButton* hydrogelLargeRadio_ = nullptr;
+    QComboBox* hydrogelSizeCombo_ = nullptr;
     QSpinBox* currentSonicationNumberEdit_ = nullptr;
     QComboBox* accFlagCombo_ = nullptr;
     QPushButton* computeBestTargetsButton_ = nullptr;

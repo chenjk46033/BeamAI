@@ -264,15 +264,15 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
             addTargetListRow(QString::fromStdString(target.name));
     }
     targetListWidget_->setCurrentRow(0);
-    // Shorter than its own contents on purpose: the body that holds this panel
-    // is around 300 px, so a list tall enough for every target pushed its own
-    // bottom off the page and made the whole body scroll to reach it. Bounded
-    // here, the list scrolls itself and the page does not.
-    targetListWidget_->setFixedHeight(220);
+    // Expanding with a small minimum rather than a fixed height: it takes
+    // whatever the panel has and scrolls inside itself for the rest. A fixed
+    // height either wasted the space below it or, when taller than the body,
+    // pushed its own bottom off the page.
+    targetListWidget_->setMinimumHeight(120);
+    targetListWidget_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     targetListWidget_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     targetListWidget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    targetPanelLayout->addWidget(targetListWidget_);
-    targetPanelLayout->addStretch(1);
+    targetPanelLayout->addWidget(targetListWidget_, 1);
     bodyLayout->addWidget(targetPanel);
     treatmentBodyRow_ = bodyLayout;
 
@@ -343,20 +343,16 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolSelectorRow->addWidget(visitLabel);
     protocolSelectorRow->addWidget(visitNumberCombo_);
     protocolSelectorRow->addWidget(newVisitButton_);
-    protocolSelectorRow->addStretch(1);
-    protocolLayout->addLayout(protocolSelectorRow);
 
-    // HydrogelSizeButtonGroup + CurrentSonicationNumberEditField. Three
-    // sibling radios in one parent are naturally exclusive, so no
-    // QButtonGroup is needed -- same as beam_app's port.
-    auto* hydrogelRow = new QHBoxLayout;
-    auto* hydrogelLabel = new QLabel(QStringLiteral("Hydrogel Size:"), protocolTab);
-    hydrogelSmallRadio_ = new QRadioButton(QStringLiteral("Small"), protocolTab);
-    hydrogelMediumRadio_ = new QRadioButton(QStringLiteral("Medium"), protocolTab);
-    hydrogelLargeRadio_ = new QRadioButton(QStringLiteral("Large"), protocolTab);
-    hydrogelSmallRadio_->setChecked(true);  // HydrogelSizeButtonGroup's own default
-    for (QRadioButton* radio : {hydrogelSmallRadio_, hydrogelMediumRadio_, hydrogelLargeRadio_})
-        radio->setStyleSheet(QStringLiteral("QRadioButton { color: #dcebef; padding: 2px 6px; }"));
+    // HydrogelSizeButtonGroup, as a combo rather than BeamV0's three radios:
+    // this row now also carries the protocol selector, and three radios plus
+    // their labels did not fit beside it.
+    auto* hydrogelLabel = new QLabel(QStringLiteral("Hydrogel size:"), protocolTab);
+    hydrogelSizeCombo_ = new QComboBox(protocolTab);
+    hydrogelSizeCombo_->addItems({QStringLiteral("Small"), QStringLiteral("Medium"),
+                                  QStringLiteral("Large")});
+    hydrogelSizeCombo_->setCurrentIndex(0);  // HydrogelSizeButtonGroup's own default
+    applyItemViewPalette(hydrogelSizeCombo_);
     auto* sonicationNumberLabel = new QLabel(QStringLiteral("Current Sonication Number:"), protocolTab);
     currentSonicationNumberEdit_ = new QSpinBox(protocolTab);
     currentSonicationNumberEdit_->setRange(1, 999);
@@ -364,15 +360,17 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     applyItemViewPalette(currentSonicationNumberEdit_);
     for (QLabel* label : {treatmentProtocolLabel_, visitLabel, hydrogelLabel, sonicationNumberLabel})
         label->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; }"));
-    hydrogelRow->addWidget(hydrogelLabel);
-    hydrogelRow->addWidget(hydrogelSmallRadio_);
-    hydrogelRow->addWidget(hydrogelMediumRadio_);
-    hydrogelRow->addWidget(hydrogelLargeRadio_);
-    hydrogelRow->addSpacing(18);
-    hydrogelRow->addWidget(sonicationNumberLabel);
-    hydrogelRow->addWidget(currentSonicationNumberEdit_);
-    hydrogelRow->addStretch(1);
-    protocolLayout->addLayout(hydrogelRow);
+    // One row, not two: these five fields and the protocol selector together
+    // fit the tab's width, and the row they used to occupy goes to the
+    // schedule below.
+    protocolSelectorRow->addSpacing(18);
+    protocolSelectorRow->addWidget(hydrogelLabel);
+    protocolSelectorRow->addWidget(hydrogelSizeCombo_);
+    protocolSelectorRow->addSpacing(18);
+    protocolSelectorRow->addWidget(sonicationNumberLabel);
+    protocolSelectorRow->addWidget(currentSonicationNumberEdit_);
+    protocolSelectorRow->addStretch(1);
+    protocolLayout->addLayout(protocolSelectorRow);
 
     protocolModel_ = new beam::gui_qt::TreatmentProtocolTableModel(this);
     protocolView_ = new QTableView(protocolTab);
@@ -384,12 +382,12 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolView_->verticalHeader()->setDefaultSectionSize(22);
     protocolView_->verticalHeader()->setMinimumSectionSize(18);
     protocolView_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    protocolView_->setMaximumHeight(240);
-    // No stretch on the table, and the slack collected below it: capped as it
-    // is, a stretch here cannot be spent on the table, so the layout spread it
-    // between the rows above and left bands of empty space.
-    protocolLayout->addWidget(protocolView_);
-    protocolLayout->addStretch(1);
+    protocolView_->setMinimumHeight(120);
+    protocolView_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    // The table takes the tab's leftover height, so there is no band of empty
+    // space under it and no surplus for the layout to spread between the rows
+    // above. Its own scrollbar handles a schedule longer than the space.
+    protocolLayout->addWidget(protocolView_, 1);
 
     treatmentTabs_->addTab(protocolTab, QStringLiteral("Treatment Protocol"));
 
@@ -1114,25 +1112,15 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     auto* outer = new QVBoxLayout(treatmentExecutionBody_);
     outer->setContentsMargins(0, 0, 0, 0);
 
-    treatmentExecutionTitleLabel_ = new QLabel(QStringLiteral("Treatment execution"), treatmentExecutionBody_);
-    treatmentExecutionTitleLabel_->setStyleSheet(
-        QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
-    treatmentExecutionDescriptionLabel_ = new QLabel(
-        QStringLiteral("Fire the accepted sonication plan. Each sonication runs BeamV0's own last-moment checks "
-                       "(coupling transmission and computed duty cycle) before any command is sent."),
-        treatmentExecutionBody_);
-    treatmentExecutionDescriptionLabel_->setWordWrap(true);
-    treatmentExecutionDescriptionLabel_->setStyleSheet(
-        QStringLiteral("QLabel { color: #c8d9de; padding: 4px 0 10px 0; }"));
-    outer->addWidget(treatmentExecutionTitleLabel_);
-    outer->addWidget(treatmentExecutionDescriptionLabel_);
+    // No heading or blurb: execution is part of this page now, not a stage of
+    // its own, and the Sonicate controls name themselves.
 
     auto* row = new QHBoxLayout;
 
     // Left: what is about to be fired, and how it is going.
     auto* statusColumn = new QVBoxLayout;
-    treatmentExecutionStatusLabel_ = new QLabel(QStringLiteral("Treatment has not started."),
-                                                 treatmentExecutionBody_);
+    treatmentExecutionStatusLabel_ = new QLabel(treatmentExecutionBody_);
+    treatmentExecutionStatusLabel_->hide();
     treatmentExecutionStatusLabel_->setWordWrap(true);
     treatmentExecutionStatusLabel_->setStyleSheet(QStringLiteral(
         "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
@@ -1155,7 +1143,12 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     controlColumn->setSpacing(4);
     controlColumn->setContentsMargins(0, 0, 0, 0);
     auto* controlPanel = new QWidget(treatmentExecutionBody_);
-    controlPanel->setMaximumWidth(220);
+    // Wider than the target list: this column holds a port name, a trigger
+    // mode and four buttons, and at 220 the combos truncated and the whole
+    // thing read as squeezed into the corner. The grid and the schedule give
+    // up the width -- their columns stretch and have it to spare.
+    controlPanel->setMinimumWidth(240);
+    controlPanel->setMaximumWidth(300);
     controlPanel->setLayout(controlColumn);
     const auto columnLabel = [&](const QString& text) {
         auto* label = new QLabel(text, controlPanel);
@@ -1256,10 +1249,10 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
         try {
             serialLink_ = std::make_unique<beam::serialcom::SerialPort>(port.toStdString());
             setSerialConnectedLamp(true);
-            treatmentExecutionStatusLabel_->setText(QStringLiteral("Connected to %1.").arg(port));
+            setExecutionStatus(QStringLiteral("Connected to %1.").arg(port));
         } catch (const std::exception& e) {
             serialLink_.reset();
-            treatmentExecutionStatusLabel_->setText(
+            setExecutionStatus(
                 QStringLiteral("Connection failed: %1").arg(QString::fromStdString(e.what())));
         }
     });
@@ -1286,7 +1279,7 @@ void WorkflowWindow::runSonication(bool sham) {
         return;
     }
     if (!stimParamModel_ || stimParamModel_->rows().empty()) {
-        treatmentExecutionStatusLabel_->setText(QStringLiteral("No sonication is planned."));
+        setExecutionStatus(QStringLiteral("No sonication is planned."));
         return;
     }
     const int shown = std::clamp(stimParamModel_->currentShownRow(), 1,
@@ -1299,7 +1292,7 @@ void WorkflowWindow::runSonication(bool sham) {
         const beam::gui::ShamSonicationOutcome outcome =
             beam::gui::prepareShamSonication(params, shamBurstSound(), kShamSoundFs);
         startSonicationCountdown(static_cast<int>(outcome.durationSeconds));
-        treatmentExecutionStatusLabel_->setText(
+        setExecutionStatus(
             QStringLiteral("Sham sonication %1: masking audio ready (%2 samples, %3 s). No ultrasound was sent.")
                 .arg(shown)
                 .arg(outcome.maskingAudio.size())
@@ -1315,7 +1308,7 @@ void WorkflowWindow::runSonication(bool sham) {
             if (i != 0) message += QStringLiteral("; ");
             message += QString::fromStdString(outcome.messages[i]);
         }
-        treatmentExecutionStatusLabel_->setText(message);
+        setExecutionStatus(message);
         showMessage(message, true);
         workflow_.block(beam::gui::WorkflowStage::Treatment, message.toStdString());
         refresh();
@@ -1343,8 +1336,17 @@ void WorkflowWindow::runSonication(bool sham) {
             status += QStringLiteral(" | Send failed: %1").arg(QString::fromStdString(e.what()));
         }
     }
-    treatmentExecutionStatusLabel_->setText(status);
+    setExecutionStatus(status);
     startSonicationCountdown(static_cast<int>(outcome.durationSeconds));
+}
+
+// The status panel earns its space only when there is something to report, so
+// it stays out of the page until a sonication says something and goes again
+// when the text is cleared.
+void WorkflowWindow::setExecutionStatus(const QString& text) {
+    if (!treatmentExecutionStatusLabel_) return;
+    treatmentExecutionStatusLabel_->setText(text);
+    treatmentExecutionStatusLabel_->setVisible(!text.trimmed().isEmpty());
 }
 
 void WorkflowWindow::startSonicationCountdown(int durationSeconds) {
@@ -1379,7 +1381,7 @@ void WorkflowWindow::abortSonication() {
         status += QStringLiteral(" No serial connection -- no command sent.");
     }
     workflow_.block(beam::gui::WorkflowStage::Treatment, status.toStdString());
-    treatmentExecutionStatusLabel_->setText(status);
+    setExecutionStatus(status);
     showMessage(status, true);
     refresh();
 }
