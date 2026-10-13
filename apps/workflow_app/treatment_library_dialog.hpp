@@ -6,6 +6,7 @@
 
 QT_BEGIN_NAMESPACE
 class QComboBox;
+class QLabel;
 class QListWidget;
 class QPushButton;
 class QTableWidget;
@@ -26,6 +27,8 @@ private:
     void reloadTargets(const QString& select = QString());
     void reloadProtocols(const QString& select = QString());
     void reloadEntries();
+    void reloadTargetPoints();
+    void commitTargetPoints();
     QString selectedTarget() const;
     QString selectedProtocol() const;
 
@@ -33,6 +36,9 @@ private:
     QListWidget* targetList_ = nullptr;
     QListWidget* protocolList_ = nullptr;
     QTableWidget* entryTable_ = nullptr;
+    QTableWidget* pointTable_ = nullptr;
+    QLabel* pointCaption_ = nullptr;
+    bool reloadingPoints_ = false;
     QComboBox* entryTargetCombo_ = nullptr;
 };
 

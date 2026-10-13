@@ -34,6 +34,13 @@ target_compile_definitions(detect_fiducials PRIVATE
     BEAM_DEFAULT_SUBJECT_RECT_CSV="${CMAKE_SOURCE_DIR}/../DefaultSubjectV0/defaultSubjectArrayRect.csv")
 target_link_libraries(detect_fiducials PRIVATE infra_dicom mri array registration util)
 
+# Runs the Registration tab's detect -> register -> lock-position sequence over
+# a whole dataset folder, for parity against BeamV0.
+add_executable(sweep_registration sweep_registration/main.cpp)
+target_compile_definitions(sweep_registration PRIVATE
+    BEAM_DEFAULT_SUBJECT_RECT_CSV="${CMAKE_SOURCE_DIR}/../DefaultSubjectV0/defaultSubjectArrayRect.csv")
+target_link_libraries(sweep_registration PRIVATE infra_dicom mri array registration util)
+
 add_executable(parity_safety parity_safety/main.cpp)
 target_link_libraries(parity_safety PRIVATE safety)
 

@@ -62,11 +62,22 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
     layout->addWidget(buttons);
 
     reloadTargets();
+    reloadTargetPoints();
     reloadProtocols();
 }
 
 void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
-    auto* layout = new QHBoxLayout(page);
+    auto* outer = new QVBoxLayout(page);
+    auto* caption = new QLabel(
+        QStringLiteral("The Target List is a template. A treatment protocol copies a target's "
+                       "points when the target is added to it, so changes here reach only "
+                       "protocols that take the target afterwards."),
+        page);
+    caption->setWordWrap(true);
+    caption->setStyleSheet(QStringLiteral("color: #4a5f69;"));
+    outer->addWidget(caption);
+    auto* layout = new QHBoxLayout;
+    outer->addLayout(layout, 1);
     targetList_ = new QListWidget(page);
     layout->addWidget(targetList_, 1);
 
@@ -77,6 +88,61 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
     for (QPushButton* button : {add, rename, remove}) column->addWidget(button);
     column->addStretch(1);
     layout->addLayout(column);
+
+    // The template's own parameters. Without this the Target List would be
+    // name-only: the Treatment grid writes to the selected protocol's copy, so
+    // nothing else can reach these values.
+    pointCaption_ = new QLabel(page);
+    outer->addWidget(pointCaption_);
+    pointTable_ = new QTableWidget(0, 9, page);
+    pointTable_->setHorizontalHeaderLabels(
+        {QStringLiteral("#"), QStringLiteral("Show"), QStringLiteral("Amplitude"),
+         QStringLiteral("Start (s)"), QStringLiteral("End (s)"), QStringLiteral("Burst dur (s)"),
+         QStringLiteral("Burst int (s)"), QStringLiteral("Pulse dur (s)"),
+         QStringLiteral("Pulse int (s)")});
+    pointTable_->horizontalHeader()->setStretchLastSection(true);
+    pointTable_->verticalHeader()->setVisible(false);
+    pointTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    outer->addWidget(pointTable_, 1);
+
+    auto* pointButtons = new QHBoxLayout;
+    auto* addPoint = new QPushButton(QStringLiteral("Add point"), page);
+    auto* removePoint = new QPushButton(QStringLiteral("Remove point"), page);
+    pointButtons->addStretch(1);
+    pointButtons->addWidget(addPoint);
+    pointButtons->addWidget(removePoint);
+    outer->addLayout(pointButtons);
+
+    connect(targetList_, &QListWidget::currentRowChanged, this,
+            [this](int) { reloadTargetPoints(); });
+    connect(pointTable_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem*) {
+        if (!reloadingPoints_) commitTargetPoints();
+    });
+
+    connect(addPoint, &QPushButton::clicked, this, [this] {
+        const beam::gui::TreatmentTarget* target = store_.findTarget(selectedTarget().toStdString());
+        if (target == nullptr) return;
+        std::vector<beam::gui::TreatmentTargetPoint> points = target->points;
+        // createSonicationUpdateTable.m appends by copying the previous row.
+        points.push_back(points.empty() ? beam::gui::TreatmentTargetPoint{} : points.back());
+        store_.setTargetPoints(target->name, std::move(points));
+        reloadTargetPoints();
+    });
+
+    connect(removePoint, &QPushButton::clicked, this, [this] {
+        const beam::gui::TreatmentTarget* target = store_.findTarget(selectedTarget().toStdString());
+        const int row = pointTable_->currentRow();
+        if (target == nullptr || row < 0 || row >= static_cast<int>(target->points.size())) return;
+        if (target->points.size() <= 1) {
+            QMessageBox::warning(this, QStringLiteral("Remove point"),
+                                 QStringLiteral("A target must keep at least one point."));
+            return;
+        }
+        std::vector<beam::gui::TreatmentTargetPoint> points = target->points;
+        points.erase(points.begin() + row);
+        store_.setTargetPoints(target->name, std::move(points));
+        reloadTargetPoints();
+    });
 
     connect(add, &QPushButton::clicked, this, [this] {
         std::vector<std::string> taken;
@@ -137,6 +203,83 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
         reloadTargets();
         reloadEntries();
     });
+}
+
+void TreatmentLibraryDialog::reloadTargetPoints() {
+    if (pointTable_ == nullptr) return;
+    const QString name = selectedTarget();
+    const beam::gui::TreatmentTarget* target = store_.findTarget(name.toStdString());
+
+    reloadingPoints_ = true;
+    pointTable_->clearContents();
+    pointTable_->setRowCount(target == nullptr ? 0 : static_cast<int>(target->points.size()));
+    if (target != nullptr) {
+        for (int row = 0; row < static_cast<int>(target->points.size()); ++row) {
+            const beam::gui::TreatmentTargetPoint& point = target->points[static_cast<std::size_t>(row)];
+            auto* order = new QTableWidgetItem(QString::number(point.order));
+            order->setFlags(order->flags() & ~Qt::ItemIsEditable);
+            pointTable_->setItem(row, 0, order);
+
+            auto* show = new QTableWidgetItem;
+            show->setFlags((show->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
+            show->setCheckState(point.show ? Qt::Checked : Qt::Unchecked);
+            pointTable_->setItem(row, 1, show);
+
+            const double values[] = {point.amplitude,
+                                     point.startTimeSeconds,
+                                     point.endTimeSeconds,
+                                     point.burstDurationSeconds,
+                                     point.burstIntervalSeconds,
+                                     point.pulseDurationSeconds,
+                                     point.pulseIntervalSeconds};
+            for (int i = 0; i < 7; ++i)
+                pointTable_->setItem(row, i + 2, new QTableWidgetItem(QString::number(values[i])));
+        }
+    }
+    reloadingPoints_ = false;
+
+    pointCaption_->setText(
+        target == nullptr
+            ? QStringLiteral("Template points")
+            : QStringLiteral("Template points for \"%1\" - the values a protocol copies when "
+                             "\"%1\" is added to it").arg(name));
+}
+
+// Reads the table back rather than tracking single cells: the table is small,
+// and a partial write would leave the template disagreeing with what is shown.
+void TreatmentLibraryDialog::commitTargetPoints() {
+    const QString name = selectedTarget();
+    const beam::gui::TreatmentTarget* target = store_.findTarget(name.toStdString());
+    if (target == nullptr || pointTable_->rowCount() == 0) return;
+
+    std::vector<beam::gui::TreatmentTargetPoint> points;
+    points.reserve(static_cast<std::size_t>(pointTable_->rowCount()));
+    for (int row = 0; row < pointTable_->rowCount(); ++row) {
+        // Keep the stored value for any cell the edit did not supply.
+        beam::gui::TreatmentTargetPoint point =
+            row < static_cast<int>(target->points.size())
+                ? target->points[static_cast<std::size_t>(row)]
+                : beam::gui::TreatmentTargetPoint{};
+        if (const QTableWidgetItem* show = pointTable_->item(row, 1))
+            point.show = show->checkState() == Qt::Checked;
+        double* const fields[] = {&point.amplitude,
+                                  &point.startTimeSeconds,
+                                  &point.endTimeSeconds,
+                                  &point.burstDurationSeconds,
+                                  &point.burstIntervalSeconds,
+                                  &point.pulseDurationSeconds,
+                                  &point.pulseIntervalSeconds};
+        for (int i = 0; i < 7; ++i) {
+            const QTableWidgetItem* cell = pointTable_->item(row, i + 2);
+            if (cell == nullptr) continue;
+            bool ok = false;
+            const double value = cell->text().toDouble(&ok);
+            if (ok) *fields[i] = value;
+        }
+        points.push_back(point);
+    }
+    store_.setTargetPoints(name.toStdString(), std::move(points));
+    reloadTargetPoints();
 }
 
 void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {

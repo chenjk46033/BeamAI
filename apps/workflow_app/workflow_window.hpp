@@ -149,6 +149,8 @@ private:
     void updateStimGridHeight();
     void loadTreatmentProtocol(const QString& protocolName);
     QString treatmentDataDirectory() const;
+    QString currentProtocolName() const;
+    void updateSonicationScopeLabel();
     void loadTreatmentTargetStore();
     void refreshProtocolCombo(const QString& select);
     void writeProtocolGridToStore();
@@ -279,6 +281,7 @@ private:
     QPushButton* addSonicationButton_ = nullptr;
     QPushButton* removeSonicationButton_ = nullptr;
     QComboBox* visitNumberCombo_ = nullptr;
+    QLabel* sonicationScopeLabel_ = nullptr;
     QPushButton* newVisitButton_ = nullptr;
     QRadioButton* hydrogelSmallRadio_ = nullptr;
     QRadioButton* hydrogelMediumRadio_ = nullptr;

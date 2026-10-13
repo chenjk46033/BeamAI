@@ -105,8 +105,13 @@ TEST(TreatmentTargetStore, SonicationDurationAppliesToEveryPointButNotAmplitude)
     second.startTimeSeconds = 5.0;
     ASSERT_TRUE(store.setTargetPoints("SCC1", {store.findTarget("SCC1")->points.front(), second}));
 
+    // The protocol takes its copy when SCC1 enters it, so the two points above
+    // are what it holds.
+    ASSERT_TRUE(store.addProtocol("P"));
+    ASSERT_TRUE(store.appendProtocolEntry("P", beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+
     const std::vector<beam::gui::TreatmentTargetPoint> scheduled =
-        store.pointsForSonication("SCC1", 90.0);
+        store.pointsForSonication("P", "SCC1", 90.0);
     ASSERT_EQ(scheduled.size(), 2u);
     for (const beam::gui::TreatmentTargetPoint& point : scheduled) {
         EXPECT_DOUBLE_EQ(point.startTimeSeconds, 0.0);
@@ -118,12 +123,12 @@ TEST(TreatmentTargetStore, SonicationDurationAppliesToEveryPointButNotAmplitude)
 
     // No duration from the schedule leaves the points as they are.
     const std::vector<beam::gui::TreatmentTargetPoint> unscheduled =
-        store.pointsForSonication("SCC1", std::nullopt);
+        store.pointsForSonication("P", "SCC1", std::nullopt);
     ASSERT_EQ(unscheduled.size(), 2u);
     EXPECT_DOUBLE_EQ(unscheduled[1].startTimeSeconds, 5.0);
     EXPECT_DOUBLE_EQ(unscheduled[1].endTimeSeconds, 30.0);
 
-    EXPECT_TRUE(store.pointsForSonication("NoSuchTarget", 30.0).empty());
+    EXPECT_TRUE(store.pointsForSonication("P", "NoSuchTarget", 30.0).empty());
 }
 
 TEST(TreatmentTargetStore, ProtocolsKeepScheduleOrderAndRepeatTargets) {
@@ -404,4 +409,156 @@ TEST(TreatmentTargetStore, AnEmptyProtocolSurvivesASaveAndReload) {
     ASSERT_NE(scheduled, nullptr);
     ASSERT_EQ(scheduled->entries.size(), 1u);
     EXPECT_EQ(scheduled->entries[0].target, "SCC1");
+}
+
+// The design the Treatment page follows: the Target List is a template. A
+// protocol copies a target's points when the target enters it, and from then
+// on the two are independent in both directions.
+TEST(TreatmentTargetStore, AProtocolCopiesTheTemplateWhenATargetEntersIt) {
+    beam::gui::TreatmentTargetStore store;
+    store.loadTargets(BEAM_TREATMENT_TARGETS_CSV);
+    ASSERT_TRUE(store.addProtocol("Plan"));
+    ASSERT_TRUE(store.appendProtocolEntry("Plan",
+                                          beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+
+    const std::vector<beam::gui::TreatmentTargetPoint>* copied = store.planPoints("Plan", "SCC1");
+    ASSERT_NE(copied, nullptr);
+    ASSERT_EQ(copied->size(), store.findTarget("SCC1")->points.size());
+    EXPECT_DOUBLE_EQ(copied->front().amplitude, store.findTarget("SCC1")->points.front().amplitude);
+
+    // A target the protocol does not schedule has no copy.
+    EXPECT_EQ(store.planPoints("Plan", "SCC2"), nullptr);
+}
+
+TEST(TreatmentTargetStore, EditingTheTemplateDoesNotReachAPlanThatAlreadyCopiedIt) {
+    beam::gui::TreatmentTargetStore store;
+    store.loadTargets(BEAM_TREATMENT_TARGETS_CSV);
+    ASSERT_TRUE(store.addProtocol("Plan"));
+    ASSERT_TRUE(store.appendProtocolEntry("Plan",
+                                          beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+
+    beam::gui::TreatmentTargetPoint changed = store.findTarget("SCC1")->points.front();
+    changed.amplitude = 0.9;
+    changed.burstDurationSeconds = 0.12;
+    ASSERT_TRUE(store.setTargetPoints("SCC1", {changed}));
+
+    // The template moved; the plan did not.
+    EXPECT_DOUBLE_EQ(store.findTarget("SCC1")->points.front().amplitude, 0.9);
+    ASSERT_NE(store.planPoints("Plan", "SCC1"), nullptr);
+    EXPECT_DOUBLE_EQ(store.planPoints("Plan", "SCC1")->front().amplitude, 0.5);
+    EXPECT_DOUBLE_EQ(store.planPoints("Plan", "SCC1")->front().burstDurationSeconds, 0.03);
+}
+
+TEST(TreatmentTargetStore, AnEditInsideOnePlanStaysInsideThatPlan) {
+    beam::gui::TreatmentTargetStore store;
+    store.loadTargets(BEAM_TREATMENT_TARGETS_CSV);
+    for (const char* name : {"PlanA", "PlanB"}) {
+        ASSERT_TRUE(store.addProtocol(name));
+        ASSERT_TRUE(store.appendProtocolEntry(name,
+                                              beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+    }
+
+    beam::gui::TreatmentTargetPoint local = store.planPoints("PlanA", "SCC1")->front();
+    local.amplitude = 0.77;
+    ASSERT_TRUE(store.setPlanTargetPoints("PlanA", "SCC1", {local}));
+
+    EXPECT_DOUBLE_EQ(store.planPoints("PlanA", "SCC1")->front().amplitude, 0.77);
+    // Neither the other plan nor the template followed it.
+    EXPECT_DOUBLE_EQ(store.planPoints("PlanB", "SCC1")->front().amplitude, 0.5);
+    EXPECT_DOUBLE_EQ(store.findTarget("SCC1")->points.front().amplitude, 0.5);
+}
+
+// The chosen rule for a re-add: the plan's edits are discarded with the target,
+// and it comes back as whatever the template says now.
+TEST(TreatmentTargetStore, RemovingATargetFromAPlanDiscardsThatPlansEdits) {
+    beam::gui::TreatmentTargetStore store;
+    store.loadTargets(BEAM_TREATMENT_TARGETS_CSV);
+    ASSERT_TRUE(store.addProtocol("Plan"));
+    ASSERT_TRUE(store.appendProtocolEntry("Plan",
+                                          beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+
+    beam::gui::TreatmentTargetPoint local = store.planPoints("Plan", "SCC1")->front();
+    local.amplitude = 0.77;
+    ASSERT_TRUE(store.setPlanTargetPoints("Plan", "SCC1", {local}));
+
+    ASSERT_TRUE(store.setProtocolEntries("Plan", {}));
+    EXPECT_EQ(store.planPoints("Plan", "SCC1"), nullptr);
+
+    beam::gui::TreatmentTargetPoint templateNow = store.findTarget("SCC1")->points.front();
+    templateNow.amplitude = 0.31;
+    ASSERT_TRUE(store.setTargetPoints("SCC1", {templateNow}));
+    ASSERT_TRUE(store.appendProtocolEntry("Plan",
+                                          beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+    ASSERT_NE(store.planPoints("Plan", "SCC1"), nullptr);
+    EXPECT_DOUBLE_EQ(store.planPoints("Plan", "SCC1")->front().amplitude, 0.31);
+}
+
+TEST(TreatmentTargetStore, PlanPointsSurviveASaveAndReload) {
+    const std::string targets = std::string(BEAM_TEST_SCRATCH) + "/plan_targets.csv";
+    const std::string protocols = std::string(BEAM_TEST_SCRATCH) + "/plan_protocols.csv";
+    const std::string planPoints = std::string(BEAM_TEST_SCRATCH) + "/plan_points.csv";
+
+    beam::gui::TreatmentTargetStore store;
+    store.loadTargets(BEAM_TREATMENT_TARGETS_CSV);
+    ASSERT_TRUE(store.addProtocol("Plan"));
+    ASSERT_TRUE(store.appendProtocolEntry("Plan",
+                                          beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+    beam::gui::TreatmentTargetPoint a = store.planPoints("Plan", "SCC1")->front();
+    beam::gui::TreatmentTargetPoint b = a;
+    a.amplitude = 0.77;
+    b.amplitude = 0.21;
+    b.show = false;
+    ASSERT_TRUE(store.setPlanTargetPoints("Plan", "SCC1", {a, b}));
+    ASSERT_NO_THROW(store.saveTargets(targets));
+    ASSERT_NO_THROW(store.saveProtocols(protocols));
+    ASSERT_NO_THROW(store.savePlanPoints(planPoints));
+
+    beam::gui::TreatmentTargetStore reloaded;
+    ASSERT_NO_THROW(reloaded.loadTargets(targets));
+    ASSERT_NO_THROW(reloaded.loadProtocols(protocols));
+    ASSERT_NO_THROW(reloaded.loadPlanPoints(planPoints));
+
+    const std::vector<beam::gui::TreatmentTargetPoint>* back = reloaded.planPoints("Plan", "SCC1");
+    ASSERT_NE(back, nullptr);
+    ASSERT_EQ(back->size(), 2u);
+    EXPECT_DOUBLE_EQ((*back)[0].amplitude, 0.77);
+    EXPECT_DOUBLE_EQ((*back)[1].amplitude, 0.21);
+    EXPECT_FALSE((*back)[1].show);
+    // The template is untouched by any of it.
+    EXPECT_DOUBLE_EQ(reloaded.findTarget("SCC1")->points.front().amplitude, 0.5);
+}
+
+// Data written before protocols owned points has no plan-points file at all.
+TEST(TreatmentTargetStore, DataWithNoPlanPointsFileStartsFromTheTemplate) {
+    beam::gui::TreatmentTargetStore store;
+    store.loadTargets(BEAM_TREATMENT_TARGETS_CSV);
+    store.loadProtocols(BEAM_TREATMENT_PROTOCOLS_CSV);
+    ASSERT_NO_THROW(store.loadPlanPoints(std::string(BEAM_TEST_SCRATCH) + "/not_written_yet.csv"));
+
+    const std::string protocol = store.protocols().front().name;
+    const std::vector<std::string> targets = store.distinctTargetsOf(protocol);
+    ASSERT_FALSE(targets.empty());
+    for (const std::string& name : targets) {
+        if (store.findTarget(name) == nullptr) continue;  // dangling by design
+        ASSERT_NE(store.planPoints(protocol, name), nullptr);
+        EXPECT_EQ(store.planPoints(protocol, name)->size(), store.findTarget(name)->points.size());
+    }
+}
+
+// A rename has to carry the copies too, or a plan loses its edits to a target
+// that merely changed name.
+TEST(TreatmentTargetStore, RenamingATargetCarriesEachPlansCopyWithIt) {
+    beam::gui::TreatmentTargetStore store;
+    store.loadTargets(BEAM_TREATMENT_TARGETS_CSV);
+    ASSERT_TRUE(store.addProtocol("Plan"));
+    ASSERT_TRUE(store.appendProtocolEntry("Plan",
+                                          beam::gui::TreatmentProtocolEntry{1, "SCC1", {}, {}}));
+    beam::gui::TreatmentTargetPoint local = store.planPoints("Plan", "SCC1")->front();
+    local.amplitude = 0.77;
+    ASSERT_TRUE(store.setPlanTargetPoints("Plan", "SCC1", {local}));
+
+    ASSERT_TRUE(store.renameTarget("SCC1", "SCC1b"));
+    EXPECT_EQ(store.planPoints("Plan", "SCC1"), nullptr);
+    ASSERT_NE(store.planPoints("Plan", "SCC1b"), nullptr);
+    EXPECT_DOUBLE_EQ(store.planPoints("Plan", "SCC1b")->front().amplitude, 0.77);
 }

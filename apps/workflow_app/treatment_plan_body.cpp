@@ -282,6 +282,11 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
                        "BeamV0's own removeSonicationUpdateTable.m clears its flag first."));
     for (QPushButton* button : {sortByOrderButton_, addSonicationButton_, removeSonicationButton_})
         button->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
+    sonicationScopeLabel_ = new QLabel(bodyContent);
+    sonicationScopeLabel_->setWordWrap(true);
+    sonicationScopeLabel_->setStyleSheet(QStringLiteral("color: #9fb3ba;"));
+    rightColumn->addWidget(sonicationScopeLabel_);
+
     auto* gridButtonRow = new QHBoxLayout;
     gridButtonRow->addWidget(sortByOrderButton_);
     gridButtonRow->addWidget(addSonicationButton_);
@@ -556,6 +561,10 @@ void WorkflowWindow::wireTreatmentPlanBody() {
 // Where the operator's own protocol/target library lives. The copies under
 // data/ in the install are the shipped seed and are never written: deleting
 // the user's copy restores them.
+QString WorkflowWindow::currentProtocolName() const {
+    return treatmentProtocolCombo_ ? treatmentProtocolCombo_->currentText() : QString();
+}
+
 QString WorkflowWindow::treatmentDataDirectory() const {
     const QString home =
         QDir(QDir::homePath()).filePath(QStringLiteral("Documents/BeamAI/treatment"));
@@ -580,6 +589,7 @@ void WorkflowWindow::loadTreatmentTargetStore() {
 
     const QString targetsPath = locate(QStringLiteral("treatment_targets.csv"));
     const QString protocolsPath = locate(QStringLiteral("treatment_protocols.csv"));
+    const QString planPointsPath = locate(QStringLiteral("treatment_plan_points.csv"));
     if (targetsPath.isEmpty() || protocolsPath.isEmpty()) {
         showMessage(QStringLiteral("Treatment target/protocol data was not found; using built-in "
                                    "defaults."),
@@ -589,6 +599,9 @@ void WorkflowWindow::loadTreatmentTargetStore() {
     try {
         targetStore_.loadTargets(targetsPath.toStdString());
         targetStore_.loadProtocols(protocolsPath.toStdString());
+        // Absent before a protocol was ever edited: every protocol then starts
+        // from a fresh copy of the Target List.
+        if (!planPointsPath.isEmpty()) targetStore_.loadPlanPoints(planPointsPath.toStdString());
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Treatment data could not be read: %1").arg(error.what()), true);
         return;
@@ -640,6 +653,8 @@ void WorkflowWindow::saveTreatmentTargetStore() {
             QDir(directory).filePath(QStringLiteral("treatment_targets.csv")).toStdString());
         targetStore_.saveProtocols(
             QDir(directory).filePath(QStringLiteral("treatment_protocols.csv")).toStdString());
+        targetStore_.savePlanPoints(
+            QDir(directory).filePath(QStringLiteral("treatment_plan_points.csv")).toStdString());
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Could not save treatment data: %1").arg(error.what()), true);
         return;
@@ -666,11 +681,16 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
     QList<QStringList> sourceRows;
     if (definition != nullptr) {
         for (const beam::gui::TreatmentProtocolEntry& entry : definition->entries) {
+            // Where the entry says nothing, the first point stands in -- it is
+            // the row the schedule would have been written from. It has to be
+            // THIS protocol's copy, not the Target List's: the grid edits the
+            // copy, so reading the template would show a value no one can see.
+            const std::vector<beam::gui::TreatmentTargetPoint>* points =
+                targetStore_.planPoints(protocolName.toStdString(), entry.target);
             const beam::gui::TreatmentTarget* target = targetStore_.findTarget(entry.target);
-            // Where the entry says nothing, the target's first point stands in
-            // -- it is the row the schedule would have been written from.
+            if (points == nullptr && target != nullptr) points = &target->points;
             const beam::gui::TreatmentTargetPoint* first =
-                target != nullptr && !target->points.empty() ? &target->points.front() : nullptr;
+                points != nullptr && !points->empty() ? &points->front() : nullptr;
             const double amplitude =
                 entry.amplitude.value_or(first != nullptr ? first->amplitude : 0.75);
             const double duration =
@@ -830,7 +850,8 @@ void WorkflowWindow::switchToSelectedTarget() {
 
         std::vector<beam::gui_qt::StimParamRow> rows;
         for (const beam::gui::TreatmentTargetPoint& point :
-             targetStore_.pointsForSonication(name.toStdString(), scheduledDuration)) {
+             targetStore_.pointsForSonication(currentProtocolName().toStdString(),
+                                              name.toStdString(), scheduledDuration)) {
             beam::gui_qt::StimParamRow row;
             row.order = point.order;
             row.show = point.show;
@@ -944,7 +965,24 @@ void WorkflowWindow::setSonicationTargetFromMri(const Eigen::Vector3d& positionM
     updateTreatmentPlanSummary();
 }
 
+// Says whose points the grid is showing. The Target List is a template; what
+// the operator edits here belongs to this protocol alone.
+void WorkflowWindow::updateSonicationScopeLabel() {
+    if (!sonicationScopeLabel_) return;
+    const QString protocol = currentProtocolName();
+    const QListWidgetItem* item = targetListWidget_ ? targetListWidget_->currentItem() : nullptr;
+    if (protocol.isEmpty() || item == nullptr) {
+        sonicationScopeLabel_->setText(QStringLiteral("Select a protocol and a target."));
+        return;
+    }
+    sonicationScopeLabel_->setText(
+        QStringLiteral("Editing %1 in protocol \"%2\" only. These points were copied from the "
+                       "Target List when %1 entered this protocol.")
+            .arg(targetListName(item), protocol));
+}
+
 void WorkflowWindow::updateTreatmentPlanSummary() {
+    updateSonicationScopeLabel();
     if (!treatmentPlanTargetLabel_) return;
     const int row = selectedSonicationRow();
     if (row < 0) {
@@ -1350,8 +1388,10 @@ void WorkflowWindow::finishTreatmentStage() {
 }
 
 void WorkflowWindow::openTreatmentLibrary() {
+    // The dialog edits a copy, and accepting it replaces the store wholesale, so
+    // anything still only in the grid has to reach the store first or it is lost.
     writeProtocolGridToStore();
-    saveCurrentTargetSonications();
+    writeTargetPointsToStore();
     const QString protocol = treatmentProtocolCombo_->currentText();
     TreatmentLibraryDialog dialog(targetStore_, this);
     if (dialog.exec() != QDialog::Accepted) return;
@@ -1397,7 +1437,10 @@ void WorkflowWindow::writeTargetPointsToStore() {
             point.pulseIntervalSeconds = grid.pi;
             points.push_back(point);
         }
-        targetStore_.setTargetPoints(targetListName(item).toStdString(), std::move(points));
+        // The protocol's own copy, not the Target List's: the list is a
+        // template, and an edit made inside one plan stays inside it.
+        targetStore_.setPlanTargetPoints(currentProtocolName().toStdString(),
+                                         targetListName(item).toStdString(), std::move(points));
     }
 }
 

@@ -18,6 +18,11 @@
 //                   duration that entry runs for. BeamV0's protocols list the
 //                   same target repeatedly with different values, so these
 //                   cannot live only on the target.
+//   plan points     a protocol's own copy of a target's points, taken from the
+//                   Target List when the target first enters the protocol. The
+//                   Target List is a template: editing it afterwards does not
+//                   reach a protocol that already holds a copy, and editing a
+//                   copy does not reach the template or any other protocol.
 //   session         X/Y/Z placement, per patient. Not here.
 
 namespace beam::gui {
@@ -70,6 +75,10 @@ struct TreatmentProtocolEntry {
 struct TreatmentProtocolDefinition {
     std::string name;
     std::vector<TreatmentProtocolEntry> entries;
+    // Keyed by target name, so the same target scheduled twice in one protocol
+    // shares one editable set -- the two entries differ by duration, not by
+    // parameters. Absent for a target the protocol does not schedule.
+    std::map<std::string, std::vector<TreatmentTargetPoint>> targetPoints;
 };
 
 class TreatmentTargetStore {
@@ -79,6 +88,10 @@ public:
     // typo in the data surfaces at load rather than as a silent default.
     void loadTargets(const std::string& path);
     void loadProtocols(const std::string& path);
+    // The per-protocol copies. Missing file is not an error -- data written
+    // before protocols owned their points simply has none, and every protocol
+    // takes a fresh copy of the template the first time it is loaded.
+    void loadPlanPoints(const std::string& path);
 
     const std::vector<TreatmentTarget>& targets() const { return targets_; }
     const std::vector<TreatmentProtocolDefinition>& protocols() const { return protocols_; }
@@ -96,13 +109,26 @@ public:
     // (updateSonicateSettingsForCurrentSonication.m): every row of the target
     // takes startTime 0 and endTime from the protocol entry's duration, and
     // keeps its own amplitude. Empty if the target is unknown.
-    std::vector<TreatmentTargetPoint> pointsForSonication(const std::string& targetName,
+    std::vector<TreatmentTargetPoint> pointsForSonication(const std::string& protocolName,
+                                                           const std::string& targetName,
                                                            std::optional<double> durationSeconds) const;
+
+    // The protocol's own copy of a target's points, or nullptr if it does not
+    // schedule that target.
+    const std::vector<TreatmentTargetPoint>* planPoints(const std::string& protocolName,
+                                                         const std::string& targetName) const;
+    // Edits one protocol's copy. Touches nothing else: not the Target List,
+    // not another protocol. Refuses an unknown protocol or an empty list.
+    bool setPlanTargetPoints(const std::string& protocolName, const std::string& targetName,
+                             std::vector<TreatmentTargetPoint> points);
 
     // Writes the current state back in the same format loadTargets /
     // loadProtocols read. Throws std::runtime_error if the path is unwritable.
     void saveTargets(const std::string& path) const;
     void saveProtocols(const std::string& path) const;
+    // Writes only the copies for targets a protocol still schedules, so a
+    // target dropped from a protocol does not leave its points behind.
+    void savePlanPoints(const std::string& path) const;
 
     bool addTarget(const TreatmentTarget& target);
     bool removeTarget(const std::string& name);
@@ -130,6 +156,11 @@ public:
     std::vector<std::string> danglingTargetNames() const;
 
 private:
+    // Gives every scheduled target a copy of the template's points if the
+    // protocol has none yet. Never overwrites an existing copy, so it is safe
+    // to run after any load regardless of which file arrived first.
+    void snapshotMissingPlanPoints();
+
     std::vector<TreatmentTarget> targets_;
     std::vector<TreatmentProtocolDefinition> protocols_;
     std::map<std::string, std::size_t> targetIndex_;
