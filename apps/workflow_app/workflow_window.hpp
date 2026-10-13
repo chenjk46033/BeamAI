@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "gui/treatment_target_store.hpp"
+#include "treatment_library_dialog.hpp"
 #include "gui/treatment_workflow.hpp"
 #include "array/array_types.hpp"
 #include "mri/fiducial_detect.hpp"
@@ -160,7 +161,7 @@ private:
     void writeProtocolGridToStore();
     void saveTreatmentTargetStore();
     void writeTargetPointsToStore();
-    void openTreatmentLibrary();
+    void openTreatmentLibrary(TreatmentLibraryDialog::Page page);
     void setTargetStoreDirty(bool dirty);
     void selectSonicationRow(int row);
     int selectedSonicationRow() const;
@@ -285,6 +286,7 @@ private:
     QTableView* protocolView_ = nullptr;
     QListWidget* targetListWidget_ = nullptr;
     QPushButton* moveToTargetButton_ = nullptr;
+    QPushButton* manageTargetsButton_ = nullptr;
     QComboBox* visitNumberCombo_ = nullptr;
     QHBoxLayout* treatmentBodyRow_ = nullptr;
     Eigen::VectorXd couplingCh0Raw_;

@@ -70,15 +70,16 @@ struct TreatmentProtocolEntry {
     // so the amplitude here is the schedule's record, not an override.
     std::optional<double> amplitude;
     std::optional<double> durationSeconds;
+    // This occurrence's own points, copied from the Target List when the entry
+    // was created. Independent of every other entry -- including another entry
+    // in the same protocol scheduling the same target, which is why these live
+    // on the entry rather than beside it keyed by target name.
+    std::vector<TreatmentTargetPoint> points;
 };
 
 struct TreatmentProtocolDefinition {
     std::string name;
     std::vector<TreatmentProtocolEntry> entries;
-    // Keyed by target name, so the same target scheduled twice in one protocol
-    // shares one editable set -- the two entries differ by duration, not by
-    // parameters. Absent for a target the protocol does not schedule.
-    std::map<std::string, std::vector<TreatmentTargetPoint>> targetPoints;
 };
 
 class TreatmentTargetStore {
@@ -110,17 +111,21 @@ public:
     // takes startTime 0 and endTime from the protocol entry's duration, and
     // keeps its own amplitude. Empty if the target is unknown.
     std::vector<TreatmentTargetPoint> pointsForSonication(const std::string& protocolName,
-                                                           const std::string& targetName,
+                                                           std::size_t entryIndex,
                                                            std::optional<double> durationSeconds) const;
 
-    // The protocol's own copy of a target's points, or nullptr if it does not
-    // schedule that target.
-    const std::vector<TreatmentTargetPoint>* planPoints(const std::string& protocolName,
-                                                         const std::string& targetName) const;
-    // Edits one protocol's copy. Touches nothing else: not the Target List,
-    // not another protocol. Refuses an unknown protocol or an empty list.
-    bool setPlanTargetPoints(const std::string& protocolName, const std::string& targetName,
-                             std::vector<TreatmentTargetPoint> points);
+    // One scheduled occurrence's own points, or nullptr if the protocol or the
+    // index is unknown.
+    const std::vector<TreatmentTargetPoint>* entryPoints(const std::string& protocolName,
+                                                          std::size_t entryIndex) const;
+    // Edits one occurrence. Touches nothing else: not the Target List, not
+    // another protocol, and not another entry scheduling the same target.
+    bool setEntryPoints(const std::string& protocolName, std::size_t entryIndex,
+                        std::vector<TreatmentTargetPoint> points);
+    // The first entry scheduling this target, or -1. The Treatment page's grid
+    // selects a target rather than an occurrence, so it needs a rule; this is
+    // it, and the page says which entry it is editing.
+    int firstEntryForTarget(const std::string& protocolName, const std::string& targetName) const;
 
     // Writes the current state back in the same format loadTargets /
     // loadProtocols read. Throws std::runtime_error if the path is unwritable.
@@ -156,9 +161,8 @@ public:
     std::vector<std::string> danglingTargetNames() const;
 
 private:
-    // Gives every scheduled target a copy of the template's points if the
-    // protocol has none yet. Never overwrites an existing copy, so it is safe
-    // to run after any load regardless of which file arrived first.
+    // Gives every entry a copy of its target's template points if it has none
+    // yet. Never overwrites, so it is safe after any load.
     void snapshotMissingPlanPoints();
 
     std::vector<TreatmentTarget> targets_;

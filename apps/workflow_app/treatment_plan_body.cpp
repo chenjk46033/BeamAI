@@ -243,6 +243,11 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // 430-pixel list sits past the bottom of the visible area -- reachable
     // only by scrolling, which is no use for something you press while
     // looking at the MRI views.
+    manageTargetsButton_ = new QPushButton(QStringLiteral("Manage Targets..."), targetPanel);
+    manageTargetsButton_->setToolTip(
+        QStringLiteral("Add, rename, delete targets and edit the template points they start from"));
+    manageTargetsButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
+    targetPanelLayout->addWidget(manageTargetsButton_);
     moveToTargetButton_ = new QPushButton(QStringLiteral("Move to Selected Target"), targetPanel);
     moveToTargetButton_->setToolTip(
         QStringLiteral("Centre all three MRI planes on the shown sonication's position"));
@@ -331,8 +336,8 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         return button;
     };
     manageLibraryButton_ = makeProtocolButton(
-        QStringLiteral("Manage targets and protocols..."),
-        QStringLiteral("Edit the shared Target List and protocol schedules"));
+        QStringLiteral("Manage Protocols..."),
+        QStringLiteral("Add, rename, delete protocols and the targets each one schedules"));
     saveProtocolsButton_ = makeProtocolButton(QStringLiteral("Save protocols"),
                                                QStringLiteral("Write protocols and target parameters to your own copy"));
     protocolSelectorRow->addWidget(treatmentProtocolLabel_);
@@ -520,7 +525,10 @@ void WorkflowWindow::wireTreatmentPlanBody() {
             [this](const QString& name) { loadTreatmentProtocol(name); });
 
 
-    connect(manageLibraryButton_, &QPushButton::clicked, this, [this] { openTreatmentLibrary(); });
+    connect(manageLibraryButton_, &QPushButton::clicked, this,
+            [this] { openTreatmentLibrary(TreatmentLibraryDialog::Page::Protocols); });
+    connect(manageTargetsButton_, &QPushButton::clicked, this,
+            [this] { openTreatmentLibrary(TreatmentLibraryDialog::Page::Targets); });
     connect(saveProtocolsButton_, &QPushButton::clicked, this, [this] { saveTreatmentTargetStore(); });
     connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
             [this] { setTargetStoreDirty(true); });
@@ -625,14 +633,31 @@ void WorkflowWindow::writeProtocolGridToStore() {
     const std::string name = treatmentProtocolCombo_->currentText().toStdString();
     if (targetStore_.findProtocol(name) == nullptr) return;
     std::vector<beam::gui::TreatmentProtocolEntry> entries;
-    for (const beam::gui_qt::TreatmentProtocolRow& row : protocolModel_->rows()) {
+    const auto* existing = targetStore_.findProtocol(name);
+    for (std::size_t row = 0; row < protocolModel_->rows().size(); ++row) {
+        const beam::gui_qt::TreatmentProtocolRow& source = protocolModel_->rows()[row];
         beam::gui::TreatmentProtocolEntry entry;
-        entry.target = row.target.toStdString();
-        entry.amplitude = row.amplitude;
-        entry.durationSeconds = row.duration;
+        entry.target = source.target.toStdString();
+        // The schedule's own amplitude is a record BeamV0 never applies; keep
+        // whatever was stored rather than overwriting it with the displayed
+        // point value, which the loop below writes to its proper home.
+        if (existing != nullptr && row < existing->entries.size())
+            entry.amplitude = existing->entries[row].amplitude;
+        entry.durationSeconds = source.duration;
         entries.push_back(std::move(entry));
     }
     targetStore_.setProtocolEntries(name, std::move(entries));
+
+    // The Amplitude column shows the plan's point, so an edit to it belongs
+    // there too -- otherwise the column would not keep what was typed into it.
+    for (std::size_t row = 0; row < protocolModel_->rows().size(); ++row) {
+        const std::vector<beam::gui::TreatmentTargetPoint>* owned =
+            targetStore_.entryPoints(name, row);
+        if (owned == nullptr || owned->empty()) continue;
+        std::vector<beam::gui::TreatmentTargetPoint> points = *owned;
+        points.front().amplitude = protocolModel_->rows()[row].amplitude;
+        targetStore_.setEntryPoints(name, row, std::move(points));
+    }
 }
 
 void WorkflowWindow::saveTreatmentTargetStore() {
@@ -671,19 +696,24 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
         targetStore_.findProtocol(protocolName.toStdString());
     QList<QStringList> sourceRows;
     if (definition != nullptr) {
-        for (const beam::gui::TreatmentProtocolEntry& entry : definition->entries) {
+        for (std::size_t index = 0; index < definition->entries.size(); ++index) {
+            const beam::gui::TreatmentProtocolEntry& entry = definition->entries[index];
             // Where the entry says nothing, the first point stands in -- it is
             // the row the schedule would have been written from. It has to be
             // THIS protocol's copy, not the Target List's: the grid edits the
             // copy, so reading the template would show a value no one can see.
             const std::vector<beam::gui::TreatmentTargetPoint>* points =
-                targetStore_.planPoints(protocolName.toStdString(), entry.target);
+                targetStore_.entryPoints(protocolName.toStdString(), index);
             const beam::gui::TreatmentTarget* target = targetStore_.findTarget(entry.target);
             if (points == nullptr && target != nullptr) points = &target->points;
             const beam::gui::TreatmentTargetPoint* first =
                 points != nullptr && !points->empty() ? &points->front() : nullptr;
+            // The point's amplitude, not the entry's. BeamV0 stores a schedule
+            // amplitude but never applies it (setStimulationAmplitudeFromResponses
+            // is commented out), so the point is what is transmitted -- and it is
+            // what Manage Protocols edits.
             const double amplitude =
-                entry.amplitude.value_or(first != nullptr ? first->amplitude : 0.75);
+                first != nullptr ? first->amplitude : entry.amplitude.value_or(0.75);
             const double duration =
                 entry.durationSeconds.value_or(first != nullptr ? first->endTimeSeconds : 30.0);
             sourceRows.push_back({QString::number(entry.order),
@@ -841,8 +871,12 @@ void WorkflowWindow::switchToSelectedTarget() {
 
         std::vector<beam::gui_qt::StimParamRow> rows;
         for (const beam::gui::TreatmentTargetPoint& point :
-             targetStore_.pointsForSonication(currentProtocolName().toStdString(),
-                                              name.toStdString(), scheduledDuration)) {
+             targetStore_.pointsForSonication(
+                 currentProtocolName().toStdString(),
+                 static_cast<std::size_t>(std::max(
+                     0, targetStore_.firstEntryForTarget(currentProtocolName().toStdString(),
+                                                         name.toStdString()))),
+                 scheduledDuration)) {
             beam::gui_qt::StimParamRow row;
             row.order = point.order;
             row.show = point.show;
@@ -1398,13 +1432,13 @@ void WorkflowWindow::finishTreatmentStage() {
     ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
 }
 
-void WorkflowWindow::openTreatmentLibrary() {
+void WorkflowWindow::openTreatmentLibrary(TreatmentLibraryDialog::Page page) {
     // The dialog edits a copy, and accepting it replaces the store wholesale, so
     // anything still only in the grid has to reach the store first or it is lost.
     writeProtocolGridToStore();
     writeTargetPointsToStore();
     const QString protocol = treatmentProtocolCombo_->currentText();
-    TreatmentLibraryDialog dialog(targetStore_, this);
+    TreatmentLibraryDialog dialog(targetStore_, page, this);
     if (dialog.exec() != QDialog::Accepted) return;
     targetStore_ = dialog.store();
     setTargetStoreDirty(true);
@@ -1450,8 +1484,11 @@ void WorkflowWindow::writeTargetPointsToStore() {
         }
         // The protocol's own copy, not the Target List's: the list is a
         // template, and an edit made inside one plan stays inside it.
-        targetStore_.setPlanTargetPoints(currentProtocolName().toStdString(),
-                                         targetListName(item).toStdString(), std::move(points));
+        const int entry = targetStore_.firstEntryForTarget(
+            currentProtocolName().toStdString(), targetListName(item).toStdString());
+        if (entry >= 0)
+            targetStore_.setEntryPoints(currentProtocolName().toStdString(),
+                                        static_cast<std::size_t>(entry), std::move(points));
     }
 }
 

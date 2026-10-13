@@ -169,49 +169,50 @@ bool TreatmentTargetStore::setTargetPoints(const std::string& name,
 
 void TreatmentTargetStore::snapshotMissingPlanPoints() {
     for (TreatmentProtocolDefinition& definition : protocols_) {
-        for (const TreatmentProtocolEntry& entry : definition.entries) {
-            if (definition.targetPoints.count(entry.target) != 0) continue;
+        for (TreatmentProtocolEntry& entry : definition.entries) {
+            if (!entry.points.empty()) continue;
             const TreatmentTarget* target = findTarget(entry.target);
-            if (target == nullptr) continue;  // dangling name; danglingTargetNames() reports it
-            definition.targetPoints.emplace(entry.target, target->points);
+            if (target == nullptr) continue;  // dangling; danglingTargetNames() reports it
+            entry.points = target->points;
         }
     }
 }
 
-const std::vector<TreatmentTargetPoint>* TreatmentTargetStore::planPoints(
-    const std::string& protocolName, const std::string& targetName) const {
+const std::vector<TreatmentTargetPoint>* TreatmentTargetStore::entryPoints(
+    const std::string& protocolName, std::size_t entryIndex) const {
     const TreatmentProtocolDefinition* definition = findProtocol(protocolName);
-    if (definition == nullptr) return nullptr;
-    const auto found = definition->targetPoints.find(targetName);
-    return found == definition->targetPoints.end() ? nullptr : &found->second;
+    if (definition == nullptr || entryIndex >= definition->entries.size()) return nullptr;
+    return &definition->entries[entryIndex].points;
 }
 
-bool TreatmentTargetStore::setPlanTargetPoints(const std::string& protocolName,
-                                                const std::string& targetName,
-                                                std::vector<TreatmentTargetPoint> points) {
+int TreatmentTargetStore::firstEntryForTarget(const std::string& protocolName,
+                                               const std::string& targetName) const {
+    const TreatmentProtocolDefinition* definition = findProtocol(protocolName);
+    if (definition == nullptr) return -1;
+    for (std::size_t i = 0; i < definition->entries.size(); ++i)
+        if (definition->entries[i].target == targetName) return static_cast<int>(i);
+    return -1;
+}
+
+bool TreatmentTargetStore::setEntryPoints(const std::string& protocolName, std::size_t entryIndex,
+                                           std::vector<TreatmentTargetPoint> points) {
     const auto found = std::find_if(protocols_.begin(), protocols_.end(),
                                     [&](const TreatmentProtocolDefinition& definition) {
                                         return definition.name == protocolName;
                                     });
-    if (found == protocols_.end() || targetName.empty() || points.empty()) return false;
+    if (found == protocols_.end() || entryIndex >= found->entries.size() || points.empty())
+        return false;
     for (std::size_t i = 0; i < points.size(); ++i) points[i].order = static_cast<int>(i) + 1;
-    found->targetPoints[targetName] = std::move(points);
+    found->entries[entryIndex].points = std::move(points);
     return true;
 }
 
 std::vector<TreatmentTargetPoint> TreatmentTargetStore::pointsForSonication(
-    const std::string& protocolName, const std::string& targetName,
+    const std::string& protocolName, std::size_t entryIndex,
     std::optional<double> durationSeconds) const {
-    // The protocol's own copy is the answer whenever it has one. Falling back
-    // to the template covers a target not yet scheduled anywhere.
-    std::vector<TreatmentTargetPoint> points;
-    if (const std::vector<TreatmentTargetPoint>* owned = planPoints(protocolName, targetName)) {
-        points = *owned;
-    } else {
-        const TreatmentTarget* target = findTarget(targetName);
-        if (target == nullptr) return {};
-        points = target->points;
-    }
+    const std::vector<TreatmentTargetPoint>* owned = entryPoints(protocolName, entryIndex);
+    if (owned == nullptr || owned->empty()) return {};
+    std::vector<TreatmentTargetPoint> points = *owned;
     if (durationSeconds) {
         // The scalar assignment in updateSonicateSettingsForCurrentSonication.m
         // writes one value down a whole table column, so every row moves.
@@ -245,43 +246,60 @@ std::vector<std::string> TreatmentTargetStore::distinctTargetsOf(const std::stri
 void TreatmentTargetStore::loadPlanPoints(const std::string& path) {
     std::ifstream probe(path);
     if (!probe) return;  // nothing written yet; snapshots below supply the copies
+    // Copies were keyed by target name before they moved onto the entry, and
+    // that file cannot say which occurrence a row belonged to. Skip it rather
+    // than fail the load or guess: every entry then takes a fresh copy of the
+    // template below, which is what it held before anyone edited an occurrence.
+    {
+        std::string line;
+        while (std::getline(probe, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            const std::string stripped = trimmed(line);
+            if (stripped.empty() || stripped.front() == '#') continue;
+            if (stripped.rfind("protocol,target,", 0) == 0) return;  // the old header
+            break;
+        }
+    }
     probe.close();
 
-    const std::vector<std::vector<std::string>> rows = readCsv(path, 11);
+    const std::vector<std::vector<std::string>> rows = readCsv(path, 12);
     // A stored copy replaces whatever snapshotMissingPlanPoints() already put
     // there, rather than appending to it -- the loads can arrive in any order.
-    std::set<std::pair<std::string, std::string>> replaced;
+    std::set<std::pair<std::string, std::size_t>> replaced;
     for (const std::vector<std::string>& row : rows) {
         const std::string& protocolName = row[0];
-        const std::string& targetName = row[1];
         if (protocolName.empty()) throw std::runtime_error(path + ": a row has no protocol name");
-        if (targetName.empty()) throw std::runtime_error(path + ": a row has no target name");
+        const int entryNumber = static_cast<int>(toDouble(row[1], path, "entry"));
+        if (entryNumber < 1) throw std::runtime_error(path + ": entry numbers start at 1");
+        const std::size_t entryIndex = static_cast<std::size_t>(entryNumber - 1);
 
         auto definition = std::find_if(protocols_.begin(), protocols_.end(),
                                        [&](const TreatmentProtocolDefinition& candidate) {
                                            return candidate.name == protocolName;
                                        });
-        // A copy whose protocol is gone is stale, not an error: removeProtocol
-        // has no reason to rewrite this file.
-        if (definition == protocols_.end()) continue;
+        // A copy whose protocol or entry is gone is stale, not an error: neither
+        // removeProtocol nor an edited schedule rewrites this file.
+        if (definition == protocols_.end() || entryIndex >= definition->entries.size()) continue;
 
-        std::vector<TreatmentTargetPoint>& points = definition->targetPoints[targetName];
-        if (replaced.emplace(protocolName, targetName).second) points.clear();
+        TreatmentProtocolEntry& entry = definition->entries[entryIndex];
+        std::vector<TreatmentTargetPoint>& points = entry.points;
+        if (replaced.emplace(protocolName, entryIndex).second) points.clear();
         TreatmentTargetPoint point;
-        point.order = static_cast<int>(toDouble(row[2], path, "point"));
+        point.order = static_cast<int>(toDouble(row[3], path, "point"));
         if (point.order != static_cast<int>(points.size()) + 1) {
-            throw std::runtime_error(path + ": protocol \"" + protocolName + "\" target \"" +
-                                     targetName + "\" point numbers must run 1..n");
+            throw std::runtime_error(path + ": protocol \"" + protocolName + "\" entry " +
+                                     std::to_string(entryNumber) +
+                                     " point numbers must run 1..n");
         }
-        const std::string& show = row[3];
+        const std::string& show = row[4];
         point.show = !(show == "0" || show == "N" || show == "n" || show == "false");
-        point.amplitude = toDouble(row[4], path, "amplitude");
-        point.startTimeSeconds = toDouble(row[5], path, "startTime");
-        point.endTimeSeconds = toDouble(row[6], path, "endTime");
-        point.burstDurationSeconds = toDouble(row[7], path, "burstDuration");
-        point.burstIntervalSeconds = toDouble(row[8], path, "burstInterval");
-        point.pulseDurationSeconds = toDouble(row[9], path, "pulseDuration");
-        point.pulseIntervalSeconds = toDouble(row[10], path, "pulseInterval");
+        point.amplitude = toDouble(row[5], path, "amplitude");
+        point.startTimeSeconds = toDouble(row[6], path, "startTime");
+        point.endTimeSeconds = toDouble(row[7], path, "endTime");
+        point.burstDurationSeconds = toDouble(row[8], path, "burstDuration");
+        point.burstIntervalSeconds = toDouble(row[9], path, "burstInterval");
+        point.pulseDurationSeconds = toDouble(row[10], path, "pulseDuration");
+        point.pulseIntervalSeconds = toDouble(row[11], path, "pulseInterval");
         points.push_back(point);
     }
     snapshotMissingPlanPoints();
@@ -290,22 +308,20 @@ void TreatmentTargetStore::loadPlanPoints(const std::string& path) {
 void TreatmentTargetStore::savePlanPoints(const std::string& path) const {
     std::ofstream file(path);
     if (!file) throw std::runtime_error("cannot write " + path);
-    file << "# BeamAI per-protocol target points: each protocol's own copy, taken from the\n"
-         << "# Target List when the target entered the protocol. The Target List is a\n"
-         << "# template - editing it does not reach a copy already made here, and editing a\n"
-         << "# copy reaches neither the template nor any other protocol.\n"
-         << "protocol,target,point,show,amplitude,startTime,endTime,burstDuration,"
+    file << "# BeamAI per-entry points: every scheduled occurrence carries its own copy,\n"
+         << "# taken from the Target List when the entry was created. Two entries naming the\n"
+         << "# same target are independent. The Target List is a template - editing it does\n"
+         << "# not reach a copy already made here, and editing a copy reaches nothing else.\n"
+         << "# `entry` is the 1-based position in the protocol's schedule; `target` is\n"
+         << "# written for readability and is not what the row is matched on.\n"
+         << "protocol,entry,target,point,show,amplitude,startTime,endTime,burstDuration,"
             "burstInterval,pulseDuration,pulseInterval\n";
     for (const TreatmentProtocolDefinition& definition : protocols_) {
-        for (const auto& [targetName, points] : definition.targetPoints) {
-            const bool scheduled = std::any_of(definition.entries.begin(), definition.entries.end(),
-                                               [&](const TreatmentProtocolEntry& entry) {
-                                                   return entry.target == targetName;
-                                               });
-            if (!scheduled) continue;
-            for (const TreatmentTargetPoint& point : points) {
-                file << definition.name << ',' << targetName << ',' << point.order << ','
-                     << (point.show ? 1 : 0) << ',' << point.amplitude << ','
+        for (std::size_t index = 0; index < definition.entries.size(); ++index) {
+            const TreatmentProtocolEntry& entry = definition.entries[index];
+            for (const TreatmentTargetPoint& point : entry.points) {
+                file << definition.name << ',' << (index + 1) << ',' << entry.target << ','
+                     << point.order << ',' << (point.show ? 1 : 0) << ',' << point.amplitude << ','
                      << point.startTimeSeconds << ',' << point.endTimeSeconds << ','
                      << point.burstDurationSeconds << ',' << point.burstIntervalSeconds << ','
                      << point.pulseDurationSeconds << ',' << point.pulseIntervalSeconds << '\n';
@@ -390,14 +406,10 @@ bool TreatmentTargetStore::renameTarget(const std::string& from, const std::stri
     targets_[found->second].name = to;
     targetIndex_.clear();
     for (std::size_t i = 0; i < targets_.size(); ++i) targetIndex_.emplace(targets_[i].name, i);
-    for (TreatmentProtocolDefinition& protocol : protocols_) {
-        for (TreatmentProtocolEntry& entry : protocol.entries)
-            if (entry.target == from) entry.target = to;
-        const auto moved = protocol.targetPoints.find(from);
-        if (moved == protocol.targetPoints.end()) continue;
-        protocol.targetPoints.emplace(to, std::move(moved->second));
-        protocol.targetPoints.erase(moved);
-    }
+    // The protocols are deliberately left alone. A target that has entered a
+    // protocol was copied into it, name and points together, so the protocol
+    // holds a complete target of its own and does not follow the template's
+    // later edits -- renaming included.
     return true;
 }
 
@@ -437,16 +449,8 @@ bool TreatmentTargetStore::setProtocolEntries(const std::string& name,
     if (found == protocols_.end()) return false;
     for (std::size_t i = 0; i < entries.size(); ++i) entries[i].order = static_cast<int>(i) + 1;
     found->entries = std::move(entries);
-    // A target dropped from the schedule loses this protocol's copy, so adding
-    // it back later takes a fresh one from the Target List rather than
-    // resurrecting edits the operator removed.
-    for (auto it = found->targetPoints.begin(); it != found->targetPoints.end();) {
-        const bool scheduled = std::any_of(found->entries.begin(), found->entries.end(),
-                                           [&](const TreatmentProtocolEntry& entry) {
-                                               return entry.target == it->first;
-                                           });
-        it = scheduled ? std::next(it) : found->targetPoints.erase(it);
-    }
+    // An entry carries its own points, so removing it takes them with it and
+    // adding one takes a fresh copy of the template below.
     snapshotMissingPlanPoints();
     return true;
 }
@@ -465,6 +469,8 @@ std::vector<std::string> TreatmentTargetStore::danglingTargetNames() const {
     for (const TreatmentProtocolDefinition& definition : protocols_) {
         for (const TreatmentProtocolEntry& entry : definition.entries) {
             if (targetIndex_.count(entry.target) != 0) continue;
+            // Its own points make it sonicable whatever the Target List holds.
+            if (!entry.points.empty()) continue;
             if (std::find(missing.begin(), missing.end(), entry.target) == missing.end())
                 missing.push_back(entry.target);
         }
