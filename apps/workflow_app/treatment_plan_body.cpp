@@ -23,9 +23,15 @@
 //   * No Get Params button: its source action just exposes MATLAB's
 //     workspace for debugging, which has no equivalent here.
 
+#ifdef _WIN32
+#include <windows.h>
+#include <mmsystem.h>
+#endif
+
 #include "workflow_window.hpp"
 
 #include "treatment_library_dialog.hpp"
+
 
 #include <algorithm>
 #include <cmath>
@@ -35,6 +41,8 @@
 
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDataStream>
+#include <QFileInfo>
 #include <QDateTime>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -372,10 +380,6 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolSelectorRow->addWidget(treatmentProtocolLabel_);
     protocolSelectorRow->addWidget(treatmentProtocolCombo_);
     protocolSelectorRow->addWidget(manageLibraryButton_);
-    saveLogButton_ = makeProtocolButton(QStringLiteral("Save Log..."),
-                                        QStringLiteral("Write this visit's log to a file of your choosing"));
-    connect(saveLogButton_, &QPushButton::clicked, this, [this] { saveTreatmentLogAs(); });
-    protocolSelectorRow->addWidget(saveLogButton_);
     protocolSelectorRow->addSpacing(18);
     protocolSelectorRow->addWidget(visitLabel);
     protocolSelectorRow->addWidget(visitNumberCombo_);
@@ -740,8 +744,14 @@ void WorkflowWindow::saveTreatmentTargetStore() {
             QDir(directory).filePath(QStringLiteral("treatment_targets.csv")).toStdString());
         targetStore_.saveProtocols(
             QDir(directory).filePath(QStringLiteral("treatment_protocols.csv")).toStdString());
-        treatmentLog_.save(
-            QDir(directory).filePath(QStringLiteral("treatment_log.csv")).toStdString());
+        const QString logPath = QDir(directory).filePath(QStringLiteral("treatment_log.csv"));
+        treatmentLog_.save(logPath.toStdString());
+        // The log writes itself on every change, so there is no Save button to
+        // press and no way to tell whether it happened. This is that telling.
+        showMessage(QStringLiteral("Log updated: %1 at %2")
+                        .arg(QDir::toNativeSeparators(logPath))
+                        .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"))),
+                    false);
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Could not save treatment data: %1").arg(error.what()), true);
         return;
@@ -1140,16 +1150,102 @@ namespace {
 // redistributable and not bundled here; prepareShamSonication takes the
 // caller's own buffer, so this synthesises the same 200 Hz burst beam_app
 // uses (startup_data.cpp's syntheticShamBurstSound).
-constexpr double kShamSoundFs = 44100.0;
+// BeamV0 tiles a recorded burst that it loads from sonicationSound.mat. That
+// file ships with BeamV0, not with this application, and reading it would tie a
+// sham to both a MATLAB container and a sibling checkout -- so it was converted
+// once into data/sham_burst.wav and this reads the audio file. A synthesised
+// 200 Hz burst stands in when the file is absent: the mask still masks, it just
+// does not sound the same.
+// Every button in the Sonicate column is this tall, so the column reads as
+// one set of controls.
+constexpr int kControlButtonHeight = 38;
 
-std::vector<double> shamBurstSound() {
+constexpr double kSyntheticShamFs = 44100.0;
+
+struct ShamBurst {
+    std::vector<double> samples;
+    double sampleRateHz = kSyntheticShamFs;
+    bool recorded = false;
+};
+
+ShamBurst synthesiseShamBurst() {
     constexpr double kToneHz = 200.0;
     constexpr double kBurstSeconds = 0.05;
-    const auto n = static_cast<std::size_t>(kBurstSeconds * kShamSoundFs);
-    std::vector<double> sound(n);
-    for (std::size_t i = 0; i < n; ++i)
-        sound[i] = std::sin(2.0 * 3.14159265358979323846 * kToneHz * static_cast<double>(i) / kShamSoundFs);
-    return sound;
+    ShamBurst burst;
+    const auto n = static_cast<std::size_t>(kBurstSeconds * kSyntheticShamFs);
+    burst.samples.resize(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        burst.samples[i] = std::sin(2.0 * 3.14159265358979323846 * kToneHz *
+                                    static_cast<double>(i) / kSyntheticShamFs);
+    }
+    return burst;
+}
+
+// Enough WAV to read the one file this ships: 16-bit PCM, mono, uncompressed.
+// Anything else returns nothing and the caller falls back, rather than playing
+// a misread buffer as noise at a participant.
+ShamBurst readWavBurst(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    const QByteArray bytes = file.readAll();
+    if (bytes.size() < 44 || !bytes.startsWith("RIFF") || bytes.mid(8, 4) != "WAVE") return {};
+
+    QDataStream in(bytes);
+    in.setByteOrder(QDataStream::LittleEndian);
+    in.skipRawData(20);
+    quint16 format = 0, channels = 0, bitsPerSample = 0, blockAlign = 0;
+    quint32 sampleRate = 0, byteRate = 0;
+    in >> format >> channels >> sampleRate >> byteRate >> blockAlign >> bitsPerSample;
+    if (format != 1 || channels != 1 || bitsPerSample != 16 || sampleRate == 0) return {};
+
+    // Walk the chunks rather than assuming data starts at 36: a file written by
+    // another tool may carry LIST or fact before it.
+    int offset = 12;
+    while (offset + 8 <= bytes.size()) {
+        const QByteArray id = bytes.mid(offset, 4);
+        const quint32 size = static_cast<quint32>(static_cast<unsigned char>(bytes[offset + 4])) |
+                             (static_cast<quint32>(static_cast<unsigned char>(bytes[offset + 5])) << 8) |
+                             (static_cast<quint32>(static_cast<unsigned char>(bytes[offset + 6])) << 16) |
+                             (static_cast<quint32>(static_cast<unsigned char>(bytes[offset + 7])) << 24);
+        if (id == "data") {
+            const int start = offset + 8;
+            const int count = static_cast<int>(std::min<quint32>(size, bytes.size() - start)) / 2;
+            if (count <= 0) return {};
+            ShamBurst burst;
+            burst.sampleRateHz = sampleRate;
+            burst.recorded = true;
+            burst.samples.reserve(static_cast<std::size_t>(count));
+            for (int i = 0; i < count; ++i) {
+                const auto low = static_cast<unsigned char>(bytes[start + i * 2]);
+                const auto high = static_cast<unsigned char>(bytes[start + i * 2 + 1]);
+                burst.samples.push_back(static_cast<qint16>(low | (high << 8)) / 32768.0);
+            }
+            return burst;
+        }
+        offset += 8 + static_cast<int>(size) + (size % 2);  // chunks are word aligned
+    }
+    return {};
+}
+
+// Read once: the file does not change while the application runs, and a sham
+// should not stall on disk at the moment it is triggered.
+const ShamBurst& shamBurst() {
+    static const ShamBurst burst = [] {
+        const QString executableDir = QCoreApplication::applicationDirPath();
+        const QStringList candidates = {
+            QDir(executableDir).filePath(QStringLiteral("../../../data/sham_burst.wav")),
+            QDir(executableDir).filePath(QStringLiteral("../../data/sham_burst.wav")),
+            QDir(executableDir).filePath(QStringLiteral("data/sham_burst.wav")),
+            QDir::current().filePath(QStringLiteral("data/sham_burst.wav")),
+        };
+        for (const QString& candidate : candidates) {
+            if (!QFileInfo::exists(candidate)) continue;
+            const ShamBurst found = readWavBurst(candidate);
+            if (!found.samples.empty()) return found;
+        }
+        return synthesiseShamBurst();
+    }();
+    return burst;
 }
 
 }  // namespace
@@ -1181,12 +1277,12 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     treatmentExecutionProgressBar_->setValue(0);
     treatmentExecutionProgressBar_->setTextVisible(false);
     treatmentExecutionProgressBar_->setMinimumHeight(24);
-    treatmentExecutionProgressBar_->setMinimumWidth(420);
+    treatmentExecutionProgressBar_->setMinimumWidth(210);
     treatmentExecutionProgressBar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     // The bar takes the larger share of the row: it is what the operator
     // watches while a sonication runs, and the label beside it holds one line.
     statusColumn->addWidget(sonicationCountdownLabel_, 1);
-    statusColumn->addWidget(treatmentExecutionProgressBar_, 2);
+    statusColumn->addWidget(treatmentExecutionProgressBar_, 1);
     row->addLayout(statusColumn, 1);
 
     // Right: the .mlapp's own narrow control column.
@@ -1232,7 +1328,8 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     // A plan holds many sonications and BeamV0 fires them one at a time, so
     // finishing the stage is a separate, deliberate action -- completing it
     // when the first countdown ends would skip the rest of the plan.
-    finishTreatmentButton_ = new QPushButton(QStringLiteral("Finish treatment and continue →"), controlPanel);
+    // Short label: it sits in the narrow control column now, not on a wide row.
+    finishTreatmentButton_ = new QPushButton(QStringLiteral("Finish treatment"), controlPanel);
     finishTreatmentButton_->setMinimumHeight(36);
     finishTreatmentButton_->setEnabled(false);
     for (QPushButton* button : {serialConnectButton_, shamButton_, abortTreatmentButton_, finishTreatmentButton_})
@@ -1252,15 +1349,26 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     controlColumn->addWidget(shamButton_);
     controlColumn->addWidget(startTreatmentButton_);
     controlColumn->addWidget(abortTreatmentButton_);
+    controlColumn->addWidget(finishTreatmentButton_);
     // Slack below, or the box layout spreads the controls apart.
     controlColumn->addStretch(1);
-    // Finish is not a firing control, so it stays out of the Sonicate column;
-    // it ends the status line instead, at the far right.
-    finishTreatmentButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    // Wide: it ends the visit, and on a row of status text a button sized to
-    // its own label reads as one more label.
-    finishTreatmentButton_->setMinimumWidth(420);
-    statusColumn->addWidget(finishTreatmentButton_);
+
+    // One size for the whole column. Sonicate was taller than the rest and
+    // Finish a different shape again, which made the column read as four
+    // unrelated controls rather than one set.
+    for (QPushButton* button : {serialConnectButton_, shamButton_, startTreatmentButton_,
+                                abortTreatmentButton_, finishTreatmentButton_}) {
+        // Last, so it wins over whatever each button's own sheet set. The
+        // min-height matters most: Sonicate's sheet asks for 34px plus padding,
+        // and a stylesheet minimum beats any maximum set in code.
+        button->setStyleSheet(button->styleSheet() +
+                              QStringLiteral(" QPushButton { padding: 4px 10px; min-height: 28px; max-height: 28px; }"));
+        button->setMinimumHeight(kControlButtonHeight);
+        button->setMaximumHeight(kControlButtonHeight);
+        button->setMinimumWidth(0);
+        button->setMaximumWidth(QWIDGETSIZE_MAX);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
     // Beside the plan rather than under it. Stacked below, this column began
     // around 1150 px down a maximised window -- off the bottom of a 1080p
     // screen, so the operator could not see Sonicate at all.
@@ -1288,6 +1396,7 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
             sonicationCountdownTimer_->stop();
             sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
             closeOpenLogRow();
+            stopShamAudio();
             // Back to empty rather than sitting at 100%: the Completed column
             // now says the sonication finished, and a full bar left on screen
             // reads as one still in progress.
@@ -1445,12 +1554,25 @@ void WorkflowWindow::showScheduleRowMenu(const QPoint& where) {
     if (row == nullptr) return;
 
     QMenu menu(this);
+    // Ask the log what it would accept rather than guessing: a row below this
+    // one that has already run cannot be moved, so neither action is possible
+    // even though THIS row looks free.
+    const bool canInsert = treatmentLog_.canInsertAfter(protocol, visit, sequence) &&
+                           !targetStore_.targets().empty();
+    const bool canSkip = treatmentLog_.canRemoveAt(protocol, visit, sequence);
     const bool fired = beam::gui::TreatmentLog::delivered(*row);
+    const QString blocked =
+        fired ? QStringLiteral("Sonication %1 has already been delivered.").arg(sequence)
+              : QStringLiteral("A sonication below %1 has already been delivered, so the order "
+                               "cannot change.")
+                    .arg(sequence);
+
     QAction* insert = menu.addAction(QStringLiteral("Insert sonication after %1...").arg(sequence));
     QAction* skip = menu.addAction(QStringLiteral("Skip sonication %1").arg(sequence));
-    insert->setEnabled(!targetStore_.targets().empty());
-    skip->setEnabled(!fired);
-    if (fired) skip->setToolTip(QStringLiteral("This sonication has already been delivered."));
+    insert->setEnabled(canInsert);
+    skip->setEnabled(canSkip);
+    if (!canInsert) insert->setToolTip(blocked);
+    if (!canSkip) skip->setToolTip(blocked);
 
     QAction* chosen = menu.exec(protocolView_->viewport()->mapToGlobal(where));
     if (chosen == nullptr) return;
@@ -1512,25 +1634,66 @@ void WorkflowWindow::showScheduleRowMenu(const QPoint& where) {
     saveTreatmentTargetStore();
 }
 
-// Writes the visit log wherever the operator asks, on top of the copy kept
-// beside the plan. setLogInfoToCSV.m does the same thing to its own
-// participantLogFilesBeam folder after every sonication.
-void WorkflowWindow::saveTreatmentLogAs() {
-    const QString suggested =
-        QDir(treatmentDataDirectory())
-            .filePath(QStringLiteral("treatment_log_%1.csv")
-                          .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmm"))));
-    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Save treatment log"),
-                                                      suggested, QStringLiteral("CSV (*.csv)"));
-    if (path.isEmpty()) return;
-    writeProtocolGridToStore();  // anything typed and not yet committed
-    try {
-        treatmentLog_.save(path.toStdString());
-    } catch (const std::exception& error) {
-        showMessage(QStringLiteral("Could not save the log: %1").arg(error.what()), true);
-        return;
+// setShamAudio.m ends with `sound(shamData, fs)` -- the masking track is meant
+// to be heard, and a sham the participant cannot hear is not blinded. The port
+// assembled the buffer and dropped it on the floor.
+//
+// PlaySound with SND_MEMORY rather than Qt Multimedia, which is not in this
+// build's Qt. The buffer has to outlive the call because SND_ASYNC plays from
+// it, so it is held on the window.
+QByteArray WorkflowWindow::wavFromSamples(const std::vector<double>& samples, int sampleRate) {
+    QByteArray wav;
+    if (samples.empty() || sampleRate <= 0) return wav;
+
+    // MATLAB's sound() clips to [-1, 1]; anything louder is scaled down rather
+    // than wrapping round, which would turn a loud mask into noise.
+    double peak = 0.0;
+    for (const double sample : samples) peak = std::max(peak, std::abs(sample));
+    const double scale = peak > 1.0 ? 1.0 / peak : 1.0;
+
+    const quint32 frames = static_cast<quint32>(samples.size());
+    const quint32 dataBytes = frames * 2;  // 16-bit mono
+    QDataStream out(&wav, QIODevice::WriteOnly);
+    out.setByteOrder(QDataStream::LittleEndian);
+    out.writeRawData("RIFF", 4);
+    out << quint32(36 + dataBytes);
+    out.writeRawData("WAVEfmt ", 8);
+    out << quint32(16) << quint16(1) << quint16(1) << quint32(sampleRate)
+        << quint32(sampleRate * 2) << quint16(2) << quint16(16);
+    out.writeRawData("data", 4);
+    out << dataBytes;
+    for (const double sample : samples) {
+        const double clamped = std::clamp(sample * scale, -1.0, 1.0);
+        out << static_cast<qint16>(std::lround(clamped * 32767.0));
     }
-    showMessage(QStringLiteral("Treatment log saved to %1.").arg(path), false);
+    return wav;
+}
+
+// PLATFORM SEAM. The playback call below is the only Windows-specific line in
+// this application, and it is here because this build's Qt has no
+// multimedia module. Everything above it -- assembling the mask, reading the
+// burst, writing the WAV -- is portable. Adding Qt Multimedia would replace
+// these few lines with a QAudioSink and nothing else would move.
+void WorkflowWindow::playShamAudio(const std::vector<double>& samples, int sampleRate) {
+    shamAudioBuffer_ = wavFromSamples(samples, sampleRate);
+    if (shamAudioBuffer_.isEmpty()) return;
+#ifdef _WIN32
+    PlaySoundW(reinterpret_cast<LPCWSTR>(shamAudioBuffer_.constData()), nullptr,
+               SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+#else
+    // Said out loud rather than failing quietly: an unheard mask is an
+    // unblinded sham, which is worse than a sham that refuses to pretend.
+    showMessage(QStringLiteral("Masking audio cannot be played on this platform, so this "
+                               "sham is not blinded."),
+                true);
+#endif
+}
+
+void WorkflowWindow::stopShamAudio() {
+#ifdef _WIN32
+    PlaySoundW(nullptr, nullptr, SND_PURGE);
+#endif
+    shamAudioBuffer_.clear();
 }
 
 void WorkflowWindow::runSonication(bool sham) {
@@ -1553,8 +1716,9 @@ void WorkflowWindow::runSonication(bool sham) {
 
     if (sham) {
         const beam::gui::ShamSonicationOutcome outcome =
-            beam::gui::prepareShamSonication(params, shamBurstSound(), kShamSoundFs);
+            beam::gui::prepareShamSonication(params, shamBurst().samples, shamBurst().sampleRateHz);
         // A sham sends nothing, so there is no transmission or duty cycle.
+        playShamAudio(outcome.maskingAudio, static_cast<int>(shamBurst().sampleRateHz));
         recordSonicationStart(r, true, std::nullopt, std::nullopt);
         startSonicationCountdown(static_cast<int>(outcome.durationSeconds));
         setExecutionStatus(
@@ -1634,6 +1798,7 @@ void WorkflowWindow::abortSonication() {
     sonicationCountdownTimer_->stop();
     sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
     closeOpenLogRow();
+    stopShamAudio();
     abortTreatmentButton_->setEnabled(false);
     startTreatmentButton_->setEnabled(true);
     shamButton_->setEnabled(true);

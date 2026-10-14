@@ -442,3 +442,72 @@ TEST(TreatmentLog, CorrectionValuesAreLoggedAndSurviveAReload) {
     EXPECT_FALSE(masked->dutyCycle.has_value());
     EXPECT_TRUE(masked->sham);
 }
+
+// The menu offering these asks the same question the operation answers, so an
+// action that cannot work is disabled rather than refused after the fact.
+TEST(TreatmentLog, WhatCanBeInsertedOrSkippedMatchesWhatIsAccepted) {
+    beam::gui::TreatmentLog log;
+    std::vector<beam::gui::TreatmentLogRow> planned;
+    for (int i = 1; i <= 4; ++i) {
+        beam::gui::TreatmentLogRow row = makeRow(1, "SCC1");
+        row.sequence = i;
+        row.startedAt.clear();
+        planned.push_back(row);
+    }
+    log.seedVisit(1, "Default", planned);
+
+    beam::gui::TreatmentLogRow fired = makeRow(1, "SCC1");
+    fired.protocol = "Default";
+    fired.sequence = 2;
+    fired.startedAt = "2026-10-14T10:00:00";
+    log.record(std::move(fired));
+
+    // Row 1 is itself unfired, but row 2 below it has run, so neither its
+    // insert nor its skip can go ahead -- and both say so in advance.
+    EXPECT_FALSE(log.canInsertAfter("Default", 1, 1));
+    EXPECT_FALSE(log.canRemoveAt("Default", 1, 1));
+    EXPECT_FALSE(log.insertAfter("Default", 1, 1, makeRow(1, "aMCC1")));
+    EXPECT_FALSE(log.removeAt("Default", 1, 1));
+
+    // Row 2 has run, so it cannot be skipped, but there is nothing fired below
+    // it and inserting after it is fine.
+    EXPECT_FALSE(log.canRemoveAt("Default", 1, 2));
+    EXPECT_TRUE(log.canInsertAfter("Default", 1, 2));
+    EXPECT_TRUE(log.insertAfter("Default", 1, 2, makeRow(1, "aMCC1")));
+
+    EXPECT_FALSE(log.canInsertAfter("Default", 1, 99)) << "no such position";
+}
+
+// Skipping closes the gap, so the visit's last position falls vacant. Treating
+// that as "missing" and refilling it from the plan put the row straight back:
+// a visit with several skips came out exactly as long as it started.
+TEST(TreatmentLog, SkippedSonicationsStaySkippedAcrossReseeding) {
+    beam::gui::TreatmentLog log;
+    std::vector<beam::gui::TreatmentLogRow> planned;
+    for (int i = 1; i <= 6; ++i) {
+        beam::gui::TreatmentLogRow row = makeRow(1, "SCC" + std::to_string(i));
+        row.sequence = i;
+        row.startedAt.clear();
+        planned.push_back(row);
+    }
+    log.seedVisit(1, "Default", planned);
+    ASSERT_EQ(log.rowsFor("Default", 1).size(), 6u);
+
+    // Skip three, the way an operator works down the table.
+    ASSERT_TRUE(log.removeAt("Default", 1, 2));  // SCC2
+    ASSERT_TRUE(log.removeAt("Default", 1, 2));  // what was SCC3, now at 2
+    ASSERT_TRUE(log.removeAt("Default", 1, 2));  // what was SCC4
+    ASSERT_EQ(log.rowsFor("Default", 1).size(), 3u);
+
+    // Every redraw of the page re-seeds; the skips have to survive that.
+    for (int redraw = 0; redraw < 3; ++redraw) log.seedVisit(1, "Default", planned);
+
+    const std::vector<beam::gui::TreatmentLogRow> left = log.rowsFor("Default", 1);
+    ASSERT_EQ(left.size(), 3u) << "a skipped sonication came back";
+    EXPECT_EQ(left[0].target, "SCC1");
+    EXPECT_EQ(left[1].target, "SCC5");
+    EXPECT_EQ(left[2].target, "SCC6");
+    EXPECT_EQ(left[0].sequence, 1);
+    EXPECT_EQ(left[1].sequence, 2);
+    EXPECT_EQ(left[2].sequence, 3);
+}

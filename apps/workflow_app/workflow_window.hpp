@@ -168,9 +168,11 @@ private:
                                std::optional<double> attenuation,
                                std::optional<double> dutyCycle);
     void closeOpenLogRow();
+    static QByteArray wavFromSamples(const std::vector<double>& samples, int sampleRate);
+    void playShamAudio(const std::vector<double>& samples, int sampleRate);
+    void stopShamAudio();
     void advanceToNextScheduledSonication();
     void showScheduleRowMenu(const QPoint& where);
-    void saveTreatmentLogAs();
     void selectScheduledSonication(int oneBased);
     void writeTargetPointsToStore();
     void openTreatmentLibrary(TreatmentLibraryDialog::Page page);
@@ -178,6 +180,7 @@ private:
     void selectSonicationRow(int row);
     int selectedSonicationRow() const;
     void focusTreatmentViewsOn(const Eigen::Vector3d& positionMm);
+    void centreViewsOnTarget();
     void updateSonicationPlots();
     void updateBestTargets();
     void updateExampleTargetImage();
@@ -300,11 +303,12 @@ private:
     beam::gui::TreatmentLog treatmentLog_;
     // The row runSonication opened, so the countdown can stamp its end.
     int openLogSequence_ = 0;
+    // Held while PlaySound is reading from it.
+    QByteArray shamAudioBuffer_;
     // Which protocol the schedule table currently holds, so a reload of the
     // same one does not throw away the visit's position.
     QString lastLoadedProtocol_;
     QPushButton* manageLibraryButton_ = nullptr;
-    QPushButton* saveLogButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
     QTableView* protocolView_ = nullptr;
     QListWidget* targetListWidget_ = nullptr;

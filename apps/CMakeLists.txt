@@ -106,6 +106,9 @@ if(Qt6_FOUND AND TARGET gui_qt)
     target_link_libraries(workflow_app PRIVATE gui gui_qt gui_qt_models gui_qt_views mri correction
                                                 stimulation sham safety serialcom infra_dicom infra_mat
                                                 Qt6::Widgets Qt6::Charts)
+    if(WIN32)
+        target_link_libraries(workflow_app PRIVATE winmm)
+    endif()
     set_target_properties(workflow_app PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
         AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../designer")
     beam_deploy_qt_platform(workflow_app)

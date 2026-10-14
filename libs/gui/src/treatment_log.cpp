@@ -102,13 +102,26 @@ void TreatmentLog::record(TreatmentLogRow row) {
     *found = std::move(row);
 }
 
+// Nothing may be moved once it has run: its sequence is where it happened. So
+// an insert or a skip is only possible while every row below the one in
+// question is still unfired.
+bool TreatmentLog::canInsertAfter(const std::string& protocol, int visit, int sequence) const {
+    if (find(protocol, visit, sequence) == nullptr) return false;
+    return std::none_of(rows_.begin(), rows_.end(), [&](const TreatmentLogRow& row) {
+        return row.protocol == protocol && row.visit == visit && row.sequence > sequence &&
+               delivered(row);
+    });
+}
+
+bool TreatmentLog::canRemoveAt(const std::string& protocol, int visit, int sequence) const {
+    const TreatmentLogRow* target = find(protocol, visit, sequence);
+    if (target == nullptr || delivered(*target)) return false;
+    return canInsertAfter(protocol, visit, sequence);
+}
+
 bool TreatmentLog::insertAfter(const std::string& protocol, int visit, int sequence,
                                TreatmentLogRow row) {
-    if (find(protocol, visit, sequence) == nullptr) return false;
-    for (const TreatmentLogRow& existing : rows_) {
-        if (existing.protocol != protocol || existing.visit != visit) continue;
-        if (existing.sequence > sequence && delivered(existing)) return false;
-    }
+    if (!canInsertAfter(protocol, visit, sequence)) return false;
     for (TreatmentLogRow& existing : rows_) {
         if (existing.protocol != protocol || existing.visit != visit) continue;
         if (existing.sequence > sequence) ++existing.sequence;
@@ -124,12 +137,7 @@ bool TreatmentLog::insertAfter(const std::string& protocol, int visit, int seque
 }
 
 bool TreatmentLog::removeAt(const std::string& protocol, int visit, int sequence) {
-    const TreatmentLogRow* target = find(protocol, visit, sequence);
-    if (target == nullptr || delivered(*target)) return false;
-    for (const TreatmentLogRow& existing : rows_) {
-        if (existing.protocol != protocol || existing.visit != visit) continue;
-        if (existing.sequence > sequence && delivered(existing)) return false;
-    }
+    if (!canRemoveAt(protocol, visit, sequence)) return false;
     rows_.erase(std::remove_if(rows_.begin(), rows_.end(),
                                [&](const TreatmentLogRow& row) {
                                    return sameSlot(row, protocol, visit, sequence);
@@ -162,10 +170,11 @@ void TreatmentLog::seedVisit(int visit, const std::string& protocol,
     // protocol reaches it -- no new visit required.
     //
     // The exception is a visit whose sequence the operator has changed by
-    // skipping or adding a sonication: its positions no longer line up with the
-    // plan's, so refreshing or trimming by position would undo that edit. Such
-    // a visit takes missing positions only.
-    const bool frozen = visitFrozen(protocol, visit);
+    // skipping or adding a sonication: its list is theirs and this leaves it
+    // alone entirely. Adding back merely "missing" positions undid every skip,
+    // because skipping closes the gap and so vacates the last position -- which
+    // then looked missing and was refilled from the plan.
+    if (visitFrozen(protocol, visit)) return;
     for (const TreatmentLogRow& row : planned) {
         TreatmentLogRow copy = row;
         copy.visit = visit;
@@ -177,7 +186,7 @@ void TreatmentLog::seedVisit(int visit, const std::string& protocol,
             rows_.push_back(std::move(copy));
             continue;
         }
-        if (frozen || delivered(*found)) continue;  // a record, or the operator's
+        if (delivered(*found)) continue;  // a record, not a plan copy
         // Keep what the operator wrote against the row; take everything the
         // protocol and the Target List say.
         copy.responsePain = found->responsePain;
@@ -188,7 +197,6 @@ void TreatmentLog::seedVisit(int visit, const std::string& protocol,
     // The schedule may have got shorter. Unfired rows past its end are plan
     // copies of entries that no longer exist; fired ones stay, because they
     // happened.
-    if (frozen) return;
     const int planned_count = static_cast<int>(planned.size());
     rows_.erase(std::remove_if(rows_.begin(), rows_.end(),
                                [&](const TreatmentLogRow& row) {

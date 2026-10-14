@@ -94,9 +94,14 @@ public:
     // its sequence is where it happened. The new row is the operator's, not
     // the plan's. False if the position is unknown.
     bool insertAfter(const std::string& protocol, int visit, int sequence, TreatmentLogRow row);
+    // Whether that insert would be accepted. The menu offering it asks this,
+    // so an action that cannot work is disabled rather than refused after the
+    // operator has chosen a target.
+    bool canInsertAfter(const std::string& protocol, int visit, int sequence) const;
     // Drops a sonication the visit has not run, closing the gap. Refuses a
     // row that has been fired, and one whose removal would move a fired row.
     bool removeAt(const std::string& protocol, int visit, int sequence);
+    bool canRemoveAt(const std::string& protocol, int visit, int sequence) const;
     // The row at one scheduled position, or nullptr.
     const TreatmentLogRow* find(const std::string& protocol, int visit, int sequence) const;
     // True once the visit has stopped following the plan -- something has been

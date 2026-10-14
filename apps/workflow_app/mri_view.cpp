@@ -163,6 +163,20 @@ void WorkflowMriView::resetView() {
     update();
 }
 
+void WorkflowMriView::centreOn(QPointF normalizedPosition, double minimumZoom) {
+    if (image_.isNull()) return;
+    zoom_ = std::max(zoom_, std::clamp(minimumZoom, 1.0, 10.0));
+    // From no pan, so the point's position is read off the freshly zoomed
+    // image rather than the one the previous pan was describing.
+    pan_ = {};
+    const QRectF shown = imageRect();
+    const QPointF point(shown.left() + normalizedPosition.x() * shown.width(),
+                        shown.top() + normalizedPosition.y() * shown.height());
+    pan_ = QPointF(width() / 2.0, height() / 2.0) - point;
+    clampPan();
+    update();
+}
+
 void WorkflowMriView::revealAt(QPointF normalizedPosition, double minimumZoom) {
     if (image_.isNull()) return;
     // A point inside this fraction of the viewport needs no reframing.

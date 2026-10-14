@@ -52,6 +52,12 @@ public:
     // inside it. Zoom is only ever raised, so the operator's own framing and
     // pan survive a marker that is already on screen.
     void revealAt(QPointF normalizedPosition, double minimumZoom = 3.0);
+    // Puts a point in the middle of the view, whether or not it was already
+    // visible. revealAt leaves a point alone once it is comfortably on
+    // screen, which is right for a marker being inspected and wrong for the
+    // target: that one should sit under the crosshair in the centre every
+    // time it moves. Zoom is still only ever raised.
+    void centreOn(QPointF normalizedPosition, double minimumZoom = 3.0);
     void setPointPlacementEnabled(bool enabled);
     void setPointPickedHandler(std::function<void(const Eigen::Vector3d&)> handler);
     // The context menu's "Move fiducial ... to mouse point" is an explicit

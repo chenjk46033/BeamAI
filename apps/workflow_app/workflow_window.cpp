@@ -254,6 +254,10 @@ double normalizedAxisPosition(const Eigen::VectorXd& axis, double mm) {
 // Bounds for the shared MRI viewer height chosen in syncMriViewerHeights().
 // The floor is the Designer form's own minimum, so a short window degrades to
 // the layout the form describes rather than to unreadable slivers.
+// How far in the three planes zoom when they move onto the target. One step
+// past revealAt's default: at 3x the ROI was on screen but still small.
+constexpr double kTargetViewZoom = 4.0;
+
 constexpr int kMinMriViewerHeight = 300;
 constexpr int kMaxMriViewerHeight = 900;
 
@@ -2346,6 +2350,36 @@ void WorkflowWindow::focusTreatmentViewsOn(const Eigen::Vector3d& positionMm) {
     ui_->axialSlider->setValue(static_cast<int>(voxel.k));
     targetMm_ = positionMm;
     showMriPreviews();
+    // And frame it, in every plane of every page: moving the sliders puts the
+    // target on the right slice but leaves it a few pixels across in a
+    // whole-head view. centreOn puts it under the crosshair in the middle and
+    // only ever raises the zoom, so an operator already zoomed in further keeps
+    // their own framing. Registering the array to a new lock position comes
+    // through here too, so the views follow it.
+    centreViewsOnTarget();
+}
+
+// Puts the target in the middle of all nine planes. Separate from the function
+// above because it has to run again when a page is shown: centring reads the
+// view's own width and height, and a hidden page still has whatever geometry it
+// had last, so a view centred while off screen lands off centre when it appears.
+void WorkflowWindow::centreViewsOnTarget() {
+    if (!mriLoaded_ || targetMm_.isZero()) return;
+    const QPointF sagittal(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
+                           1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z()));
+    const QPointF coronal(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
+                          1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z()));
+    const QPointF axial(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
+                        1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()));
+    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->registrationSagittalPreview,
+                                  treatmentSagittalPreview_})
+        view->centreOn(sagittal, kTargetViewZoom);
+    for (WorkflowMriView* view : {ui_->coronalPreview, ui_->registrationCoronalPreview,
+                                  treatmentCoronalPreview_})
+        view->centreOn(coronal, kTargetViewZoom);
+    for (WorkflowMriView* view : {ui_->axialPreview, ui_->registrationAxialPreview,
+                                  treatmentAxialPreview_})
+        view->centreOn(axial, kTargetViewZoom);
 }
 
 bool WorkflowWindow::fiducialDiagramData(std::array<QString, 6>* labels,
@@ -3624,6 +3658,8 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     ui_->pageTitle->setText(QString::fromUtf8(beam::gui::workflowStageName(stage).data()));
     const int stageIndex = static_cast<int>(stage);
     ui_->pageStack->setCurrentIndex(stageIndex <= 3 ? stageIndex : 4);
+    // Once the page is actually up, so centring reads real geometry.
+    QTimer::singleShot(0, this, [this] { centreViewsOnTarget(); });
     // Not on Treatment either: that page carries its own status line, and a
     // second message box under it was the last thing on a crowded page.
     const bool showsFooter = stage != beam::gui::WorkflowStage::Registration &&
