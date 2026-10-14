@@ -239,15 +239,6 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     auto* targetListLabel = new QLabel(QStringLiteral("Target List Template"), targetPanel);
     targetListLabel->setStyleSheet(QString::fromLatin1(kSectionLabelStyle));
     targetPanelLayout->addWidget(targetListLabel);
-    // Above the list, not below it: the body scrolls, and a button under a
-    // 430-pixel list sits past the bottom of the visible area -- reachable
-    // only by scrolling, which is no use for something you press while
-    // looking at the MRI views.
-    manageTargetsButton_ = new QPushButton(QStringLiteral("Manage Template..."), targetPanel);
-    manageTargetsButton_->setToolTip(
-        QStringLiteral("Add, rename, delete targets and edit the template points they start from"));
-    manageTargetsButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
-    targetPanelLayout->addWidget(manageTargetsButton_);
     moveToTargetButton_ = new QPushButton(QStringLiteral("Move to Selected Target"), targetPanel);
     moveToTargetButton_->setToolTip(
         QStringLiteral("Centre all three MRI planes on the shown sonication's position"));
@@ -278,6 +269,13 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     targetListWidget_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     targetListWidget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     targetPanelLayout->addWidget(targetListWidget_, 1);
+    // Under the list it edits. It sat above it while the body still scrolled,
+    // where a button below a full-height list fell past the visible area.
+    manageTargetsButton_ = new QPushButton(QStringLiteral("Manage Template..."), targetPanel);
+    manageTargetsButton_->setToolTip(
+        QStringLiteral("Add, rename, delete targets and edit the template points they start from"));
+    manageTargetsButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
+    targetPanelLayout->addWidget(manageTargetsButton_);
     bodyLayout->addWidget(targetPanel);
     treatmentBodyRow_ = bodyLayout;
 
@@ -293,6 +291,13 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     stimParamView_ = new QTableView(bodyContent);
     stimParamView_->setModel(stimParamModel_);
     configureModelTable(stimParamView_);
+    // The sonication being fired is read off this one row, so it reads on
+    // paper rather than in the dark palette the rest of the page uses.
+    stimParamView_->setAlternatingRowColors(false);
+    stimParamView_->setStyleSheet(QStringLiteral(
+        "QTableView { background: #ffffff; color: #10232b; gridline-color: #b9c9d0; } "
+        "QTableView::item { background: #ffffff; color: #10232b; } "
+        "QTableView::item:selected { background: #cfe6ef; color: #10232b; }"));
     // The grid is exactly as tall as the rows it holds -- normally one -- so
     // the sub-tabs below start right under it instead of after a band of
     // empty white. updateStimGridHeight keeps that true as rows come and go.
@@ -307,6 +312,14 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         "QTabWidget::pane { border: 1px solid #356574; background: #173944; } "
         "QTabBar::tab { color: #dcebef; background: #244b58; padding: 7px 13px; } "
         "QTabBar::tab:selected { background: #176b87; }"));
+    // A QStackedWidget takes the largest minimum of ALL its pages, so Pulse
+    // Details and Targeting Examples imposed 284px while the operator was
+    // looking at Treatment Protocol. That put the column above this scroll
+    // area's viewport, so a wheel over the protocol table scrolled the whole
+    // lower half of the page. Ignored drops the pages' hint; the floor below
+    // is what the tabs actually reserve, and each tab scrolls inside it.
+    treatmentTabs_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
+    treatmentTabs_->setMinimumHeight(270);  // six schedule rows, header and tab bar
 
     // Treatment Protocol tab.
     auto* protocolTab = new QWidget(treatmentTabs_);
@@ -444,19 +457,6 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
 
     rightColumn->addWidget(treatmentTabs_, 1);
 
-    // beam_app's own statusRow, in the same place: full width under the tabs.
-    treatmentPlanTargetLabel_ = new QLabel(QStringLiteral("Selected sonication: none"), bodyContent);
-    treatmentPlanTargetLabel_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 8px; }"));
-    treatmentPlanTargetLabel_->setWordWrap(true);
-    rightColumn->addWidget(treatmentPlanTargetLabel_);
-
-    acceptTreatmentPlanButton_ =
-        new QPushButton(QStringLiteral("Accept treatment plan and continue →"), bodyContent);
-    acceptTreatmentPlanButton_->setMinimumHeight(40);
-    acceptTreatmentPlanButton_->setStyleSheet(acceptButtonStyle);
-    rightColumn->addWidget(acceptTreatmentPlanButton_);
-
     bodyLayout->addLayout(rightColumn, 1);
     treatmentPlanBody_->setVisible(false);
 
@@ -471,11 +471,10 @@ void WorkflowWindow::wireTreatmentPlanBody() {
         saveCurrentTargetSonications();
         saveTreatmentTargetStore();
         updateSonicationPlots();
-        updateTreatmentPlanSummary();
     });
     connect(stimParamView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
             [this](const QModelIndex& current) {
-                if (current.isValid()) updateTreatmentPlanSummary();
+                if (current.isValid()) updateSonicationPlots();
             });
 
 
@@ -798,7 +797,6 @@ void WorkflowWindow::selectSonicationRow(int row) {
     stimParamView_->selectRow(clamped);
     currentSonicationNumberEdit_->setValue(clamped + 1);
     updateSonicationPlots();
-    updateTreatmentPlanSummary();
 }
 
 int WorkflowWindow::selectedSonicationRow() const {
@@ -927,7 +925,6 @@ void WorkflowWindow::switchToSelectedTarget() {
     currentSonicationNumberEdit_->setRange(1, std::max<int>(1, static_cast<int>(stimParamModel_->rows().size())));
     saveCurrentTargetSonications();
     updateSonicationPlots();
-    updateTreatmentPlanSummary();
 }
 
 // Port of registerCurrentTransducerPostion.m's tail: once the array is
@@ -960,7 +957,6 @@ void WorkflowWindow::applyArrayCentreToAllTargets(const Eigen::Vector3d& centreM
         }
         stimParamModel_->setRows(std::move(rows));
         saveCurrentTargetSonications();
-        updateTreatmentPlanSummary();
     }
 }
 
@@ -988,34 +984,6 @@ void WorkflowWindow::setSonicationTargetFromMri(const Eigen::Vector3d& positionM
     if (QListWidgetItem* item = targetListWidget_->currentItem())
         item->setData(Qt::UserRole, QList<QVariant>{positionMm.x(), positionMm.y(), positionMm.z()});
     saveCurrentTargetSonications();
-    updateTreatmentPlanSummary();
-}
-
-void WorkflowWindow::updateTreatmentPlanSummary() {
-    if (!treatmentPlanTargetLabel_) return;
-    const int row = selectedSonicationRow();
-    if (row < 0) {
-        treatmentPlanTargetLabel_->setText(QStringLiteral("Selected sonication: none"));
-        return;
-    }
-    const beam::gui_qt::StimParamRow& r = stimParamModel_->rows()[static_cast<std::size_t>(row)];
-    const QString targetName = targetListWidget_->currentItem() ? targetListName(targetListWidget_->currentItem())
-                                                                : QStringLiteral("no target selected");
-    treatmentPlanTargetLabel_->setText(
-        QStringLiteral("Sonication %1 (%2) — RAS LR %3, AP %4, IS %5 mm · %6 MPa · %7–%8 s · "
-                       "BD %9 s, BI %10 s, PD %11 s, PI %12 s")
-            .arg(row + 1)
-            .arg(targetName)
-            .arg(r.x, 0, 'f', 2)
-            .arg(r.y, 0, 'f', 2)
-            .arg(r.z, 0, 'f', 2)
-            .arg(r.amplitude, 0, 'f', 2)
-            .arg(r.startTime, 0, 'f', 1)
-            .arg(r.endTime, 0, 'f', 1)
-            .arg(r.bd, 0, 'f', 3)
-            .arg(r.bi, 0, 'f', 3)
-            .arg(r.pd, 0, 'f', 4)
-            .arg(r.pi, 0, 'f', 4));
 }
 
 void WorkflowWindow::updateSonicationPlots() {
@@ -1137,11 +1105,6 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
 
     // Left: what is about to be fired, and how it is going.
     auto* statusColumn = new QVBoxLayout;
-    treatmentExecutionStatusLabel_ = new QLabel(treatmentExecutionBody_);
-    treatmentExecutionStatusLabel_->hide();
-    treatmentExecutionStatusLabel_->setWordWrap(true);
-    treatmentExecutionStatusLabel_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
     treatmentExecutionProgressBar_ = new QProgressBar(treatmentExecutionBody_);
     treatmentExecutionProgressBar_->setRange(0, 100);
     treatmentExecutionProgressBar_->setValue(0);
@@ -1149,7 +1112,6 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     treatmentExecutionProgressBar_->setMinimumHeight(24);
     sonicationCountdownLabel_ = new QLabel(QStringLiteral("No sonication running."), treatmentExecutionBody_);
     sonicationCountdownLabel_->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; padding: 4px; }"));
-    statusColumn->addWidget(treatmentExecutionStatusLabel_, 1);
     statusColumn->addWidget(treatmentExecutionProgressBar_);
     statusColumn->addWidget(sonicationCountdownLabel_);
     row->addLayout(statusColumn, 1);
@@ -1271,7 +1233,7 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
         } catch (const std::exception& e) {
             serialLink_.reset();
             setExecutionStatus(
-                QStringLiteral("Connection failed: %1").arg(QString::fromStdString(e.what())));
+                QStringLiteral("Connection failed: %1").arg(QString::fromStdString(e.what())), true);
         }
     });
     connect(shamButton_, &QPushButton::clicked, this, [this] { runSonication(/*sham=*/true); });
@@ -1297,7 +1259,7 @@ void WorkflowWindow::runSonication(bool sham) {
         return;
     }
     if (!stimParamModel_ || stimParamModel_->rows().empty()) {
-        setExecutionStatus(QStringLiteral("No sonication is planned."));
+        setExecutionStatus(QStringLiteral("No sonication is planned."), true);
         return;
     }
     const int shown = std::clamp(stimParamModel_->currentShownRow(), 1,
@@ -1326,8 +1288,7 @@ void WorkflowWindow::runSonication(bool sham) {
             if (i != 0) message += QStringLiteral("; ");
             message += QString::fromStdString(outcome.messages[i]);
         }
-        setExecutionStatus(message);
-        showMessage(message, true);
+        setExecutionStatus(message, true);
         workflow_.block(beam::gui::WorkflowStage::Treatment, message.toStdString());
         refresh();
         return;
@@ -1361,10 +1322,12 @@ void WorkflowWindow::runSonication(bool sham) {
 // The status panel earns its space only when there is something to report, so
 // it stays out of the page until a sonication says something and goes again
 // when the text is cleared.
-void WorkflowWindow::setExecutionStatus(const QString& text) {
-    if (!treatmentExecutionStatusLabel_) return;
-    treatmentExecutionStatusLabel_->setText(text);
-    treatmentExecutionStatusLabel_->setVisible(!text.trimmed().isEmpty());
+// The page had two: this one and the workflow banner, saying the same thing
+// after a failed sonication. The banner is every other stage's channel, so it
+// is the one kept.
+void WorkflowWindow::setExecutionStatus(const QString& text, bool isError) {
+    if (text.trimmed().isEmpty()) return;
+    showMessage(text, isError);
 }
 
 void WorkflowWindow::startSonicationCountdown(int durationSeconds) {
@@ -1445,7 +1408,6 @@ void WorkflowWindow::applyTreatmentLibrary(const beam::gui::TreatmentTargetStore
     refreshProtocolCombo(kept ? protocol : QString());
     if (!treatmentProtocolCombo_->currentText().isEmpty())
         loadTreatmentProtocol(treatmentProtocolCombo_->currentText());
-    updateTreatmentPlanSummary();
     saveTreatmentTargetStore();
 }
 

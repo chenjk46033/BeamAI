@@ -468,7 +468,7 @@
                                           <string>Show target</string>
                                         </property>
                                         <property name="checked">
-                                          <bool>false</bool>
+                                          <bool>true</bool>
                                         </property>
                                       </widget>
                                     </item>
@@ -489,16 +489,6 @@
                                         </property>
                                         <property name="checked">
                                           <bool>true</bool>
-                                        </property>
-                                      </widget>
-                                    </item>
-                                    <item>
-                                      <widget class="QCheckBox" name="showLinkedNavigationCheckBox">
-                                        <property name="text">
-                                          <string>Show linked navigation cursor</string>
-                                        </property>
-                                        <property name="checked">
-                                          <bool>false</bool>
                                         </property>
                                       </widget>
                                     </item>
@@ -1056,7 +1046,7 @@
                                     <string>Show target</string>
                                   </property>
                                   <property name="checked">
-                                    <bool>false</bool>
+                                    <bool>true</bool>
                                   </property>
                                 </widget>
                               </item>
@@ -1077,16 +1067,6 @@
                                   </property>
                                   <property name="checked">
                                     <bool>true</bool>
-                                  </property>
-                                </widget>
-                              </item>
-                              <item>
-                                <widget class="QCheckBox" name="registrationShowLinkedNavigationCheckBox">
-                                  <property name="text">
-                                    <string>Show linked navigation cursor</string>
-                                  </property>
-                                  <property name="checked">
-                                    <bool>false</bool>
                                   </property>
                                 </widget>
                               </item>

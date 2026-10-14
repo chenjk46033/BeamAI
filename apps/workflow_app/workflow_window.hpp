@@ -127,7 +127,7 @@ private:
     void refresh();
     void setMriPathDisplay(const QString& path);
     void updateCouplingCharts(double transmissionAmp);
-    void setExecutionStatus(const QString& text);
+    void setExecutionStatus(const QString& text, bool isError = false);
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
     void capWindowToScreen();
@@ -169,7 +169,6 @@ private:
     int selectedSonicationRow() const;
     void setSonicationTargetFromMri(const Eigen::Vector3d& positionMm);
     void focusTreatmentViewsOn(const Eigen::Vector3d& positionMm);
-    void updateTreatmentPlanSummary();
     void updateSonicationPlots();
     void updateBestTargets();
     void updateExampleTargetImage();
@@ -201,6 +200,10 @@ private:
     // carries the plan body and the execution controls below these viewers, and
     // at the full height the Sonicate row fell off the bottom of a 1080p screen.
     static constexpr int kTreatmentViewerHeight = 420;
+    // The Treatment page's viewers may not squeeze the plan below this.
+    static constexpr int kMinTreatmentViewerHeight = 240;
+    // What sits under them: the execution controls and the status row.
+    static constexpr int kTreatmentControlsHeight = 110;
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
@@ -258,11 +261,9 @@ private:
     QPushButton* acceptCorrectionButton_ = nullptr;
     QLabel* treatmentPlanTitleLabel_ = nullptr;
     QLabel* treatmentPlanDescriptionLabel_ = nullptr;
-    QLabel* treatmentPlanTargetLabel_ = nullptr;
     QLabel* treatmentProtocolLabel_ = nullptr;
     QComboBox* treatmentProtocolCombo_ = nullptr;
     QTabWidget* treatmentTabs_ = nullptr;
-    QPushButton* acceptTreatmentPlanButton_ = nullptr;
     QWidget* treatmentMriPage_ = nullptr;
     int mriHeightSyncPasses_ = 0;
     // app.sys.protocolTables: each target's own stimParamTable data, keyed by
@@ -271,8 +272,9 @@ private:
     int currentTargetId_ = -1;
     int nextTargetId_ = 0;
     QSize lastMriSyncWindowSize_;
-    // Window height minus the stack's, learned while the stack still fits.
-    int stackChromeHeight_ = 0;
+    // The stack height this window can afford, learned before any page has
+    // forced the window past the screen. Relearned when the operator resizes.
+    int maxStackHeight_ = 0;
     QSpacerItem* placeholderTailSpacer_ = nullptr;
     std::vector<DetachedViewer> detachedViewers_;
     QGroupBox* calibrationGroup_ = nullptr;
@@ -324,7 +326,6 @@ private:
     QWidget* treatmentExecutionBody_ = nullptr;
     QLabel* treatmentExecutionTitleLabel_ = nullptr;
     QLabel* treatmentExecutionDescriptionLabel_ = nullptr;
-    QLabel* treatmentExecutionStatusLabel_ = nullptr;
     QProgressBar* treatmentExecutionProgressBar_ = nullptr;
     QPushButton* startTreatmentButton_ = nullptr;
     QPushButton* abortTreatmentButton_ = nullptr;

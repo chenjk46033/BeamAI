@@ -378,8 +378,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     for (QCheckBox* checkBox : {ui_->registrationShowFieldCheckBox,
                                 ui_->registrationShowTargetCheckBox,
                                 ui_->registrationShowTransducersCheckBox,
-                                ui_->registrationShowFiducialsCheckBox,
-                                ui_->registrationShowLinkedNavigationCheckBox}) {
+                                ui_->registrationShowFiducialsCheckBox}) {
         checkBox->setStyleSheet(QStringLiteral("QCheckBox { color: #f2f7f8; spacing: 5px; }"));
         QPalette palette = checkBox->palette();
         palette.setColor(QPalette::WindowText, QColor(242, 247, 248));
@@ -1004,9 +1003,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* treatmentShowTarget = new QCheckBox(QStringLiteral("Show target"), treatmentMriPage_);
     auto* treatmentShowTransducers = new QCheckBox(QStringLiteral("Show transducers"), treatmentMriPage_);
     auto* treatmentShowFiducials = new QCheckBox(QStringLiteral("Show fiducials"), treatmentMriPage_);
-    auto* treatmentShowNavigation = new QCheckBox(QStringLiteral("Linked navigation"), treatmentMriPage_);
     for (QCheckBox* check : {treatmentShowField, treatmentShowTarget, treatmentShowTransducers,
-                             treatmentShowFiducials, treatmentShowNavigation}) {
+                             treatmentShowFiducials}) {
         check->setStyleSheet(QStringLiteral("QCheckBox { color: #dcebef; padding: 2px; }"));
         treatmentViewerControls->addWidget(check);
     }
@@ -1035,16 +1033,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(treatmentShowTarget, &QCheckBox::toggled, ui_->showTargetCheckBox, &QCheckBox::setChecked);
     connect(treatmentShowTransducers, &QCheckBox::toggled, ui_->showTransducersCheckBox, &QCheckBox::setChecked);
     connect(treatmentShowFiducials, &QCheckBox::toggled, ui_->showFiducialsCheckBox, &QCheckBox::setChecked);
-    connect(treatmentShowNavigation, &QCheckBox::toggled, ui_->showLinkedNavigationCheckBox, &QCheckBox::setChecked);
-    connect(treatmentShowNavigation, &QCheckBox::toggled, this, [this](bool visible) {
-        for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_})
-            view->setNavigationCrosshairVisible(visible);
-    });
     connect(ui_->showFieldCheckBox, &QCheckBox::toggled, treatmentShowField, &QCheckBox::setChecked);
     connect(ui_->showTargetCheckBox, &QCheckBox::toggled, treatmentShowTarget, &QCheckBox::setChecked);
     connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, treatmentShowTransducers, &QCheckBox::setChecked);
     connect(ui_->showFiducialsCheckBox, &QCheckBox::toggled, treatmentShowFiducials, &QCheckBox::setChecked);
-    connect(ui_->showLinkedNavigationCheckBox, &QCheckBox::toggled, treatmentShowNavigation, &QCheckBox::setChecked);
     connect(treatmentTransparency, &QSlider::valueChanged, ui_->transducerTransparencySlider, &QSlider::setValue);
     connect(ui_->transducerTransparencySlider, &QSlider::valueChanged, treatmentTransparency, &QSlider::setValue);
     connect(treatmentBrightnessDown, &QToolButton::clicked, ui_->brightnessDownButton, &QToolButton::click);
@@ -1054,7 +1046,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentShowTarget->setChecked(ui_->showTargetCheckBox->isChecked());
     treatmentShowTransducers->setChecked(ui_->showTransducersCheckBox->isChecked());
     treatmentShowFiducials->setChecked(ui_->showFiducialsCheckBox->isChecked());
-    treatmentShowNavigation->setChecked(ui_->showLinkedNavigationCheckBox->isChecked());
     treatmentSagittalPreview_ = ui_->treatmentSagittalPreview;
     treatmentCoronalPreview_ = ui_->treatmentCoronalPreview;
     treatmentAxialPreview_ = ui_->treatmentAxialPreview;
@@ -1167,7 +1158,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         }
         acceptCouplingButton_->setEnabled(false);
         runCouplingCheckButton_->setEnabled(false);
-        showMessage(QStringLiteral("Correction and coupling accepted. Continuing to Treatment plan."), false);
         refresh();
         ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
     });
@@ -1253,27 +1243,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         }
         acceptCorrectionButton_->setEnabled(false);
         runCorrectionButton_->setEnabled(false);
-        showMessage(QStringLiteral("Correction and coupling accepted. Continuing to Treatment plan."), false);
         refresh();
         ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
-    });
-    connect(acceptTreatmentPlanButton_, &QPushButton::clicked, this, [this] {
-        std::string reason;
-        if (!workflow_.complete(beam::gui::WorkflowStage::TreatmentPlan, &reason)) {
-            showMessage(QString::fromStdString(reason), true);
-            return;
-        }
-        // Safety review has no tab of its own any more -- accepting the plan
-        // is the review, and it is what unlocks Sonicate below. Delivery is
-        // left open deliberately: "Finish treatment and continue" completes it
-        // and moves to Report. Navigating here would land on a hidden row.
-        if (!workflow_.complete(beam::gui::WorkflowStage::SafetyReview, &reason)) {
-            showMessage(QString::fromStdString(reason), true);
-            return;
-        }
-        acceptTreatmentPlanButton_->setEnabled(false);
-        showMessage(QStringLiteral("Treatment plan accepted. Sonication is now enabled."), false);
-        refresh();
     });
     connect(acceptSafetyReviewButton_, &QPushButton::clicked, this, [this] {
         std::string reason;
@@ -1374,21 +1345,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->loadMriButtons->addWidget(ui_->mriPathLabel, 1);
     connect(ui_->showFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->registrationShowFiducialsCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
-    connect(ui_->showLinkedNavigationCheckBox, &QCheckBox::toggled, this, [this](bool visible) {
-        for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview})
-            view->setNavigationCrosshairVisible(visible);
-        for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_})
-            view->setNavigationCrosshairVisible(visible);
-    });
-    connect(ui_->registrationShowLinkedNavigationCheckBox, &QCheckBox::toggled, this, [this](bool visible) {
-        for (WorkflowMriView* view : {ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
-                                     ui_->registrationAxialPreview})
-            view->setNavigationCrosshairVisible(visible);
-    });
-    connect(ui_->showLinkedNavigationCheckBox, &QCheckBox::toggled,
-            ui_->registrationShowLinkedNavigationCheckBox, &QCheckBox::setChecked);
-    connect(ui_->registrationShowLinkedNavigationCheckBox, &QCheckBox::toggled,
-            ui_->showLinkedNavigationCheckBox, &QCheckBox::setChecked);
     const auto adjustAllViewBrightness = [this](double amount) {
         for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
                                      ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
@@ -1480,7 +1436,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     };
     for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
         view->setPointPickedHandler(treatmentPointPicked);
-        view->setNavigationCrosshairVisible(false);
         view->setContextWidgetFactory([this](QMenu* menu) { return buildFiducialPickerWidget(menu); });
     }
     connect(ui_->resetSagittalButton, &QToolButton::clicked, this, [this] {
@@ -1878,6 +1833,11 @@ void WorkflowWindow::syncMriViewerHeights() {
     // below (passes > 0) deliberately bypasses this guard.
     const QSize windowSize = size();
     if (windowSize == lastMriSyncWindowSize_ && mriHeightSyncPasses_ == 0) return;
+    // Only an operator resize relearns the affordance. A page forcing the
+    // window taller also changes its size, in steps of a few pixels; treating
+    // those as a resize relearned the grown value and the creep continued.
+    if (std::abs(windowSize.height() - lastMriSyncWindowSize_.height()) > 80)
+        maxStackHeight_ = 0;
     lastMriSyncWindowSize_ = windowSize;
     // Normalise the banner out of the basis, so the height is the one that
     // fits the stages that do show it.
@@ -1890,15 +1850,16 @@ void WorkflowWindow::syncMriViewerHeights() {
     // this basis -- so an inflated basis makes them taller, which inflates it
     // again (983 -> 1025 -> 1340 over three tab changes, in a 1129 window,
     // leaving the bottom of every page off-screen). The window is the real
-    // ceiling. The gap is window chrome, so it is measured once and kept --
-    // re-reading it per stage drifted the viewer by the few pixels the stack
-    // differs between pages. The half-window test discards a pass taken before
-    // the first layout, which would otherwise pin the viewers to their
-    // minimum for good.
-    if (stackChromeHeight_ == 0 && stackHeight * 2 > height())
-        stackChromeHeight_ = height() - stackHeight;
-    if (stackChromeHeight_ > 0)
-        stackHeight = std::min(stackHeight, height() - stackChromeHeight_);
+    // ceiling -- but the window's CURRENT height is not it, because the window
+    // is what grows: measuring against it fed back (bigger window, bigger
+    // basis, bigger viewers, bigger window) and crept 1000 -> 1025 in seven
+    // passes. So the affordance is measured once, before any page has forced
+    // the window wider, and kept until the operator actually resizes. The
+    // half-window test discards a pass taken before the first layout, which
+    // would otherwise pin the viewers to their minimum for good.
+    if (maxStackHeight_ == 0 && stackHeight * 2 > QWidget::height())
+        maxStackHeight_ = stackHeight;
+    if (maxStackHeight_ > 0) stackHeight = std::min(stackHeight, maxStackHeight_);
     // What each page needs for everything except its viewer row.  Taking the
     // difference of the two hints keeps this independent of the height we are
     // about to pick, so the calculation has a stable fixed point.
@@ -1923,10 +1884,16 @@ void WorkflowWindow::syncMriViewerHeights() {
     // which raises the leftover space, which raises the height again (the
     // window grew ~60px per tab switch until it outgrew the screen).
     // The page carries the plan and the execution controls as well, so its
-    // viewers give up the difference. 80%: the Sonicate body underneath scrolls
-    // and sits at its own minimum, so the slack between that minimum and what
-    // the body currently holds is the viewers to take.
-    const int treatmentHeight = std::min(height * 80 / 100, kTreatmentViewerHeight);
+    // viewers give up the difference -- and the difference has to be measured,
+    // not guessed at as a fraction: 80% of the shared height fits a 1129px
+    // screen and overflows a 1009px one, because what sits below the viewers
+    // does not scale with the screen. Subtract it instead, so the viewers take
+    // whatever is genuinely left over on whatever screen this is.
+    const int treatmentFits =
+        stackHeight - kTreatmentBodyMinHeight - kTreatmentControlsHeight - columnChrome;
+    const int treatmentHeight =
+        std::clamp(std::min({height * 80 / 100, kTreatmentViewerHeight, treatmentFits}),
+                   kMinTreatmentViewerHeight, kTreatmentViewerHeight);
     if (height == ui_->sagittalPreview->minimumHeight() &&
         height == ui_->sagittalPreview->maximumHeight() &&
         treatmentHeight == treatmentSagittalPreview_->minimumHeight() &&
@@ -3314,18 +3281,33 @@ void WorkflowWindow::showMriPreviews() {
         treatmentCoronalPreview_->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
         treatmentAxialPreview_->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
     }
-    const double iNorm = mriVolume_.nx > 1 ? static_cast<double>(sagittal - 1) / (mriVolume_.nx - 1) : 0.5;
-    const double jNorm = mriVolume_.ny > 1 ? static_cast<double>(coronal - 1) / (mriVolume_.ny - 1) : 0.5;
-    const double kNorm = mriVolume_.nz > 1 ? static_cast<double>(axial - 1) / (mriVolume_.nz - 1) : 0.5;
-    ui_->sagittalPreview->setNavigationCrosshair(QPointF(1.0 - jNorm, 1.0 - kNorm));
-    ui_->coronalPreview->setNavigationCrosshair(QPointF(iNorm, 1.0 - kNorm));
-    ui_->axialPreview->setNavigationCrosshair(QPointF(iNorm, 1.0 - jNorm));
-    ui_->registrationSagittalPreview->setNavigationCrosshair(QPointF(1.0 - jNorm, 1.0 - kNorm));
-    ui_->registrationCoronalPreview->setNavigationCrosshair(QPointF(iNorm, 1.0 - kNorm));
-    ui_->registrationAxialPreview->setNavigationCrosshair(QPointF(iNorm, 1.0 - jNorm));
-    treatmentSagittalPreview_->setNavigationCrosshair(QPointF(1.0 - jNorm, 1.0 - kNorm));
-    treatmentCoronalPreview_->setNavigationCrosshair(QPointF(iNorm, 1.0 - kNorm));
-    treatmentAxialPreview_->setNavigationCrosshair(QPointF(iNorm, 1.0 - jNorm));
+    // "Show target" draws a crosshair through the target in every plane. This
+    // was the slice-intersection cursor of linked navigation, which is gone;
+    // the target is what the operator aims at, so it is what gets marked. The
+    // green marker further down still appears only on the slice the target
+    // sits in -- the crosshair shows on all of them, so the target's position
+    // is readable even while scrolling away from it.
+    const bool showTarget = ui_->showTargetCheckBox->isChecked();
+    const QPointF targetSagittal(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
+                                 1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z()));
+    const QPointF targetCoronal(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
+                                1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z()));
+    const QPointF targetAxial(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
+                              1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()));
+    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->registrationSagittalPreview,
+                                  treatmentSagittalPreview_})
+        view->setNavigationCrosshair(targetSagittal);
+    for (WorkflowMriView* view : {ui_->coronalPreview, ui_->registrationCoronalPreview,
+                                  treatmentCoronalPreview_})
+        view->setNavigationCrosshair(targetCoronal);
+    for (WorkflowMriView* view : {ui_->axialPreview, ui_->registrationAxialPreview,
+                                  treatmentAxialPreview_})
+        view->setNavigationCrosshair(targetAxial);
+    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
+                                  ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
+                                  ui_->registrationAxialPreview, treatmentSagittalPreview_,
+                                  treatmentCoronalPreview_, treatmentAxialPreview_})
+        view->setNavigationCrosshairVisible(showTarget);
 
     // Imaging is the unregistered source image review. Registration geometry is
     // deliberately confined to the Registration page so model estimates cannot
@@ -3685,13 +3667,18 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         // array centre that registration produced (see
         // switchToSelectedTarget), so the grid never opens on zeros.
         switchToSelectedTarget();
-        updateTreatmentPlanSummary();
         // Open on the first fiducial rather than wherever the last stage left
         // the sliders, so all three planes start from a known landmark.
         treatmentFiducialPick_ = 0;
         navigateToFiducialOnTreatment(0, false);
-        acceptTreatmentPlanButton_->setEnabled(
-            workflow_.state(beam::gui::WorkflowStage::Correction).status == beam::gui::WorkflowStatus::Complete);
+        // There is no separate review: this page is where the plan is made and
+        // where it is delivered, and Report is what follows. So the stages the
+        // model still carries between them complete on arrival, leaving
+        // Sonicate gated by correction and coupling, which is the real
+        // prerequisite. "Finish treatment and continue" completes delivery.
+        std::string planned;
+        workflow_.complete(beam::gui::WorkflowStage::TreatmentPlan, &planned);
+        workflow_.complete(beam::gui::WorkflowStage::SafetyReview, &planned);
     }
     if (treatmentExecutionPage) {
         // Firing is available only once the plan and its safety review are

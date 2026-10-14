@@ -1,26 +1,5 @@
 # BeamAI treatment protocols: an ordered list of references into the Target List.
-#
-# These six protocols, in this order, are sys.treatmentProtocolTables in
-# defaultSubjectMNIV1.mat -- the ones BeamV0 actually loads into its dropdown.
-# TreatmentProtocols/*.csv also ships MDD, PainACCTwoTargets and PainVPL, which
-# have no entry in that struct and so are unreachable in BeamV0; they are not
-# mirrored here. testdata/beamv0_protocol_tables.csv is the export this was
-# built from, and ProtocolsMatchBeamV0EntryForEntry compares the two.
-#
-# amplitude and duration are what this entry starts from; blank means use the
-# target's own. Only duration is ever applied -- BeamV0 pushes it onto the
-# target's rows in updateSonicateSettingsForCurrentSonication.m, while the
-# amplitude's one call site, setStimulationAmplitudeFromResponses, is
-# commented out.
-#
-# `order` is the row position, not BeamV0's Number column: that column is not
-# an index, and in Default it runs 1-14 then restarts 1-10 for the T1/T2/T3
-# block.
-#
-# Ten of the 22 names scheduled here -- T1-T6 and the four NACC/Nacc spellings
-# -- are not in the Target List, so those entries cannot be placed and report
-# as dangling. That is BeamV0's own inconsistency, Default included; BeamV0
-# simply does not warn about it.
+# amplitude and duration are what this entry starts from; blank means use the target's own.
 protocol,order,target,amplitude,duration
 PainSCCandAMCC,1,SCC1,0.5,30
 PainSCCandAMCC,2,SCC2,0.5,30
