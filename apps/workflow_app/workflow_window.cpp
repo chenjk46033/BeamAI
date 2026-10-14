@@ -3194,6 +3194,10 @@ void WorkflowWindow::performCurrentPositionRegistration() {
         //
         // targetMm_ is that centre, recomputed by applyRegistrationResult above.
         applyArrayCentreToAllTargets(targetMm_);
+        // And show it: the planes move onto the registered centre, so the
+        // crosshair and the target overlay are on screen rather than wherever
+        // the sliders happened to be left. Treatment opens on this same view.
+        focusTreatmentViewsOn(targetMm_);
         setRegistrationPhase(RegistrationPhase::LockPositionRegistered);
         updateRegistrationStepIndicators();
         ui_->acceptRegistrationButton->setFocus(Qt::OtherFocusReason);
@@ -3667,10 +3671,16 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         // array centre that registration produced (see
         // switchToSelectedTarget), so the grid never opens on zeros.
         switchToSelectedTarget();
-        // Open on the first fiducial rather than wherever the last stage left
-        // the sliders, so all three planes start from a known landmark.
-        treatmentFiducialPick_ = 0;
-        navigateToFiducialOnTreatment(0, false);
+        // Open on the registered array position -- what the operator is about
+        // to sonicate -- rather than wherever the sliders were left. Before a
+        // registration there is no such position, so a known landmark stands
+        // in instead.
+        if (!targetMm_.isZero()) {
+            focusTreatmentViewsOn(targetMm_);
+        } else {
+            treatmentFiducialPick_ = 0;
+            navigateToFiducialOnTreatment(0, false);
+        }
         // There is no separate review: this page is where the plan is made and
         // where it is delivered, and Report is what follows. So the stages the
         // model still carries between them complete on arrival, leaving
