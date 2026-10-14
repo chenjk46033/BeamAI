@@ -51,6 +51,7 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         case kParameters: return r.parameters;
         case kResponsePain: return r.responsePain;
         case kResponseMood: return r.responseMood;
+        case kCompleted: return r.completed;
         case kNotes: return r.notes;
         default: return QVariant();
     }
@@ -132,7 +133,8 @@ QVariant TreatmentProtocolTableModel::headerData(int section, Qt::Orientation or
         case kAmplitude: return QStringLiteral("Amplitude");
         case kParameters: return QStringLiteral("Parameters");
         case kResponsePain: return QStringLiteral("Response Pain");
-        case kResponseMood: return QStringLiteral("Response Mood/Anxiety");
+        case kResponseMood: return QStringLiteral("Response Mood");
+        case kCompleted: return QStringLiteral("Completed");
         case kNotes: return QStringLiteral("Notes");
         default: return QVariant();
     }
@@ -142,6 +144,8 @@ Qt::ItemFlags TreatmentProtocolTableModel::flags(const QModelIndex& index) const
     if (!index.isValid()) {
         return Qt::NoItemFlags;
     }
+    // The completion time is stamped by the countdown, not typed.
+    if (index.column() == kCompleted) return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
 }
 

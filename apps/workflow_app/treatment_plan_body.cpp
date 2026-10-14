@@ -35,6 +35,10 @@
 
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QFileDialog>
+#include <QInputDialog>
+#include <QMenu>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -236,7 +240,7 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     targetPanel->setMaximumWidth(220);
     auto* targetPanelLayout = new QVBoxLayout(targetPanel);
     targetPanelLayout->setContentsMargins(0, 0, 0, 0);
-    auto* targetListLabel = new QLabel(QStringLiteral("Target List Template"), targetPanel);
+    auto* targetListLabel = new QLabel(QStringLiteral("Target List"), targetPanel);
     targetListLabel->setStyleSheet(QString::fromLatin1(kSectionLabelStyle));
     targetPanelLayout->addWidget(targetListLabel);
     moveToTargetButton_ = new QPushButton(QStringLiteral("Move to Selected Target"), targetPanel);
@@ -271,9 +275,9 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     targetPanelLayout->addWidget(targetListWidget_, 1);
     // Under the list it edits. It sat above it while the body still scrolled,
     // where a button below a full-height list fell past the visible area.
-    manageTargetsButton_ = new QPushButton(QStringLiteral("Manage Template..."), targetPanel);
+    manageTargetsButton_ = new QPushButton(QStringLiteral("Manage Target List..."), targetPanel);
     manageTargetsButton_->setToolTip(
-        QStringLiteral("Add, rename, delete targets and edit the template points they start from"));
+        QStringLiteral("Add, rename, delete targets and edit the points they sonicate at"));
     manageTargetsButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
     targetPanelLayout->addWidget(manageTargetsButton_);
     bodyLayout->addWidget(targetPanel);
@@ -293,11 +297,22 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     configureModelTable(stimParamView_);
     // The sonication being fired is read off this one row, so it reads on
     // paper rather than in the dark palette the rest of the page uses.
-    stimParamView_->setAlternatingRowColors(false);
+    // The same paper the log table beside it uses, zebra stripe included, so
+    // the two read as one surface rather than two different kinds of table.
+    stimParamView_->setAlternatingRowColors(true);
     stimParamView_->setStyleSheet(QStringLiteral(
-        "QTableView { background: #ffffff; color: #10232b; gridline-color: #b9c9d0; } "
-        "QTableView::item { background: #ffffff; color: #10232b; } "
-        "QTableView::item:selected { background: #cfe6ef; color: #10232b; }"));
+        "QTableView { background: #ffffff; alternate-background-color: #f2f4f7; "
+        "color: #10232b; gridline-color: #b9c9d0; } "
+        "QTableView::item:selected { background: #ffffff; color: #10232b; }"));
+    // The selected row is painted from the palette's Highlight, which the
+    // stylesheet rule above does not reach. The grid holds one row and it is
+    // always selected, so highlighting it only tinted the whole table.
+    {
+        QPalette plain = stimParamView_->palette();
+        plain.setColor(QPalette::Highlight, QColor(0xff, 0xff, 0xff));
+        plain.setColor(QPalette::HighlightedText, QColor(0x10, 0x23, 0x2b));
+        stimParamView_->setPalette(plain);
+    }
     // The grid is exactly as tall as the rows it holds -- normally one -- so
     // the sub-tabs below start right under it instead of after a band of
     // empty white. updateStimGridHeight keeps that true as rows come and go.
@@ -325,13 +340,21 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     auto* protocolTab = new QWidget(treatmentTabs_);
     auto* protocolLayout = new QVBoxLayout(protocolTab);
     auto* protocolSelectorRow = new QHBoxLayout;
-    treatmentProtocolLabel_ = new QLabel(QStringLiteral("Treatment protocol:"), protocolTab);
+    treatmentProtocolLabel_ = new QLabel(QStringLiteral("Protocol (the plan):"), protocolTab);
     treatmentProtocolCombo_ = new QComboBox(protocolTab);
     treatmentProtocolCombo_->addItems({QStringLiteral("Default"), QStringLiteral("Addiction"),
                                        QStringLiteral("PTSD"), QStringLiteral("PainACC"),
                                        QStringLiteral("PainSCCandAMCC"), QStringLiteral("PainAMCCandSCC")});
     visitNumberCombo_ = new QComboBox(protocolTab);
-    visitNumberCombo_->addItems({QStringLiteral("1"), QStringLiteral("2"), QStringLiteral("3")});
+    // Fifteen, which is how many sessions BeamV0 keeps per protocol:
+    // treatmentProtocolTables(i).sessions is a 15-element array, and
+    // addTreatmentProtocolSession.m refuses to add past maxTreatmentSessions.
+    // Three was a placeholder with nothing behind it.
+    for (int visit = 1; visit <= kMaxTreatmentVisits; ++visit)
+        visitNumberCombo_->addItem(QString::number(visit));
+    // The table below is this visit's log, so switching visit reloads it.
+    connect(visitNumberCombo_, &QComboBox::currentTextChanged, this,
+            [this](const QString&) { loadTreatmentProtocol(currentProtocolName()); });
     newVisitButton_ = new QPushButton(QStringLiteral("New Visit"), protocolTab);
     newVisitButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
     auto* visitLabel = new QLabel(QStringLiteral("Visit:"), protocolTab);
@@ -349,6 +372,10 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolSelectorRow->addWidget(treatmentProtocolLabel_);
     protocolSelectorRow->addWidget(treatmentProtocolCombo_);
     protocolSelectorRow->addWidget(manageLibraryButton_);
+    saveLogButton_ = makeProtocolButton(QStringLiteral("Save Log..."),
+                                        QStringLiteral("Write this visit's log to a file of your choosing"));
+    connect(saveLogButton_, &QPushButton::clicked, this, [this] { saveTreatmentLogAs(); });
+    protocolSelectorRow->addWidget(saveLogButton_);
     protocolSelectorRow->addSpacing(18);
     protocolSelectorRow->addWidget(visitLabel);
     protocolSelectorRow->addWidget(visitNumberCombo_);
@@ -379,6 +406,10 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolSelectorRow->addSpacing(18);
     protocolSelectorRow->addWidget(sonicationNumberLabel);
     protocolSelectorRow->addWidget(currentSonicationNumberEdit_);
+    // updateSonicateSettingsForCurrentSonication.m indexes the schedule with
+    // this field, so typing a number here moves to that scheduled sonication.
+    connect(currentSonicationNumberEdit_, &QSpinBox::valueChanged, this,
+            [this](int value) { selectScheduledSonication(value); });
     protocolSelectorRow->addStretch(1);
     protocolLayout->addLayout(protocolSelectorRow);
 
@@ -386,6 +417,32 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolView_ = new QTableView(protocolTab);
     protocolView_->setModel(protocolModel_);
     configureModelTable(protocolView_);
+    // Explicit widths, not ResizeToContents: that sizes the view to the sum of
+    // its content, and the view then demanded the whole row -- the Sonicate and
+    // serial column was pushed off the page entirely. These fit the longest
+    // label in each column; Notes takes what is left, and the view scrolls
+    // sideways rather than growing if the window is narrow.
+    protocolView_->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    protocolView_->horizontalHeader()->setStretchLastSection(true);
+    protocolView_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    protocolView_->setToolTip(QStringLiteral(
+        "This visit's log: what was actually delivered. The protocol it started from is "
+        "edited in Manage Protocols."));
+    protocolView_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+    {
+        const int widths[] = {36, 78, 86, 86, 250, 104, 110, 142};
+        for (int column = 0; column < static_cast<int>(std::size(widths)); ++column)
+            protocolView_->setColumnWidth(column, widths[column]);
+    }
+    // Both tables carry one line of text per cell, so the default padding is
+    // most of their height. The log in particular is a list to scan.
+    protocolView_->horizontalHeader()->setFixedHeight(22);
+    protocolView_->verticalHeader()->setDefaultSectionSize(19);
+    stimParamView_->horizontalHeader()->setFixedHeight(22);
+    stimParamView_->verticalHeader()->setDefaultSectionSize(21);
+    protocolView_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(protocolView_, &QTableView::customContextMenuRequested, this,
+            [this](const QPoint& where) { showScheduleRowMenu(where); });
     // A protocol is 24-odd entries; at the default row height only a handful
     // fit and the rest pushed the page taller. Compact rows plus the table's
     // own scrollbar keep the schedule readable without growing the page.
@@ -399,7 +456,7 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // above. Its own scrollbar handles a schedule longer than the space.
     protocolLayout->addWidget(protocolView_, 1);
 
-    treatmentTabs_->addTab(protocolTab, QStringLiteral("Treatment Protocol"));
+    treatmentTabs_->addTab(protocolTab, QStringLiteral("Treatment Log"));
 
     // Pulse Details tab: BeamV0's axPulseWaveformPlot / axBurstWaveformPlot
     // / axTotalSonicationPlot. The two pulse-scale plots share a row so all
@@ -523,11 +580,20 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
             [this] { saveTreatmentTargetStore(); });
     connect(newVisitButton_, &QPushButton::clicked, this, [this] {
-        const int next = visitNumberCombo_->count() + 1;
-        visitNumberCombo_->addItem(QString::number(next));
-        visitNumberCombo_->setCurrentIndex(visitNumberCombo_->count() - 1);
-        showMessage(QStringLiteral("Visit %1 started. The protocol table was reset for the new visit.").arg(next),
-                    false);
+        // The next visit that has not run anything yet, so New Visit means
+        // "move on" rather than "add a number past the end".
+        const std::string protocol = currentProtocolName().toStdString();
+        int next = 0;
+        for (int visit = 1; visit <= kMaxTreatmentVisits && next == 0; ++visit)
+            if (treatmentLog_.rowsFor(protocol, visit).empty()) next = visit;
+        if (next == 0) {
+            showMessage(QStringLiteral("All %1 visits of this protocol have been used.")
+                            .arg(kMaxTreatmentVisits),
+                        true);
+            return;
+        }
+        visitNumberCombo_->setCurrentText(QString::number(next));
+        showMessage(QStringLiteral("Visit %1 started.").arg(next), false);
         loadTreatmentProtocol(treatmentProtocolCombo_->currentText());
     });
     connect(computeBestTargetsButton_, &QPushButton::clicked, this, [this] { updateBestTargets(); });
@@ -596,7 +662,6 @@ void WorkflowWindow::loadTreatmentTargetStore() {
 
     const QString targetsPath = locate(QStringLiteral("treatment_targets.csv"));
     const QString protocolsPath = locate(QStringLiteral("treatment_protocols.csv"));
-    const QString planPointsPath = locate(QStringLiteral("treatment_plan_points.csv"));
     if (targetsPath.isEmpty() || protocolsPath.isEmpty()) {
         showMessage(QStringLiteral("Treatment target/protocol data was not found; using built-in "
                                    "defaults."),
@@ -606,9 +671,10 @@ void WorkflowWindow::loadTreatmentTargetStore() {
     try {
         targetStore_.loadTargets(targetsPath.toStdString());
         targetStore_.loadProtocols(protocolsPath.toStdString());
-        // Absent before a protocol was ever edited: every protocol then starts
-        // from a fresh copy of the Target List.
-        if (!planPointsPath.isEmpty()) targetStore_.loadPlanPoints(planPointsPath.toStdString());
+        // The log lives with the patient's data, not the install's seed.
+        treatmentLog_.load(QDir(treatmentDataDirectory())
+                               .filePath(QStringLiteral("treatment_log.csv"))
+                               .toStdString());
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Treatment data could not be read: %1").arg(error.what()), true);
         return;
@@ -636,34 +702,32 @@ void WorkflowWindow::refreshProtocolCombo(const QString& select) {
 // The protocol grid is the authority while it is on screen; this pushes it
 // back so a create/delete/save sees the operator's edits.
 void WorkflowWindow::writeProtocolGridToStore() {
+    // Writes the table back into the VISIT LOG and nowhere else, which is all
+    // setTreatmentProtocolTableData.m does: `sessions(visit).Data = table.Data`.
+    // Nothing here touches the protocol or the Target List. Writing the table
+    // into the plan is what renamed a scheduled target to whichever one had
+    // been sonicated into that row.
     if (!protocolModel_ || !treatmentProtocolCombo_) return;
-    const std::string name = treatmentProtocolCombo_->currentText().toStdString();
-    if (targetStore_.findProtocol(name) == nullptr) return;
-    std::vector<beam::gui::TreatmentProtocolEntry> entries;
-    const auto* existing = targetStore_.findProtocol(name);
-    for (std::size_t row = 0; row < protocolModel_->rows().size(); ++row) {
-        const beam::gui_qt::TreatmentProtocolRow& source = protocolModel_->rows()[row];
-        beam::gui::TreatmentProtocolEntry entry;
-        entry.target = source.target.toStdString();
-        // The schedule's own amplitude is a record BeamV0 never applies; keep
-        // whatever was stored rather than overwriting it with the displayed
-        // point value, which the loop below writes to its proper home.
-        if (existing != nullptr && row < existing->entries.size())
-            entry.amplitude = existing->entries[row].amplitude;
-        entry.durationSeconds = source.duration;
-        entries.push_back(std::move(entry));
-    }
-    targetStore_.setProtocolEntries(name, std::move(entries));
-
-    // The Amplitude column shows the plan's point, so an edit to it belongs
-    // there too -- otherwise the column would not keep what was typed into it.
-    for (std::size_t row = 0; row < protocolModel_->rows().size(); ++row) {
-        const std::vector<beam::gui::TreatmentTargetPoint>* owned =
-            targetStore_.entryPoints(name, row);
-        if (owned == nullptr || owned->empty()) continue;
-        std::vector<beam::gui::TreatmentTargetPoint> points = *owned;
-        points.front().amplitude = protocolModel_->rows()[row].amplitude;
-        targetStore_.setEntryPoints(name, row, std::move(points));
+    const std::string protocol = treatmentProtocolCombo_->currentText().toStdString();
+    const int visit = currentVisitNumber();
+    for (std::size_t index = 0; index < protocolModel_->rows().size(); ++index) {
+        const beam::gui_qt::TreatmentProtocolRow& source = protocolModel_->rows()[index];
+        const int sequence = static_cast<int>(index) + 1;
+        const beam::gui::TreatmentLogRow* existing = treatmentLog_.find(protocol, visit, sequence);
+        if (existing == nullptr) continue;
+        beam::gui::TreatmentLogRow row = *existing;
+        row.responsePain = source.responsePain;
+        row.responseMood = source.responseMood;
+        row.notes = source.notes.toStdString();
+        // A delivered row records what was sent; only the operator entries
+        // above can change. One not yet fired is still the plan copy, so an
+        // edit to it is the operator adjusting this visit.
+        if (!beam::gui::TreatmentLog::delivered(row)) {
+            row.target = source.target.toStdString();
+            row.amplitude = source.amplitude;
+            row.endTimeSeconds = row.startTimeSeconds + source.duration;
+        }
+        treatmentLog_.record(std::move(row));
     }
 }
 
@@ -676,8 +740,8 @@ void WorkflowWindow::saveTreatmentTargetStore() {
             QDir(directory).filePath(QStringLiteral("treatment_targets.csv")).toStdString());
         targetStore_.saveProtocols(
             QDir(directory).filePath(QStringLiteral("treatment_protocols.csv")).toStdString());
-        targetStore_.savePlanPoints(
-            QDir(directory).filePath(QStringLiteral("treatment_plan_points.csv")).toStdString());
+        treatmentLog_.save(
+            QDir(directory).filePath(QStringLiteral("treatment_log.csv")).toStdString());
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Could not save treatment data: %1").arg(error.what()), true);
         return;
@@ -685,69 +749,84 @@ void WorkflowWindow::saveTreatmentTargetStore() {
 }
 
 void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
-    // From BeamAI's own store, not BeamV0's TreatmentProtocols/*.csv. Each
-    // entry references a Target List member by name; the target's points own
-    // the burst/pulse parameters, the entry carries the schedule's duration.
+    // The table on this page is the VISIT LOG, not the protocol. BeamV0 draws
+    // treatmentProtocolTables(i).sessions(visit).Data here, seeded from
+    // blank.Data by initTreatmentProtocolTables.m and written back by
+    // setTreatmentProtocolTableData.m -- never into blank. The protocol itself
+    // is the model, and Manage Protocols is the only thing that edits it.
+    const std::string protocol = protocolName.toStdString();
+    const int visit = currentVisitNumber();
     const beam::gui::TreatmentProtocolDefinition* definition =
-        targetStore_.findProtocol(protocolName.toStdString());
-    QList<QStringList> sourceRows;
+        targetStore_.findProtocol(protocol);
+
+    // What the visit would run if nothing had happened yet: the schedule, with
+    // each target own parameters filled in from the Target List.
+    std::vector<beam::gui::TreatmentLogRow> planned;
     if (definition != nullptr) {
         for (std::size_t index = 0; index < definition->entries.size(); ++index) {
             const beam::gui::TreatmentProtocolEntry& entry = definition->entries[index];
-            // Where the entry says nothing, the first point stands in -- it is
-            // the row the schedule would have been written from. It has to be
-            // THIS protocol's copy, not the Target List's: the grid edits the
-            // copy, so reading the template would show a value no one can see.
-            const std::vector<beam::gui::TreatmentTargetPoint>* points =
-                targetStore_.entryPoints(protocolName.toStdString(), index);
             const beam::gui::TreatmentTarget* target = targetStore_.findTarget(entry.target);
-            if (points == nullptr && target != nullptr) points = &target->points;
             const beam::gui::TreatmentTargetPoint* first =
-                points != nullptr && !points->empty() ? &points->front() : nullptr;
-            // The point's amplitude, not the entry's. BeamV0 stores a schedule
-            // amplitude but never applies it (setStimulationAmplitudeFromResponses
-            // is commented out), so the point is what is transmitted -- and it is
-            // what Manage Protocols edits.
-            const double amplitude =
-                first != nullptr ? first->amplitude : entry.amplitude.value_or(0.75);
-            const double duration =
+                target != nullptr && !target->points.empty() ? &target->points.front() : nullptr;
+            beam::gui::TreatmentLogRow row;
+            row.sequence = static_cast<int>(index) + 1;
+            row.target = entry.target;
+            // The point amplitude, not the entry: BeamV0 stores a schedule
+            // amplitude but never applies it, so the point is what is sent.
+            row.amplitude = first != nullptr ? first->amplitude : entry.amplitude.value_or(0.75);
+            row.startTimeSeconds = 0.0;
+            row.endTimeSeconds =
                 entry.durationSeconds.value_or(first != nullptr ? first->endTimeSeconds : 30.0);
-            sourceRows.push_back({QString::number(entry.order),
-                                  QString::fromStdString(entry.target),
-                                  QString::number(duration), QString::number(amplitude),
-                                  QStringLiteral("X:0,Y:0,Z:0"), QStringLiteral("N"),
-                                  QStringLiteral("notes")});
+            if (first != nullptr) {
+                row.burstDurationSeconds = first->burstDurationSeconds;
+                row.burstIntervalSeconds = first->burstIntervalSeconds;
+                row.pulseDurationSeconds = first->pulseDurationSeconds;
+                row.pulseIntervalSeconds = first->pulseIntervalSeconds;
+            }
+            planned.push_back(std::move(row));
         }
     }
-    std::vector<beam::gui_qt::TreatmentProtocolRow> protocolRows;
-    QStringList targetNames;
-    protocolRows.reserve(static_cast<std::size_t>(sourceRows.size()));
-    for (int row = 0; row < sourceRows.size(); ++row) {
-        const QStringList source = sourceRows.at(row);
-        const QString responseField = source.value(5);
-        const double response =
-            responseField.compare(QStringLiteral("N"), Qt::CaseInsensitive) == 0 ? 0.0 : responseField.toDouble();
-
-        beam::gui_qt::TreatmentProtocolRow protocolRow;
-        protocolRow.number = source.value(0).toInt();
-        protocolRow.target = source.value(1);
-        protocolRow.duration = source.value(2).toDouble();
-        protocolRow.amplitude = source.value(3).toDouble();
-        protocolRow.parameters = source.value(4);
-        protocolRow.responsePain = response;
-        protocolRow.responseMood = response;
-        protocolRow.notes = source.value(6);
-        protocolRows.push_back(protocolRow);
-
-
-        if (!targetNames.contains(protocolRow.target)) targetNames.push_back(protocolRow.target);
+    const bool frozen = treatmentLog_.visitFrozen(protocol, visit);
+    treatmentLog_.seedVisit(visit, protocol, planned);
+    // A frozen visit silently ignoring an edited protocol looks like the edit
+    // was lost. Say which it is, and what to do about it.
+    if (frozen) {
+        const std::vector<beam::gui::TreatmentLogRow> current =
+            treatmentLog_.rowsFor(protocol, visit);
+        bool differs = current.size() != planned.size();
+        for (std::size_t i = 0; !differs && i < planned.size(); ++i)
+            differs = current[i].target != planned[i].target;
+        if (differs) {
+            showMessage(QStringLiteral("Visit %1 of \"%2\" has sonications inserted or skipped by "
+                                       "hand, so it keeps its own order. Protocol edits reach a "
+                                       "visit that still follows the plan.")
+                            .arg(visit)
+                            .arg(protocolName),
+                        false);
+        }
     }
 
-    // The sonication grid describes the sonication being placed right now --
-    // one row, the selected target's. The protocol's 24-odd entries are the
-    // visit's schedule and belong to the Treatment Protocol tab, not here;
-    // seeding one grid row per protocol entry (as this first did) filled the
-    // grid with rows that had no target and could never get one.
+    std::vector<beam::gui_qt::TreatmentProtocolRow> protocolRows;
+    QStringList targetNames;
+    for (const beam::gui::TreatmentLogRow& logged : treatmentLog_.rowsFor(protocol, visit)) {
+        beam::gui_qt::TreatmentProtocolRow row;
+        row.number = logged.sequence;
+        row.target = QString::fromStdString(logged.target);
+        row.duration = logged.endTimeSeconds - logged.startTimeSeconds;
+        row.amplitude = logged.amplitude;
+        row.parameters =
+            QString::fromStdString(beam::gui::TreatmentLog::parameterString(logged));
+        const QDateTime ended = QDateTime::fromString(
+            QString::fromStdString(logged.endedAt), Qt::ISODate);
+        row.completed =
+            ended.isValid() ? ended.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : QString();
+        row.responsePain = logged.responsePain.value_or(0.0);
+        row.responseMood = logged.responseMood.value_or(0.0);
+        row.notes = QString::fromStdString(logged.notes);
+        protocolRows.push_back(row);
+        if (!targetNames.contains(row.target)) targetNames.push_back(row.target);
+    }
+
     const double defaultAmplitude = protocolRows.empty() ? 0.75 : protocolRows.front().amplitude;
     const double defaultDuration = protocolRows.empty() ? 30.0 : protocolRows.front().duration;
     protocolModel_->setRows(std::move(protocolRows));
@@ -784,10 +863,19 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
                         .arg(undefined.join(QStringLiteral(", "))),
                     true);
     }
-    currentSonicationNumberEdit_->setRange(1, std::max<int>(1, static_cast<int>(stimParamModel_->rows().size())));
 
     selectSonicationRow(0);
     switchToSelectedTarget();
+    // A protocol opens on its first scheduled sonication. Reloading the SAME
+    // protocol keeps where the visit has got to: this runs again after every
+    // delivery, to show the row that was just logged, and resetting to 1 there
+    // made every Sonicate advance to 2 and stop.
+    const bool sameProtocol = protocolName == lastLoadedProtocol_;
+    const int keep = sameProtocol && currentSonicationNumberEdit_
+                         ? currentSonicationNumberEdit_->value()
+                         : 1;
+    lastLoadedProtocol_ = protocolName;
+    selectScheduledSonication(keep);
     updateBestTargets();
 }
 
@@ -795,7 +883,6 @@ void WorkflowWindow::selectSonicationRow(int row) {
     if (!stimParamView_ || stimParamModel_->rows().empty()) return;
     const int clamped = std::clamp(row, 0, static_cast<int>(stimParamModel_->rows().size()) - 1);
     stimParamView_->selectRow(clamped);
-    currentSonicationNumberEdit_->setValue(clamped + 1);
     updateSonicationPlots();
 }
 
@@ -866,16 +953,12 @@ void WorkflowWindow::switchToSelectedTarget() {
 
         std::vector<beam::gui_qt::StimParamRow> rows;
         // No entry means this protocol does not schedule this target. Clamping
-        // to entry 0 showed a different target's parameters under this target's
-        // name, which is worse than showing none.
-        const int entryIndex = targetStore_.firstEntryForTarget(
-            currentProtocolName().toStdString(), name.toStdString());
-        const std::vector<beam::gui::TreatmentTargetPoint> scheduled =
-            entryIndex < 0 ? std::vector<beam::gui::TreatmentTargetPoint>{}
-                           : targetStore_.pointsForSonication(
-                                 currentProtocolName().toStdString(),
-                                 static_cast<std::size_t>(entryIndex), scheduledDuration);
-        for (const beam::gui::TreatmentTargetPoint& point : scheduled) {
+        // The target's own rows. scheduledDuration above is the protocol's
+        // only contribution, exactly as updateSonicateSettingsForCurrent-
+        // Sonication.m has it: the schedule sets how long, the target says
+        // everything else.
+        for (const beam::gui::TreatmentTargetPoint& point :
+             targetStore_.pointsForSonication(name.toStdString(), scheduledDuration)) {
             beam::gui_qt::StimParamRow row;
             row.order = point.order;
             row.show = point.show;
@@ -922,7 +1005,6 @@ void WorkflowWindow::switchToSelectedTarget() {
         stimParamModel_->setRows(std::move(rows));
     }
     stimParamView_->selectRow(0);
-    currentSonicationNumberEdit_->setRange(1, std::max<int>(1, static_cast<int>(stimParamModel_->rows().size())));
     saveCurrentTargetSonications();
     updateSonicationPlots();
 }
@@ -963,27 +1045,6 @@ void WorkflowWindow::applyArrayCentreToAllTargets(const Eigen::Vector3d& centreM
 void WorkflowWindow::saveCurrentTargetSonications() {
     if (currentTargetId_ >= 0 && stimParamModel_ && !stimParamModel_->rows().empty())
         targetSonications_.insert(currentTargetId_, stimParamModel_->rows());
-}
-
-// Writes an MRI click into the selected sonication. This is the piece
-// BeamV0 has no equivalent for: its Sonicate tab has no MRI view, so X/Y/Z
-// can only be typed into the grid.
-void WorkflowWindow::setSonicationTargetFromMri(const Eigen::Vector3d& positionMm) {
-    const int row = selectedSonicationRow();
-    if (row < 0) return;
-    std::vector<beam::gui_qt::StimParamRow> rows = stimParamModel_->rows();
-    rows[static_cast<std::size_t>(row)].x = positionMm.x();
-    rows[static_cast<std::size_t>(row)].y = positionMm.y();
-    rows[static_cast<std::size_t>(row)].z = positionMm.z();
-    stimParamModel_->setRows(std::move(rows));
-    stimParamView_->selectRow(row);
-
-    // The placed position also belongs to whichever target is selected: the
-    // grid row goes into that target's own record, and the position onto the
-    // list item for Move To Target.
-    if (QListWidgetItem* item = targetListWidget_->currentItem())
-        item->setData(Qt::UserRole, QList<QVariant>{positionMm.x(), positionMm.y(), positionMm.z()});
-    saveCurrentTargetSonications();
 }
 
 void WorkflowWindow::updateSonicationPlots() {
@@ -1095,6 +1156,10 @@ std::vector<double> shamBurstSound() {
 
 void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyle) {
     treatmentExecutionBody_ = new QWidget(ui_->placeholderPage);
+    // Only as tall as the one status line it holds. Left Expanding it was
+    // given 83px for 44px of content and centred it, which is the dark band
+    // above and below the last line of the page.
+    treatmentExecutionBody_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto* outer = new QVBoxLayout(treatmentExecutionBody_);
     outer->setContentsMargins(0, 0, 0, 0);
 
@@ -1103,17 +1168,25 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
 
     auto* row = new QHBoxLayout;
 
-    // Left: what is about to be fired, and how it is going.
-    auto* statusColumn = new QVBoxLayout;
+    // One line, not three stacked: the countdown reads at the left, the
+    // progress bar takes the middle, and Finish sits at the right where an
+    // end-of-visit action belongs. Stacked, these three cost the MRI viewers
+    // about 70px of height for text that fits on one row.
+    auto* statusColumn = new QHBoxLayout;
+    statusColumn->setSpacing(8);
+    sonicationCountdownLabel_ = new QLabel(QStringLiteral("No sonication running."), treatmentExecutionBody_);
+    sonicationCountdownLabel_->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; padding: 4px; }"));
     treatmentExecutionProgressBar_ = new QProgressBar(treatmentExecutionBody_);
     treatmentExecutionProgressBar_->setRange(0, 100);
     treatmentExecutionProgressBar_->setValue(0);
-    treatmentExecutionProgressBar_->setFormat(QStringLiteral("Treatment progress: %p%"));
+    treatmentExecutionProgressBar_->setTextVisible(false);
     treatmentExecutionProgressBar_->setMinimumHeight(24);
-    sonicationCountdownLabel_ = new QLabel(QStringLiteral("No sonication running."), treatmentExecutionBody_);
-    sonicationCountdownLabel_->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; padding: 4px; }"));
-    statusColumn->addWidget(treatmentExecutionProgressBar_);
-    statusColumn->addWidget(sonicationCountdownLabel_);
+    treatmentExecutionProgressBar_->setMinimumWidth(420);
+    treatmentExecutionProgressBar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    // The bar takes the larger share of the row: it is what the operator
+    // watches while a sonication runs, and the label beside it holds one line.
+    statusColumn->addWidget(sonicationCountdownLabel_, 1);
+    statusColumn->addWidget(treatmentExecutionProgressBar_, 2);
     row->addLayout(statusColumn, 1);
 
     // Right: the .mlapp's own narrow control column.
@@ -1127,8 +1200,8 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     // mode and four buttons, and at 220 the combos truncated and the whole
     // thing read as squeezed into the corner. The grid and the schedule give
     // up the width -- their columns stretch and have it to spare.
-    controlPanel->setMinimumWidth(240);
-    controlPanel->setMaximumWidth(300);
+    controlPanel->setMinimumWidth(320);
+    controlPanel->setMaximumWidth(400);
     controlPanel->setLayout(controlColumn);
     const auto columnLabel = [&](const QString& text) {
         auto* label = new QLabel(text, controlPanel);
@@ -1181,9 +1254,12 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     controlColumn->addWidget(abortTreatmentButton_);
     // Slack below, or the box layout spreads the controls apart.
     controlColumn->addStretch(1);
-    // Finish is not a firing control and it is what made this column taller
-    // than the body that holds it, clipping Abort. It belongs with the status
-    // readout below, where the operator looks once the plan has been run.
+    // Finish is not a firing control, so it stays out of the Sonicate column;
+    // it ends the status line instead, at the far right.
+    finishTreatmentButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    // Wide: it ends the visit, and on a row of status text a button sized to
+    // its own label reads as one more label.
+    finishTreatmentButton_->setMinimumWidth(420);
     statusColumn->addWidget(finishTreatmentButton_);
     // Beside the plan rather than under it. Stacked below, this column began
     // around 1150 px down a maximised window -- off the bottom of a 1080p
@@ -1194,7 +1270,10 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     } else {
         row->addWidget(controlPanel);
     }
-    outer->addLayout(row, 1);
+    // No stretch: this row is one line of status and a button. Given a share of
+    // the leftover height it centred them in a tall empty band at the foot of
+    // the page. The Sonicate body above takes the slack instead.
+    outer->addLayout(row);
     treatmentExecutionBody_->setVisible(false);
 
     setSerialConnectedLamp(false);
@@ -1208,7 +1287,11 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
         if (beam::gui::isCountdownDone(left)) {
             sonicationCountdownTimer_->stop();
             sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
-            treatmentExecutionProgressBar_->setValue(100);
+            closeOpenLogRow();
+            // Back to empty rather than sitting at 100%: the Completed column
+            // now says the sonication finished, and a full bar left on screen
+            // reads as one still in progress.
+            treatmentExecutionProgressBar_->setValue(0);
             abortTreatmentButton_->setEnabled(false);
             startTreatmentButton_->setEnabled(true);
             shamButton_->setEnabled(true);
@@ -1252,7 +1335,207 @@ void WorkflowWindow::setSerialConnectedLamp(bool connected) {
 // generalSonicateMaster.m's decision path: build stimParams from the shown
 // row, run the two last-moment checks, and only then send. The transmission
 // figure is the one the Correction stage actually measured.
+int WorkflowWindow::currentVisitNumber() const {
+
+    bool ok = false;
+    const int visit = visitNumberCombo_ ? visitNumberCombo_->currentText().toInt(&ok) : 0;
+    return ok && visit > 0 ? visit : 1;
+}
+
+// One row per delivery, stamped as it starts. BeamV0 means to record this --
+// setLogInfoToCSV.m parses a Parameters string and names SonicationStartDTM
+// columns -- but nothing there ever writes either, so the values are taken
+// here, from the row actually sent.
+void WorkflowWindow::recordSonicationStart(const beam::gui_qt::StimParamRow& row, bool sham,
+                                           std::optional<double> attenuation,
+                                           std::optional<double> dutyCycle) {
+    beam::gui::TreatmentLogRow entry;
+    entry.visit = currentVisitNumber();
+    entry.protocol = currentProtocolName().toStdString();
+    const QListWidgetItem* item = targetListWidget_ ? targetListWidget_->currentItem() : nullptr;
+    entry.target = item != nullptr ? targetListName(item).toStdString() : std::string();
+    entry.xMm = row.x;
+    entry.yMm = row.y;
+    entry.zMm = row.z;
+    entry.amplitude = row.amplitude;
+    entry.startTimeSeconds = row.startTime;
+    entry.endTimeSeconds = row.endTime;
+    entry.burstDurationSeconds = row.bd;
+    entry.burstIntervalSeconds = row.bi;
+    entry.pulseDurationSeconds = row.pd;
+    entry.pulseIntervalSeconds = row.pi;
+    entry.sham = sham;
+    entry.attenuation = attenuation;
+    entry.dutyCycle = dutyCycle;
+    entry.startedAt = QDateTime::currentDateTime().toString(Qt::ISODate).toStdString();
+    // BeamV0 writes into treatmentProtocolTable row i, where i is the Current
+    // Sonication Number, so stepping back and re-firing replaces that row.
+    entry.sequence = currentSonicationNumberEdit_ ? currentSonicationNumberEdit_->value() : 1;
+    openLogSequence_ = entry.sequence;
+    treatmentLog_.record(std::move(entry));
+    // Persist now -- a row that is never closed still has to survive a crash
+    // mid-delivery -- but do not rebuild the table here: that reloads the
+    // sonication grid out from under the row currently being fired. The
+    // table catches up when the countdown closes the row.
+    saveTreatmentTargetStore();
+}
+
+// The countdown reaching zero, or an abort, ends the row. An abort still leaves
+// a row: it was delivered, just not for as long as planned.
+void WorkflowWindow::closeOpenLogRow() {
+    if (openLogSequence_ <= 0) return;
+    treatmentLog_.close(currentProtocolName().toStdString(), currentVisitNumber(), openLogSequence_,
+                        QDateTime::currentDateTime().toString(Qt::ISODate).toStdString());
+    openLogSequence_ = 0;
+    saveTreatmentTargetStore();
+    loadTreatmentProtocol(currentProtocolName());
+    advanceToNextScheduledSonication();
+}
+
+// Where the visit has got to: one past the last delivery, which is BeamV0's
+// own numbering -- sessions(visit).Data is the schedule in order and a row is
+// filled in as it is delivered. Moves the schedule selection and the target
+// with it, so the next Sonicate fires the next scheduled target rather than
+// repeating the last one.
+// One step along the schedule, which is BeamV0's own
+// `CurrentSonicationNumberEditField.Value + 1` in SonicateButtonPushed. Taken
+// from the field rather than from the log's highest sequence, so stepping back
+// to re-fire a row and letting it finish advances to the row after THAT one.
+void WorkflowWindow::advanceToNextScheduledSonication() {
+    if (!currentSonicationNumberEdit_) return;
+    selectScheduledSonication(currentSonicationNumberEdit_->value() + 1);
+}
+
+// Moves to one scheduled sonication: the number field, the highlighted row,
+// and the target the grid is showing, which is what Sonicate sends.
+void WorkflowWindow::selectScheduledSonication(int oneBased) {
+    if (!protocolModel_ || !currentSonicationNumberEdit_) return;
+    const int scheduled = static_cast<int>(protocolModel_->rows().size());
+    if (scheduled == 0) return;
+    const int position = std::clamp(oneBased, 1, scheduled);
+
+    {
+        const QSignalBlocker blocker(currentSonicationNumberEdit_);
+        currentSonicationNumberEdit_->setRange(1, scheduled);
+        currentSonicationNumberEdit_->setValue(position);
+    }
+    if (protocolView_) protocolView_->selectRow(position - 1);
+
+    const QString target = protocolModel_->rows()[static_cast<std::size_t>(position) - 1].target;
+    if (!targetListWidget_) return;
+    for (int i = 0; i < targetListWidget_->count(); ++i) {
+        if (targetListName(targetListWidget_->item(i)) != target) continue;
+        if (targetListWidget_->currentRow() != i) targetListWidget_->setCurrentRow(i);
+        return;
+    }
+}
+
+// Right-click a row to change what this VISIT runs, without touching the
+// protocol: skip one that has not started, or add one after it. BeamV0 has no
+// equivalent -- its table is fixed at 24 rows -- but a visit that has to drop
+// or add a sonication otherwise has nowhere to record that it did.
+void WorkflowWindow::showScheduleRowMenu(const QPoint& where) {
+    if (!protocolView_ || !protocolModel_) return;
+    const QModelIndex index = protocolView_->indexAt(where);
+    if (!index.isValid()) return;
+    const int sequence = index.row() + 1;
+    const std::string protocol = currentProtocolName().toStdString();
+    const int visit = currentVisitNumber();
+    const beam::gui::TreatmentLogRow* row = treatmentLog_.find(protocol, visit, sequence);
+    if (row == nullptr) return;
+
+    QMenu menu(this);
+    const bool fired = beam::gui::TreatmentLog::delivered(*row);
+    QAction* insert = menu.addAction(QStringLiteral("Insert sonication after %1...").arg(sequence));
+    QAction* skip = menu.addAction(QStringLiteral("Skip sonication %1").arg(sequence));
+    insert->setEnabled(!targetStore_.targets().empty());
+    skip->setEnabled(!fired);
+    if (fired) skip->setToolTip(QStringLiteral("This sonication has already been delivered."));
+
+    QAction* chosen = menu.exec(protocolView_->viewport()->mapToGlobal(where));
+    if (chosen == nullptr) return;
+
+    if (chosen == skip) {
+        if (!treatmentLog_.removeAt(protocol, visit, sequence)) {
+            showMessage(QStringLiteral("Sonication %1 cannot be skipped: it or one below it has "
+                                       "already been delivered.")
+                            .arg(sequence),
+                        true);
+            return;
+        }
+        showMessage(QStringLiteral("Sonication %1 skipped for this visit. The protocol is "
+                                   "unchanged.")
+                        .arg(sequence),
+                    false);
+    } else if (chosen == insert) {
+        QStringList names;
+        for (const beam::gui::TreatmentTarget& target : targetStore_.targets())
+            names << QString::fromStdString(target.name);
+        bool accepted = false;
+        const QString picked =
+            QInputDialog::getItem(this, QStringLiteral("Insert sonication"),
+                                  QStringLiteral("Target:"), names, 0, false, &accepted);
+        if (!accepted || picked.isEmpty()) return;
+
+        // The added sonication takes the target's own parameters, the same way
+        // a seeded row does.
+        const beam::gui::TreatmentTarget* target = targetStore_.findTarget(picked.toStdString());
+        if (target == nullptr || target->points.empty()) return;
+        const beam::gui::TreatmentTargetPoint& point = target->points.front();
+        beam::gui::TreatmentLogRow added;
+        added.target = target->name;
+        added.amplitude = point.amplitude;
+        added.startTimeSeconds = 0.0;
+        added.endTimeSeconds = point.endTimeSeconds;
+        added.burstDurationSeconds = point.burstDurationSeconds;
+        added.burstIntervalSeconds = point.burstIntervalSeconds;
+        added.pulseDurationSeconds = point.pulseDurationSeconds;
+        added.pulseIntervalSeconds = point.pulseIntervalSeconds;
+        if (!treatmentLog_.insertAfter(protocol, visit, sequence, std::move(added))) {
+            showMessage(QStringLiteral("Nothing can be inserted here: a sonication below %1 has "
+                                       "already been delivered.")
+                            .arg(sequence),
+                        true);
+            return;
+        }
+        showMessage(QStringLiteral("%1 added after sonication %2 for this visit. The protocol is "
+                                   "unchanged.")
+                        .arg(picked)
+                        .arg(sequence),
+                    false);
+    }
+    // Reload first: saveTreatmentTargetStore writes the displayed rows back
+    // into the log by position, and the table still holds the sequence from
+    // before the insert. Saving first wrote the old row over the new one --
+    // which is why an inserted SCC3 came back as the row above it.
+    loadTreatmentProtocol(currentProtocolName());
+    saveTreatmentTargetStore();
+}
+
+// Writes the visit log wherever the operator asks, on top of the copy kept
+// beside the plan. setLogInfoToCSV.m does the same thing to its own
+// participantLogFilesBeam folder after every sonication.
+void WorkflowWindow::saveTreatmentLogAs() {
+    const QString suggested =
+        QDir(treatmentDataDirectory())
+            .filePath(QStringLiteral("treatment_log_%1.csv")
+                          .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmm"))));
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Save treatment log"),
+                                                      suggested, QStringLiteral("CSV (*.csv)"));
+    if (path.isEmpty()) return;
+    writeProtocolGridToStore();  // anything typed and not yet committed
+    try {
+        treatmentLog_.save(path.toStdString());
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("Could not save the log: %1").arg(error.what()), true);
+        return;
+    }
+    showMessage(QStringLiteral("Treatment log saved to %1.").arg(path), false);
+}
+
 void WorkflowWindow::runSonication(bool sham) {
+
+
     std::string reason;
     if (!workflow_.begin(beam::gui::WorkflowStage::Treatment, &reason)) {
         showMessage(QString::fromStdString(reason), true);
@@ -1271,6 +1554,8 @@ void WorkflowWindow::runSonication(bool sham) {
     if (sham) {
         const beam::gui::ShamSonicationOutcome outcome =
             beam::gui::prepareShamSonication(params, shamBurstSound(), kShamSoundFs);
+        // A sham sends nothing, so there is no transmission or duty cycle.
+        recordSonicationStart(r, true, std::nullopt, std::nullopt);
         startSonicationCountdown(static_cast<int>(outcome.durationSeconds));
         setExecutionStatus(
             QStringLiteral("Sham sonication %1: masking audio ready (%2 samples, %3 s). No ultrasound was sent.")
@@ -1316,6 +1601,7 @@ void WorkflowWindow::runSonication(bool sham) {
         }
     }
     setExecutionStatus(status);
+    recordSonicationStart(r, false, transmissionAmplitude_, outcome.dutyCycle);
     startSonicationCountdown(static_cast<int>(outcome.durationSeconds));
 }
 
@@ -1347,6 +1633,7 @@ void WorkflowWindow::startSonicationCountdown(int durationSeconds) {
 void WorkflowWindow::abortSonication() {
     sonicationCountdownTimer_->stop();
     sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
+    closeOpenLogRow();
     abortTreatmentButton_->setEnabled(false);
     startTreatmentButton_->setEnabled(true);
     shamButton_->setEnabled(true);
@@ -1435,13 +1722,9 @@ void WorkflowWindow::writeTargetPointsToStore() {
             point.pulseIntervalSeconds = grid.pi;
             points.push_back(point);
         }
-        // The protocol's own copy, not the Target List's: the list is a
-        // template, and an edit made inside one plan stays inside it.
-        const int entry = targetStore_.firstEntryForTarget(
-            currentProtocolName().toStdString(), targetListName(item).toStdString());
-        if (entry >= 0)
-            targetStore_.setEntryPoints(currentProtocolName().toStdString(),
-                                        static_cast<std::size_t>(entry), std::move(points));
+        // Straight onto the target. A protocol carries no parameters, so this
+        // is visible from every protocol that schedules it.
+        targetStore_.setTargetPoints(targetListName(item).toStdString(), std::move(points));
     }
 }
 

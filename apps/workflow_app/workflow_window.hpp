@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "gui/treatment_log.hpp"
 #include "gui/treatment_target_store.hpp"
 #include "treatment_library_dialog.hpp"
 #include "gui/treatment_workflow.hpp"
@@ -162,12 +163,20 @@ private:
     void refreshProtocolCombo(const QString& select);
     void writeProtocolGridToStore();
     void saveTreatmentTargetStore();
+    int currentVisitNumber() const;
+    void recordSonicationStart(const beam::gui_qt::StimParamRow& row, bool sham,
+                               std::optional<double> attenuation,
+                               std::optional<double> dutyCycle);
+    void closeOpenLogRow();
+    void advanceToNextScheduledSonication();
+    void showScheduleRowMenu(const QPoint& where);
+    void saveTreatmentLogAs();
+    void selectScheduledSonication(int oneBased);
     void writeTargetPointsToStore();
     void openTreatmentLibrary(TreatmentLibraryDialog::Page page);
     void applyTreatmentLibrary(const beam::gui::TreatmentTargetStore& edited);
     void selectSonicationRow(int row);
     int selectedSonicationRow() const;
-    void setSonicationTargetFromMri(const Eigen::Vector3d& positionMm);
     void focusTreatmentViewsOn(const Eigen::Vector3d& positionMm);
     void updateSonicationPlots();
     void updateBestTargets();
@@ -202,8 +211,10 @@ private:
     static constexpr int kTreatmentViewerHeight = 420;
     // The Treatment page's viewers may not squeeze the plan below this.
     static constexpr int kMinTreatmentViewerHeight = 240;
-    // What sits under them: the execution controls and the status row.
-    static constexpr int kTreatmentControlsHeight = 110;
+    // What sits under them: the one-line status row with Finish on its end.
+    static constexpr int kTreatmentControlsHeight = 54;
+    // treatmentProtocolTables(i).sessions is 15 long in BeamV0.
+    static constexpr int kMaxTreatmentVisits = 15;
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
@@ -285,7 +296,15 @@ private:
     // BeamAI's own protocol/target library. Seeded from data/*.csv in the
     // install, saved to the user's own copy -- see treatmentDataDirectory().
     beam::gui::TreatmentTargetStore targetStore_;
+    // What was actually delivered, per visit. The store above is the plan.
+    beam::gui::TreatmentLog treatmentLog_;
+    // The row runSonication opened, so the countdown can stamp its end.
+    int openLogSequence_ = 0;
+    // Which protocol the schedule table currently holds, so a reload of the
+    // same one does not throw away the visit's position.
+    QString lastLoadedProtocol_;
     QPushButton* manageLibraryButton_ = nullptr;
+    QPushButton* saveLogButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
     QTableView* protocolView_ = nullptr;
     QListWidget* targetListWidget_ = nullptr;

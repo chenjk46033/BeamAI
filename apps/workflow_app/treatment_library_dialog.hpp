@@ -23,9 +23,9 @@ namespace beam::app {
 // Edits a copy; the caller takes store() only when the dialog is accepted.
 class TreatmentLibraryDialog final : public QDialog {
 public:
-    // One page at a time: targets are the shared template and protocols are
-    // schedules over it, and a tabbed dialog holding both invited the two to
-    // be read as one thing.
+    // One page at a time: the Target List holds the targets themselves and
+    // protocols are schedules over them, and a tabbed dialog holding both
+    // invited the two to be read as one thing.
     enum class Page { Targets, Protocols };
 
     TreatmentLibraryDialog(beam::gui::TreatmentTargetStore store, Page page,
@@ -45,9 +45,8 @@ private:
     void reloadEntries();
     void commitScheduleRow(int row);
     void commitScheduleOrder();
-    // Which target's points the shared table is showing, and where they live:
-    // the Target List's template on the Targets page, this protocol's own copy
-    // on the Protocols page.
+    // Which target's points the table is showing. They live on the target
+    // itself; a protocol keeps none of its own.
     void commitTargetRow(int row);
     QString selectedTarget() const;
     QString selectedProtocol() const;

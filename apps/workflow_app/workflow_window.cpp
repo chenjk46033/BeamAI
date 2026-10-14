@@ -232,9 +232,23 @@ Eigen::MatrixXd readArrayRectCsv(const QString& path) {
 }
 
 
+// An axis holds voxel CENTRES, but drawImage stretches the slice's n voxels
+// edge to edge across the view. Mapping millimetres with the centres as the
+// ends therefore puts every overlay up to half a voxel out from the image
+// under it -- worst at the edges, zero in the middle. These are the edges: half
+// a voxel beyond the first and last centre.
+std::pair<double, double> axisEdgesMm(const Eigen::VectorXd& axis) {
+    if (axis.size() < 2) return {0.0, 1.0};
+    const double first = axis(0);
+    const double last = axis(axis.size() - 1);
+    const double step = (last - first) / static_cast<double>(axis.size() - 1);
+    return {first - step / 2.0, last + step / 2.0};
+}
+
 double normalizedAxisPosition(const Eigen::VectorXd& axis, double mm) {
-    if (axis.size() < 2 || axis(axis.size() - 1) == axis(0)) return 0.5;
-    return std::clamp((mm - axis(0)) / (axis(axis.size() - 1) - axis(0)), 0.0, 1.0);
+    const auto [low, high] = axisEdgesMm(axis);
+    if (axis.size() < 2 || high == low) return 0.5;
+    return std::clamp((mm - low) / (high - low), 0.0, 1.0);
 }
 
 // Bounds for the shared MRI viewer height chosen in syncMriViewerHeights().
@@ -1073,8 +1087,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             ui_->axialNextButton, &QToolButton::click);
     connect(ui_->treatmentAxialResetButton, &QToolButton::clicked,
             ui_->resetAxialButton, &QToolButton::click);
-    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_})
-        view->setPointPlacementEnabled(true);
 
     wireDetachedViewerMenus();
 
@@ -1424,20 +1436,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         connect(pair.first, &QSlider::valueChanged, pair.second, &QSlider::setValue);
         connect(pair.second, &QSlider::valueChanged, pair.first, &QSlider::setValue);
     }
-    // Clicking any treatment MRI plane writes RAS millimetres into the
-    // selected sonication. BeamV0's Sonicate tab has no MRI view, so its
-    // grid is the only place X/Y/Z could come from; here the grid follows
-    // the image instead.
-    const auto treatmentPointPicked = [this](const Eigen::Vector3d& pointMm) {
-        if (!mriLoaded_) return;
-        targetMm_ = pointMm;
-        setSonicationTargetFromMri(pointMm);
-        showMriPreviews();
-    };
-    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_}) {
-        view->setPointPickedHandler(treatmentPointPicked);
+    // Clicking a treatment plane does not move the target. The target comes
+    // from registration -- registerCurrentTransducerPostion.m stamps the array
+    // centre into every stimParamTable -- and BeamV0's Sonicate tab has no MRI
+    // view to click at all, so a click here was a BeamAI invention that moved
+    // the crosshair off the target it is there to mark. Left-drag still pans.
+    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_})
         view->setContextWidgetFactory([this](QMenu* menu) { return buildFiducialPickerWidget(menu); });
-    }
     connect(ui_->resetSagittalButton, &QToolButton::clicked, this, [this] {
         ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));
     });
@@ -1891,8 +1896,11 @@ void WorkflowWindow::syncMriViewerHeights() {
     // whatever is genuinely left over on whatever screen this is.
     const int treatmentFits =
         stackHeight - kTreatmentBodyMinHeight - kTreatmentControlsHeight - columnChrome;
+    // No fraction here: treatmentFits is the measured leftover, so the viewers
+    // can take all of it. They are still bounded by the shared height, which
+    // is what Imaging and Registration show, and by the cap.
     const int treatmentHeight =
-        std::clamp(std::min({height * 80 / 100, kTreatmentViewerHeight, treatmentFits}),
+        std::clamp(std::min({height, kTreatmentViewerHeight, treatmentFits}),
                    kMinTreatmentViewerHeight, kTreatmentViewerHeight);
     if (height == ui_->sagittalPreview->minimumHeight() &&
         height == ui_->sagittalPreview->maximumHeight() &&
@@ -2382,33 +2390,66 @@ void WorkflowWindow::navigateToFiducialOnTreatment(int index, bool announce) {
                     false);
 }
 
+// The treatment viewer's popup. It used to be the fiducial triangle, which is
+// a registration readout and read-only here. The array lock is the one thing
+// worth changing without leaving the tab: moving it re-registers, which moves
+// the array centre, which is the target every plane is drawn around.
 QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
-    std::array<QString, 6> labels;
-    std::array<QPointF, 6> apIsMm;
-    std::array<double, 6> lrMm;
-    if (!fiducialDiagramData(&labels, &apIsMm, &lrMm)) return nullptr;
     auto* holder = new QWidget(menu);
     auto* layout = new QVBoxLayout(holder);
-    // Match the menu's other embedded widgets.
     layout->setContentsMargins(10, 5, 10, 5);
     layout->setSpacing(4);
-    auto* caption = new QLabel(QStringLiteral("Click a fiducial to show it."), holder);
+
+    auto* caption = new QLabel(QStringLiteral("Move the array lock, then Accept."), holder);
     caption->setStyleSheet(QStringLiteral(
         "QLabel { background: #d8f1f6; color: #123d4b; border: 1px solid #63b7c9; "
         "border-radius: 3px; padding: 3px 4px; font-weight: 600; }"));
-    auto* picker = new RegistrationFiducialLayout(holder);
-    picker->setFixedSize(330, 230);
-    picker->setMarkerCoordinateLabels(labels);
-    picker->setMarkerPositions(apIsMm);
-    picker->setMarkerDepthsMm(lrMm);
-    picker->setSelectedIndex(treatmentFiducialPick_);
-    // No menu->close(): it would hide the blue selection just drawn.
-    picker->setSelectionHandler([this](int markerIndex) {
-        treatmentFiducialPick_ = markerIndex;
-        navigateToFiducialOnTreatment(markerIndex);
-    });
     layout->addWidget(caption);
-    layout->addWidget(picker);
+
+    // Same control as the Registration page's, borrowing its stylesheet rather
+    // than repeating it; the proxy style must be set after, or the stylesheet
+    // discards it.
+    const auto makeLockSlider = [this, holder](Qt::Orientation orientation, int value) {
+        auto* slider = new NumberedSlider(orientation, holder);
+        slider->setRange(1, 4);
+        slider->setSingleStep(1);
+        slider->setPageStep(1);
+        slider->setValue(value);
+        slider->setStyleSheet(leftHorizontalPositionSlider_->styleSheet());
+        slider->setStyle(new ClickToPositionStyle(slider->style()));
+        return slider;
+    };
+    auto* vertical = makeLockSlider(Qt::Vertical, leftVerticalPositionSlider_->value());
+    auto* horizontal = makeLockSlider(Qt::Horizontal, leftHorizontalPositionSlider_->value());
+    vertical->setFixedSize(50, 88);
+    horizontal->setMinimumSize(120, 48);
+
+    auto* grid = new QGridLayout;
+    grid->setHorizontalSpacing(7);
+    grid->setVerticalSpacing(2);
+    grid->addWidget(new QLabel(QStringLiteral("Vertical"), holder), 0, 0, Qt::AlignCenter);
+    grid->addWidget(vertical, 1, 0, Qt::AlignCenter);
+    grid->addWidget(new QLabel(QStringLiteral("Horizontal"), holder), 0, 1, Qt::AlignCenter);
+    grid->addWidget(horizontal, 1, 1, Qt::AlignCenter);
+    layout->addLayout(grid);
+
+    auto* accept = new QPushButton(QStringLiteral("Accept new array position"), holder);
+    accept->setMinimumHeight(30);
+    accept->setStyleSheet(registerCurrentPositionButton_->styleSheet());
+    accept->setEnabled(registrationFitApplied());
+    if (!accept->isEnabled())
+        accept->setToolTip(QStringLiteral("Fit the array to the fiducials on Registration first."));
+    connect(accept, &QPushButton::clicked, this, [this, horizontal, vertical, menu] {
+        // Both locks together: performCurrentPositionRegistration refuses a
+        // left/right mismatch, and this popup offers one pair.
+        for (QSlider* slider : {leftHorizontalPositionSlider_, rightHorizontalPositionSlider_})
+            slider->setValue(horizontal->value());
+        for (QSlider* slider : {leftVerticalPositionSlider_, rightVerticalPositionSlider_})
+            slider->setValue(vertical->value());
+        performCurrentPositionRegistration();
+        menu->close();
+    });
+    layout->addWidget(accept);
     return holder;
 }
 
@@ -3429,19 +3470,19 @@ void WorkflowWindow::showMriPreviews() {
         if (ui_->showTargetCheckBox->isChecked() && targetVoxel.i == sagittal - 1) {
             sagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                  QString(), QColor(65, 235, 100), true});
+                                  QString(), QColor(65, 235, 100), false});
             imagingSagMarkers.push_back(sagMarkers.back());
         }
         if (ui_->showTargetCheckBox->isChecked() && targetVoxel.j == coronal - 1) {
             corMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
                                            1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                  QString(), QColor(65, 235, 100), true});
+                                  QString(), QColor(65, 235, 100), false});
             imagingCorMarkers.push_back(corMarkers.back());
         }
         if (ui_->showTargetCheckBox->isChecked() && targetVoxel.k == axial - 1) {
             axialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
                                              1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y())),
-                                    QString(), QColor(65, 235, 100), true});
+                                    QString(), QColor(65, 235, 100), false});
             imagingAxialMarkers.push_back(axialMarkers.back());
         }
         if (ui_->showFiducialsCheckBox->isChecked()) {
@@ -3516,15 +3557,15 @@ void WorkflowWindow::showMriPreviews() {
         if (targetVoxel.i == sagittal - 1)
             treatmentSagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
                                                    1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                           QStringLiteral("Selected target"), QColor(65, 235, 100), true});
+                                           QStringLiteral("Selected target"), QColor(65, 235, 100), false});
         if (targetVoxel.j == coronal - 1)
             treatmentCorMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
                                                    1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                           QStringLiteral("Selected target"), QColor(65, 235, 100), true});
+                                           QStringLiteral("Selected target"), QColor(65, 235, 100), false});
         if (targetVoxel.k == axial - 1)
             treatmentAxialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
                                                      1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y())),
-                                             QStringLiteral("Selected target"), QColor(65, 235, 100), true});
+                                             QStringLiteral("Selected target"), QColor(65, 235, 100), false});
         treatmentSagittalPreview_->setMarkers(std::move(treatmentSagMarkers));
         treatmentCoronalPreview_->setMarkers(std::move(treatmentCorMarkers));
         treatmentAxialPreview_->setMarkers(std::move(treatmentAxialMarkers));
@@ -3538,20 +3579,20 @@ void WorkflowWindow::showMriPreviews() {
     const double ap = coordinate(mriAxes_.dimAP, coronal);
     const double is = coordinate(mriAxes_.dimIS, axial);
     ui_->sagittalPreview->setRasMapping(QStringLiteral("sagittal"), lr,
-                                        mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1),
-                                        mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), true, true);
+                                        axisEdgesMm(mriAxes_.dimAP).first, axisEdgesMm(mriAxes_.dimAP).second,
+                                        axisEdgesMm(mriAxes_.dimIS).first, axisEdgesMm(mriAxes_.dimIS).second, true, true);
     ui_->coronalPreview->setRasMapping(QStringLiteral("coronal"), ap,
-                                       mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1),
-                                       mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), false, true);
+                                       axisEdgesMm(mriAxes_.dimLR).first, axisEdgesMm(mriAxes_.dimLR).second,
+                                       axisEdgesMm(mriAxes_.dimIS).first, axisEdgesMm(mriAxes_.dimIS).second, false, true);
     ui_->axialPreview->setRasMapping(QStringLiteral("axial"), is,
-                                     mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1),
-                                     mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1), false, true);
-    ui_->registrationSagittalPreview->setRasMapping(QStringLiteral("sagittal"), lr, mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1), mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), true, true);
-    ui_->registrationCoronalPreview->setRasMapping(QStringLiteral("coronal"), ap, mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1), mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), false, true);
-    ui_->registrationAxialPreview->setRasMapping(QStringLiteral("axial"), is, mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1), mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1), false, true);
-    treatmentSagittalPreview_->setRasMapping(QStringLiteral("sagittal"), lr, mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1), mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), true, true);
-    treatmentCoronalPreview_->setRasMapping(QStringLiteral("coronal"), ap, mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1), mriAxes_.dimIS(0), mriAxes_.dimIS(mriAxes_.dimIS.size() - 1), false, true);
-    treatmentAxialPreview_->setRasMapping(QStringLiteral("axial"), is, mriAxes_.dimLR(0), mriAxes_.dimLR(mriAxes_.dimLR.size() - 1), mriAxes_.dimAP(0), mriAxes_.dimAP(mriAxes_.dimAP.size() - 1), false, true);
+                                     axisEdgesMm(mriAxes_.dimLR).first, axisEdgesMm(mriAxes_.dimLR).second,
+                                     axisEdgesMm(mriAxes_.dimAP).first, axisEdgesMm(mriAxes_.dimAP).second, false, true);
+    ui_->registrationSagittalPreview->setRasMapping(QStringLiteral("sagittal"), lr, axisEdgesMm(mriAxes_.dimAP).first, axisEdgesMm(mriAxes_.dimAP).second, axisEdgesMm(mriAxes_.dimIS).first, axisEdgesMm(mriAxes_.dimIS).second, true, true);
+    ui_->registrationCoronalPreview->setRasMapping(QStringLiteral("coronal"), ap, axisEdgesMm(mriAxes_.dimLR).first, axisEdgesMm(mriAxes_.dimLR).second, axisEdgesMm(mriAxes_.dimIS).first, axisEdgesMm(mriAxes_.dimIS).second, false, true);
+    ui_->registrationAxialPreview->setRasMapping(QStringLiteral("axial"), is, axisEdgesMm(mriAxes_.dimLR).first, axisEdgesMm(mriAxes_.dimLR).second, axisEdgesMm(mriAxes_.dimAP).first, axisEdgesMm(mriAxes_.dimAP).second, false, true);
+    treatmentSagittalPreview_->setRasMapping(QStringLiteral("sagittal"), lr, axisEdgesMm(mriAxes_.dimAP).first, axisEdgesMm(mriAxes_.dimAP).second, axisEdgesMm(mriAxes_.dimIS).first, axisEdgesMm(mriAxes_.dimIS).second, true, true);
+    treatmentCoronalPreview_->setRasMapping(QStringLiteral("coronal"), ap, axisEdgesMm(mriAxes_.dimLR).first, axisEdgesMm(mriAxes_.dimLR).second, axisEdgesMm(mriAxes_.dimIS).first, axisEdgesMm(mriAxes_.dimIS).second, false, true);
+    treatmentAxialPreview_->setRasMapping(QStringLiteral("axial"), is, axisEdgesMm(mriAxes_.dimLR).first, axisEdgesMm(mriAxes_.dimLR).second, axisEdgesMm(mriAxes_.dimAP).first, axisEdgesMm(mriAxes_.dimAP).second, false, true);
     const double lrCenter = coordinate(mriAxes_.dimLR, static_cast<int>((mriVolume_.nx - 1) / 2) + 1);
     const double apCenter = coordinate(mriAxes_.dimAP, static_cast<int>((mriVolume_.ny - 1) / 2) + 1);
     const double isCenter = coordinate(mriAxes_.dimIS, static_cast<int>((mriVolume_.nz - 1) / 2) + 1);
@@ -3583,7 +3624,18 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     ui_->pageTitle->setText(QString::fromUtf8(beam::gui::workflowStageName(stage).data()));
     const int stageIndex = static_cast<int>(stage);
     ui_->pageStack->setCurrentIndex(stageIndex <= 3 ? stageIndex : 4);
-    ui_->workflowMessage->setVisible(stage != beam::gui::WorkflowStage::Registration);
+    // Not on Treatment either: that page carries its own status line, and a
+    // second message box under it was the last thing on a crowded page.
+    const bool showsFooter = stage != beam::gui::WorkflowStage::Registration &&
+                             stage != beam::gui::WorkflowStage::TreatmentPlan;
+    ui_->workflowMessage->setVisible(showsFooter);
+    // The space under the stack is the footer line's. With the footer hidden
+    // it is just a blank band at the foot of the page, so give it back.
+    if (ui_->contentLayout) {
+        const QMargins margins = ui_->contentLayout->contentsMargins();
+        ui_->contentLayout->setContentsMargins(margins.left(), margins.top(),
+                                               margins.right(), showsFooter ? 18 : 0);
+    }
     ui_->completeStageButton->setVisible(stage != beam::gui::WorkflowStage::CaseSetup &&
                                          stage != beam::gui::WorkflowStage::SystemCheck &&
                                          stage != beam::gui::WorkflowStage::Imaging &&
@@ -3718,12 +3770,15 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     if (stage == beam::gui::WorkflowStage::Registration && mriLoaded_) {
         showMriPreviews();
         const int row = ui_->registrationTable->currentRow();
-        if (row >= 0) {
+        // Only the FIRST arrival jumps to a fiducial. The three pages share
+        // their slice positions, so re-navigating on every return threw away
+        // wherever the operator had got to -- come back from Treatment and
+        // Imaging was showing a fiducial slice instead of the view just left.
+        // "Return to start" is still there for going back deliberately.
+        if (row >= 0 && registrationStartFiducialRow_ < 0) {
             navigateToRegistrationFiducial(row);
-            if (registrationStartFiducialRow_ < 0) {
-                registrationStartFiducialRow_ = row;
-                ui_->registrationReturnStartButton->setEnabled(true);
-            }
+            registrationStartFiducialRow_ = row;
+            ui_->registrationReturnStartButton->setEnabled(true);
         }
     }
     if (stage != beam::gui::WorkflowStage::Registration) {
@@ -3869,9 +3924,16 @@ void WorkflowWindow::showMessage(const QString& text, bool error) {
     ui_->workflowMessage->setStyleSheet(error
         ? QStringLiteral("padding: 10px; color: #a32018; background: #fdeceb; border-radius: 5px;")
         : QStringLiteral("padding: 10px; color: #12663f; background: #e8f5ed; border-radius: 5px;"));
-    // selectStage hides the footer line on Registration, so a message raised
-    // there lands on a hidden widget. Mirror it onto the page's own result
-    // label, which is where the operator is already reading.
+    // selectStage hides the footer line on Registration and Treatment, so a
+    // message raised there lands on a hidden widget. Mirror it onto the page's
+    // own line, which is where the operator is already reading.
+    if (selectedStage_ == beam::gui::WorkflowStage::TreatmentPlan && sonicationCountdownLabel_) {
+        sonicationCountdownLabel_->setText(text);
+        sonicationCountdownLabel_->setStyleSheet(
+            error ? QStringLiteral("QLabel { color: #ff9b8e; padding: 4px; }")
+                  : QStringLiteral("QLabel { color: #dcebef; padding: 4px; }"));
+        return;
+    }
     if (selectedStage_ != beam::gui::WorkflowStage::Registration || !ui_->registrationResult)
         return;
     if (error) {

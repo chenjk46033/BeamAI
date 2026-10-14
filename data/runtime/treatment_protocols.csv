@@ -147,3 +147,8 @@ Default,21,T1,0.75,240
 Default,22,T2,0.75,300
 Default,23,T3,0.75,300
 Default,24,T1,0.75,240
+Protocol1,1,SCC1,,30
+Protocol1,2,SCC1,,30
+Protocol1,3,SCC2,,30
+Protocol1,4,SCC1,,30
+Protocol1,5,SCC1,,30

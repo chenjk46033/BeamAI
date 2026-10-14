@@ -9,6 +9,7 @@ add_executable(unit_tests
     stimulation_tests.cpp
     mri_tests.cpp
     fiducial_detect_tests.cpp
+    treatment_log_tests.cpp
     treatment_target_store_tests.cpp
     treatment_migration_tests.cpp
     infra_dicom_tests.cpp

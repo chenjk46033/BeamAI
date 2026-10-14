@@ -15,15 +15,16 @@
 //                   in that target's own ordering. A target owns a list.
 //   target entry    a Target List row: a name and its points.
 //   protocol entry  an ordered reference to a target by name, carrying the
-//                   duration that entry runs for. BeamV0's protocols list the
-//                   same target repeatedly with different values, so these
-//                   cannot live only on the target.
-//   plan points     a protocol's own copy of a target's points, taken from the
-//                   Target List when the target first enters the protocol. The
-//                   Target List is a template: editing it afterwards does not
-//                   reach a protocol that already holds a copy, and editing a
-//                   copy does not reach the template or any other protocol.
+//                   duration that entry runs for. Nothing else: a protocol
+//                   names targets and their order, and the parameters stay on
+//                   the target. That is BeamV0's split --
+//                   treatmentProtocolTables holds Name/Duration/Amplitude,
+//                   protocolTables holds the stimParamTable.
 //   session         X/Y/Z placement, per patient. Not here.
+//
+// What was actually delivered is a separate record, not this one: BeamV0 keeps
+// treatmentProtocolTables(i).sessions(visit).Data, a per-visit copy of the
+// schedule that fills in as the visit runs. See TreatmentLog.
 
 namespace beam::gui {
 
@@ -70,11 +71,6 @@ struct TreatmentProtocolEntry {
     // so the amplitude here is the schedule's record, not an override.
     std::optional<double> amplitude;
     std::optional<double> durationSeconds;
-    // This occurrence's own points, copied from the Target List when the entry
-    // was created. Independent of every other entry -- including another entry
-    // in the same protocol scheduling the same target, which is why these live
-    // on the entry rather than beside it keyed by target name.
-    std::vector<TreatmentTargetPoint> points;
 };
 
 struct TreatmentProtocolDefinition {
@@ -89,10 +85,6 @@ public:
     // typo in the data surfaces at load rather than as a silent default.
     void loadTargets(const std::string& path);
     void loadProtocols(const std::string& path);
-    // The per-protocol copies. Missing file is not an error -- data written
-    // before protocols owned their points simply has none, and every protocol
-    // takes a fresh copy of the template the first time it is loaded.
-    void loadPlanPoints(const std::string& path);
 
     const std::vector<TreatmentTarget>& targets() const { return targets_; }
     const std::vector<TreatmentProtocolDefinition>& protocols() const { return protocols_; }
@@ -107,33 +99,22 @@ public:
     // not be sonicated.
     bool setTargetPoints(const std::string& name, std::vector<TreatmentTargetPoint> points);
     // BeamV0's own combination at sonication time
-    // (updateSonicateSettingsForCurrentSonication.m): every row of the target
-    // takes startTime 0 and endTime from the protocol entry's duration, and
-    // keeps its own amplitude. Empty if the target is unknown.
-    std::vector<TreatmentTargetPoint> pointsForSonication(const std::string& protocolName,
-                                                           std::size_t entryIndex,
+    // (updateSonicateSettingsForCurrentSonication.m): every row of the named
+    // target takes startTime 0 and endTime from the schedule's duration, and
+    // keeps its own amplitude. Empty if the target is unknown. The points come
+    // from the target itself -- a protocol holds no copy of them.
+    std::vector<TreatmentTargetPoint> pointsForSonication(const std::string& targetName,
                                                            std::optional<double> durationSeconds) const;
 
-    // One scheduled occurrence's own points, or nullptr if the protocol or the
-    // index is unknown.
-    const std::vector<TreatmentTargetPoint>* entryPoints(const std::string& protocolName,
-                                                          std::size_t entryIndex) const;
-    // Edits one occurrence. Touches nothing else: not the Target List, not
-    // another protocol, and not another entry scheduling the same target.
-    bool setEntryPoints(const std::string& protocolName, std::size_t entryIndex,
-                        std::vector<TreatmentTargetPoint> points);
     // The first entry scheduling this target, or -1. The Treatment page's grid
-    // selects a target rather than an occurrence, so it needs a rule; this is
-    // it, and the page says which entry it is editing.
+    // selects a target rather than an occurrence, so it needs a rule for which
+    // entry's duration applies; this is it.
     int firstEntryForTarget(const std::string& protocolName, const std::string& targetName) const;
 
     // Writes the current state back in the same format loadTargets /
     // loadProtocols read. Throws std::runtime_error if the path is unwritable.
     void saveTargets(const std::string& path) const;
     void saveProtocols(const std::string& path) const;
-    // Writes only the copies for targets a protocol still schedules, so a
-    // target dropped from a protocol does not leave its points behind.
-    void savePlanPoints(const std::string& path) const;
 
     bool addTarget(const TreatmentTarget& target);
     bool removeTarget(const std::string& name);
@@ -161,10 +142,6 @@ public:
     std::vector<std::string> danglingTargetNames() const;
 
 private:
-    // Gives every entry a copy of its target's template points if it has none
-    // yet. Never overwrites, so it is safe after any load.
-    void snapshotMissingPlanPoints();
-
     std::vector<TreatmentTarget> targets_;
     std::vector<TreatmentProtocolDefinition> protocols_;
     std::map<std::string, std::size_t> targetIndex_;

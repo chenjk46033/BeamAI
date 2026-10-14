@@ -37,7 +37,7 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
                                                QWidget* parent)
     : QDialog(parent), page_(page), store_(std::move(store)) {
     const bool targetsPage = page == Page::Targets;
-    setWindowTitle(targetsPage ? QStringLiteral("Target List Template")
+    setWindowTitle(targetsPage ? QStringLiteral("Target List")
                                : QStringLiteral("Manage protocols"));
     setModal(true);
     resize(targetsPage ? 900 : 1180, 620);
@@ -72,23 +72,22 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
 }
 
 
-// One points table serves both pages. On Targets it edits the Target List's
-// template; on Protocols it edits the selected protocol's own copy. The widget
-// and the editing are identical -- only where the rows come from and go to.
+// The points table belongs to the Target List page. A protocol holds no points
+// of its own, so there is nothing of this kind to edit on the Protocols page.
 
 
 
 
 
 // Reads the table back rather than tracking single cells: the table is small,
-// and a partial write would leave the template disagreeing with what is shown.
+// and a partial write would leave the store disagreeing with what is shown.
 
 // One pane: the protocol is chosen above, and everything it schedules is one
-// table. A row is a scheduled target carrying both its entry's duration and
-// this protocol's own copy of that target's parameters, because to an operator
-// reading a schedule those are one thing. Rows drag to reorder.
-// One pane, like the schedule: every target in the template and every point it
-// defines, in one table, editable in place. A target with several points
+// table. A row names a target and says how long it runs for -- the parameters
+// are the target's own and are edited on the Target List page. Rows drag to
+// reorder.
+// One pane, like the schedule: every target in the Target List and every point
+// it defines, in one table, editable in place. A target with several points
 // contributes several rows and repeats its name.
 void TreatmentLibraryDialog::setSaveHandler(
     std::function<void(const beam::gui::TreatmentTargetStore&)> handler) {
@@ -166,15 +165,16 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
         for (const auto& protocol : store_.protocols())
             for (const auto& entry : protocol.entries)
                 if (entry.target == name.toStdString()) ++scheduled;
-        // Protocols that already took this target keep it: they hold their own
-        // copy, so deleting the template entry does not disturb a plan.
+        // A protocol holds only the name, so deleting the target it refers to
+        // leaves that entry with nothing to sonicate. Say so, with the count,
+        // rather than removing the entries silently.
         const QString question =
             scheduled > 0
-                ? QStringLiteral("Delete \"%1\" from the template? %2 schedule entr%3 already "
-                                 "hold their own copy and are not affected.")
+                ? QStringLiteral("Delete \"%1\"? %2 schedule entr%3 still name it and will have "
+                                 "no target to sonicate.")
                       .arg(name).arg(scheduled).arg(scheduled == 1 ? QStringLiteral("y")
                                                                    : QStringLiteral("ies"))
-                : QStringLiteral("Delete \"%1\" from the template?").arg(name);
+                : QStringLiteral("Delete \"%1\" from the Target List?").arg(name);
         if (QMessageBox::question(this, QStringLiteral("Delete target"), question) !=
             QMessageBox::Yes)
             return;
@@ -290,12 +290,14 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
     top->addStretch(1);
     outer->addLayout(top);
 
-    entryTable_ = new QTableWidget(0, 11, page);
-    entryTable_->setHorizontalHeaderLabels(
-        {QStringLiteral("#"), QStringLiteral("Target"), QStringLiteral("Duration (s)"),
-         QStringLiteral("Show"), QStringLiteral("Amplitude"), QStringLiteral("Start (s)"),
-         QStringLiteral("End (s)"), QStringLiteral("Burst dur (s)"), QStringLiteral("Burst int (s)"),
-         QStringLiteral("Pulse dur (s)"), QStringLiteral("Pulse int (s)")});
+    // Number, Name, Duration, Amplitude -- the columns BeamV0's
+    // treatmentProtocolTables(i).blank.Data actually carries. Burst and pulse
+    // values are not here because a protocol does not own them: they live on
+    // the target, in protocolTables, and are edited on the Target List page.
+    entryTable_ = new QTableWidget(0, 4, page);
+    entryTable_->setHorizontalHeaderLabels({QStringLiteral("#"), QStringLiteral("Target"),
+                                            QStringLiteral("Duration (s)"),
+                                            QStringLiteral("Amplitude")});
     entryTable_->horizontalHeader()->setStretchLastSection(true);
     entryTable_->verticalHeader()->setVisible(false);
     entryTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -421,40 +423,20 @@ void TreatmentLibraryDialog::reloadEntries() {
             order->setFlags(order->flags() & ~Qt::ItemIsEditable);
             entryTable_->setItem(row, 0, order);
 
+            // Editable: changing which target a row schedules is the main edit
+            // this table exists for. commitScheduleRow refuses a name the
+            // Target List does not define rather than storing a dangling one.
             auto* name = new QTableWidgetItem(target);
-            name->setFlags(name->flags() & ~Qt::ItemIsEditable);
+            name->setToolTip(QStringLiteral("A name from the Target List"));
             entryTable_->setItem(row, 1, name);
 
             entryTable_->setItem(row, 2,
                                  new QTableWidgetItem(QString::number(
                                      entry.durationSeconds.value_or(30.0), 'f', 1)));
 
-            const std::vector<beam::gui::TreatmentTargetPoint>* owned =
-                store_.entryPoints(protocol.toStdString(), static_cast<std::size_t>(row));
-            if (owned == nullptr || owned->empty()) {
-                for (int column = 3; column < entryTable_->columnCount(); ++column) {
-                    auto* blank = new QTableWidgetItem(QStringLiteral("-"));
-                    blank->setFlags(blank->flags() & ~Qt::ItemIsEditable);
-                    entryTable_->setItem(row, column, blank);
-                }
-                continue;
-            }
-            const beam::gui::TreatmentTargetPoint& point = owned->front();
-
-            auto* show = new QTableWidgetItem;
-            show->setFlags((show->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
-            show->setCheckState(point.show ? Qt::Checked : Qt::Unchecked);
-            entryTable_->setItem(row, 3, show);
-
-            const double values[] = {point.amplitude,
-                                     point.startTimeSeconds,
-                                     point.endTimeSeconds,
-                                     point.burstDurationSeconds,
-                                     point.burstIntervalSeconds,
-                                     point.pulseDurationSeconds,
-                                     point.pulseIntervalSeconds};
-            for (int i = 0; i < 7; ++i)
-                entryTable_->setItem(row, i + 4, new QTableWidgetItem(QString::number(values[i])));
+            entryTable_->setItem(row, 3,
+                                 new QTableWidgetItem(QString::number(
+                                     entry.amplitude.value_or(0.75), 'f', 2)));
         }
     }
     reloadingPoints_ = false;
@@ -468,39 +450,36 @@ void TreatmentLibraryDialog::commitScheduleRow(int row) {
     const auto* definition = store_.findProtocol(protocol.toStdString());
     if (definition == nullptr || row < 0 || row >= static_cast<int>(definition->entries.size()))
         return;
-    const std::string target = definition->entries[static_cast<std::size_t>(row)].target;
 
     std::vector<beam::gui::TreatmentProtocolEntry> entries = definition->entries;
+    beam::gui::TreatmentProtocolEntry& entry = entries[static_cast<std::size_t>(row)];
+    bool rejected = false;
+    if (const QTableWidgetItem* cell = entryTable_->item(row, 1)) {
+        const QString typed = cell->text().trimmed();
+        if (store_.findTarget(typed.toStdString()) != nullptr) {
+            entry.target = typed.toStdString();
+        } else if (typed != QString::fromStdString(entry.target)) {
+            // Storing it would leave the protocol naming something that cannot
+            // be sonicated, which only shows up later as a dangling warning.
+            QMessageBox::warning(this, QStringLiteral("Unknown target"),
+                                 QStringLiteral("\"%1\" is not in the Target List. Add it there "
+                                                "first, or use one of its names.")
+                                     .arg(typed));
+            rejected = true;
+        }
+    }
     if (const QTableWidgetItem* cell = entryTable_->item(row, 2)) {
         bool ok = false;
         const double seconds = cell->text().toDouble(&ok);
-        if (ok) entries[static_cast<std::size_t>(row)].durationSeconds = seconds;
+        if (ok) entry.durationSeconds = seconds;
+    }
+    if (const QTableWidgetItem* cell = entryTable_->item(row, 3)) {
+        bool ok = false;
+        const double amplitude = cell->text().toDouble(&ok);
+        if (ok) entry.amplitude = amplitude;
     }
     store_.setProtocolEntries(protocol.toStdString(), std::move(entries));
-
-    const std::vector<beam::gui::TreatmentTargetPoint>* owned =
-        store_.entryPoints(protocol.toStdString(), static_cast<std::size_t>(row));
-    if (owned == nullptr || owned->empty()) return;
-    std::vector<beam::gui::TreatmentTargetPoint> points = *owned;
-    beam::gui::TreatmentTargetPoint& point = points.front();
-    if (const QTableWidgetItem* show = entryTable_->item(row, 3))
-        point.show = show->checkState() == Qt::Checked;
-    double* const fields[] = {&point.amplitude,
-                              &point.startTimeSeconds,
-                              &point.endTimeSeconds,
-                              &point.burstDurationSeconds,
-                              &point.burstIntervalSeconds,
-                              &point.pulseDurationSeconds,
-                              &point.pulseIntervalSeconds};
-    for (int i = 0; i < 7; ++i) {
-        const QTableWidgetItem* cell = entryTable_->item(row, i + 4);
-        if (cell == nullptr) continue;
-        bool ok = false;
-        const double value = cell->text().toDouble(&ok);
-        if (ok) *fields[i] = value;
-    }
-    store_.setEntryPoints(protocol.toStdString(), static_cast<std::size_t>(row),
-                          std::move(points));
+    if (rejected) reloadEntries();  // put the cell back to what is stored
 }
 
 // After a drag: the table's row order is the schedule's new order.

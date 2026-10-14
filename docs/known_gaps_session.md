@@ -19,6 +19,23 @@ ignored. The Imaging tab's "Load Beam MRI session…" button is that import, not
 session restore, and is kept as a standing reminder that the real thing is
 still missing.
 
+The operator's manual states the requirement directly:
+
+> The software logs the position, stimulation parameters, and correction values
+> for every sonication during a stimulation session. Saving parameters will
+> export this log, the registration values, and all other settings to a .mat
+> file in a user-chosen directory. Subsequent sessions can load that saved
+> session data back into the GUI by clicking 'File->Load Subjects'.
+
+The first sentence is built. `TreatmentLog` records position, the parameters as
+sent, start and end timestamps, the operator's responses and the correction
+values, as one row per scheduled sonication per visit.
+
+The second and third are not. Nothing writes `.mat`, and `Save Log...` exports
+the log alone, as CSV. Writing a session means writing MATLAB `table` objects
+into the file's `#subsystem#` -- which is also why `loadLegacyBeamPlan` cannot
+read them, and why the protocol tables had to be exported from MATLAB by hand.
+
 What a session carries that nothing in BeamAI currently persists:
 
 | | Where it lives in BeamV0 | BeamAI today |
@@ -27,8 +44,9 @@ What a session carries that nothing in BeamAI currently persists:
 | Fiducials | `fiducialMarkerTable` | `Save fiducials…` / `Import fiducials…` CSV |
 | Lock positions | `frame` | in the same CSV |
 | Registered array | `arrayData`, `originArrayData` | recomputed from the fiducials |
-| Sonication protocols | `protocolTables`, `treatmentProtocolTables` | not persisted |
-| Correction / transmit data | `txRxSubject`, `txRxFreeField` | not persisted |
+| Sonication protocols | `protocolTables`, `treatmentProtocolTables` | mirrored into `data/treatment_targets.csv` and `treatment_protocols.csv` |
+| What each sonication delivered | `sessions(visit).Data`, exported by `setLogInfoToCSV.m` | `treatment_log.csv`, in that function column shape, plus a Save Log export |
+| Correction / transmit data | `txRxSubject`, `txRxFreeField` | the per-sonication values reach the log (AttenuationVal, DC); the measured transmit arrays do not |
 | Subject and visit identity | `Subject`, `visitNumber`, `sessionNumber`, `CRF` | not persisted |
 | Targets and anatomy | `target`, `anatomy`, `MNI`, `focusImage` | not persisted |
 

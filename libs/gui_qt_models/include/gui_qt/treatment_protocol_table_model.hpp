@@ -25,6 +25,8 @@ struct TreatmentProtocolRow {
     QString parameters = QStringLiteral("X:0,Y:0,Z:0,BD,BI,PD,PI");
     double responsePain = 0.0;
     double responseMood = 0.0;
+    // When the sonication finished, as a time of day. Empty until it has.
+    QString completed;
     QString notes = QStringLiteral("notes");
 };
 
@@ -40,6 +42,7 @@ public:
         kParameters,
         kResponsePain,
         kResponseMood,
+        kCompleted,
         kNotes,
         kColumnCount
     };
