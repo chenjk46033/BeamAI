@@ -55,3 +55,12 @@ axes for this same series (ratio 1.93). See
 `docs/known_gaps_mri.md` -- the registration results are unaffected, because
 fiducial and array coordinates are millimetres in the patient frame and never
 pass through the voxel storage order.
+
+## beamv0_protocol_tables.csv
+
+`sys.treatmentProtocolTables(i).blank.Data` from
+`../DefaultSubjectV0/defaultSubjectMNIV1.mat` -- the six protocols BeamV0
+loads, 146 entries. Exported from MATLAB because the tables are MCOS objects
+matio cannot resolve, and checked in so the parity test never skips.
+`data/treatment_protocols.csv` is built from this file and compared against it
+by `TreatmentMigration.ProtocolsMatchBeamV0EntryForEntry`.

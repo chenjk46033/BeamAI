@@ -200,7 +200,7 @@ private:
     // 80% of the shared Imaging/Registration height: the Treatment page also
     // carries the plan body and the execution controls below these viewers, and
     // at the full height the Sonicate row fell off the bottom of a 1080p screen.
-    static constexpr int kTreatmentViewerHeight = 388;
+    static constexpr int kTreatmentViewerHeight = 420;
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;

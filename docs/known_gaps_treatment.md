@@ -1,11 +1,12 @@
 # Known gaps: treatment plan
 
-## The Target List's parameters are not verified against BeamV0
+## The Target List and the protocols now mirror BeamV0
 
-**Status: names and order closed; 3 of 12 parameter rows verified.** The Target
-List's names and order now match BeamV0 and are pinned by a test. The parameter
-values are being read off BeamV0's grid one target at a time; three are done,
-nine are still a guess, and the protocol schedule is untouched.
+**Status: closed.** The twelve targets with all their parameters come from
+`sys.protocolTables`, and the six protocols with all 146 entries from
+`sys.treatmentProtocolTables`, both out of `defaultSubjectMNIV1.mat` and both
+pinned by tests. `data/` is a mirror of what BeamV0 loads, not of the
+`TreatmentProtocols/*.csv` files it ignores.
 
 ### The values are per-target, and are not the protocol CSVs'
 
@@ -158,34 +159,31 @@ which skips when the sibling checkout is absent.
 
 ### What is still missing
 
-**The protocol schedule.** `treatmentProtocolTables(i).blank.Data` and
-`.sessions(j).Data` are MATLAB `table` objects, stored as MCOS references under
-the file's `#subsystem#`; matio resolves them to nothing, and
-`loadLegacyBeamPlan` reports that as `tablePayloadsUnreadable` rather than
-returning a plausible-looking blank. So `data/treatment_protocols.csv` -- the
-Name/Duration/Amplitude of all 208 entries -- is still only verified against
-the BEAM CSVs, which BeamV0 does not read.
+**`.sessions(j).Data` -- the per-visit schedules.** Each protocol carries 15 of
+them beside the `blank` that is mirrored here, and nothing reads them yet.
+BeamAI's Visit control adds a visit but does not load one.
 
-That check is worth something: it is entry-for-entry and mutation-tested, and
-it caught a UTF-8 BOM discrepancy between the PowerShell migration and a C++
-reader. But the per-target values turned out to differ from the CSVs entirely,
-so the same could be true here and the test would not show it.
+**Still unreadable in C++.** `blank.Data` and `.sessions(j).Data` are MATLAB
+`table` objects, stored as MCOS references under the file's `#subsystem#`;
+matio resolves them to nothing and `loadLegacyBeamPlan` reports that as
+`tablePayloadsUnreadable`. Both the targets and the protocols were therefore
+exported from MATLAB once and checked in -- `testdata/beamv0_protocol_tables.csv`
+for the schedules, `kVerifiedRows` for the target parameters. Re-exporting is
+the way to refresh them; the application reads neither MATLAB nor the `.mat`.
 
-**Nine of the twelve target rows.** SCC3, SCC5, SCC6 and aMCC1-aMCC6 have never
-been read off BeamV0, and SCC2 showed that they cannot be inferred from the
-three that have. They currently hold `createStimParamTable.m`'s defaults, which
-is a guess that is already known to be wrong for at least one target in three.
+The export settled two things the CSV comparison had wrong. SCC2's PD had been
+read off the running GUI as 0.05 against PI 0.01 -- a 500% duty cycle; the
+stored table says 0.005. And seven of the twelve targets did not hold
+`createStimParamTable.m`'s defaults at all: BD/BI cycle 0.03/0.7, 0.06/1.1,
+0.09/1.4 every three targets.
 
 ### To close this
 
-1. Read the remaining nine targets' rows off BeamV0's stimParamTable grid and
-   add them to `kVerifiedRows`. Reading one target at a time is 9 more
-   round-trips, so this is now the point where the export is cheaper.
-2. Run `matlab_verify/export_treatment_tables.m`. It dumps every
-   `stimParamTableData` and every protocol table at once, which settles both
-   remaining items; then repoint `ProtocolsMatchBeamV0EntryForEntry` at the
-   export so it becomes a parity test rather than a transcription check.
-3. Decide what to do with `MDD`, `PainACCTwoTargets` and `PainVPL`: BeamV0
+1. Export the protocol tables the same way `stimParamTableData` was exported,
+   then repoint `ProtocolsMatchBeamV0EntryForEntry` at the export so it becomes
+   a parity test rather than a transcription check against CSVs BeamV0 never
+   reads.
+2. Decide what to do with `MDD`, `PainACCTwoTargets` and `PainVPL`: BeamV0
    ships a CSV for each but never loads it, and each schedules targets no
    Target List defines. They are the source of all 16 dangling names.
 

@@ -1,16 +1,14 @@
-// Checks data/*.csv against BeamV0's BEAM/.../TreatmentProtocols/*.csv.
+// Checks data/*.csv against what BeamV0 actually runs with: sys.protocolTables
+// and sys.treatmentProtocolTables out of defaultSubjectMNIV1.mat, exported to
+// testdata/beamv0_protocol_tables.csv and encoded in kVerifiedRows below.
 //
-// IMPORTANT, AND THE REASON THIS IS NOT YET A PARITY TEST: those CSVs are not
-// what BeamV0 runs with. initTreatmentProtocolTables.m takes sys's own
-// treatmentProtocolTables when the loaded session has them, which
-// defaultSubjectMNIV1.mat does -- so BeamV0 reads no CSV at startup. Its
-// fallback, getTreatmentProtocolTable.m, resolves what('Diadem\...') to the
-// sibling DiademV0 checkout, whose files differ from these and cover only 6
-// of the 9 protocols.
+// Not the BEAM/.../TreatmentProtocols/*.csv files: initTreatmentProtocolTables.m
+// takes sys's own treatmentProtocolTables when the loaded session has them,
+// which the default subject does, so BeamV0 reads no CSV at startup. Those
+// files also carry three protocols -- MDD, PainACCTwoTargets, PainVPL -- that
+// have no entry in sys and so never reach BeamV0's dropdown. They are still
+// read here, by the two tests that exist to say how the CSVs and sys differ.
 //
-// So this proves the migration transcribed the BEAM CSVs faithfully, and
-// nothing more. The authoritative target parameters live in
-// sys.protocolTables / sys.treatmentProtocolTables and are NOT yet compared.
 // See docs/known_gaps_treatment.md.
 
 #include <algorithm>
@@ -115,7 +113,33 @@ std::vector<SourceEntry> readBeamV0Protocols() {
     return entries;
 }
 
+// The six protocols BeamV0 loads, from the checked-in export. Columns are
+// protocol,order,target,amplitude,duration,parameters -- amplitude before
+// duration, the opposite of the BEAM CSVs.
+std::vector<SourceEntry> readBeamV0ProtocolTables() {
+    std::vector<SourceEntry> entries;
+    std::ifstream stream(BEAM_V0_PROTOCOL_TABLES_CSV);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const std::string stripped = trim(line);
+        if (stripped.empty() || stripped[0] == '#') continue;
+        const std::vector<std::string> fields = splitRow(stripped);
+        if (fields.size() < 6 || fields[0] == "protocol") continue;
+        SourceEntry entry;
+        entry.protocol = fields[0];
+        entry.order = std::stoi(fields[1]);
+        entry.target = fields[2];
+        entry.amplitude = fields[3];
+        entry.duration = fields[4];
+        entry.parameters = fields[5];
+        entries.push_back(std::move(entry));
+    }
+    return entries;
+}
+
 bool sameNumber(const std::string& text, double value) {
+
     try {
         return std::abs(std::stod(text) - value) < 1e-9;
     } catch (const std::exception&) {
@@ -133,8 +157,8 @@ beam::gui::TreatmentTargetStore shippedStore() {
 }  // namespace
 
 TEST(TreatmentMigration, ProtocolsMatchBeamV0EntryForEntry) {
-    const std::vector<SourceEntry> source = readBeamV0Protocols();
-    if (source.empty()) GTEST_SKIP() << "needs the BeamV0 checkout at " << BEAM_V0_PROTOCOL_DIR;
+    const std::vector<SourceEntry> source = readBeamV0ProtocolTables();
+    ASSERT_EQ(source.size(), 146u) << "testdata/beamv0_protocol_tables.csv is the export";
 
     const beam::gui::TreatmentTargetStore store = shippedStore();
 
@@ -186,52 +210,51 @@ TEST(TreatmentMigration, TheProtocolCsvsCarryOneParameterStringForEveryEntry) {
     EXPECT_EQ(*distinct.begin(), "X:0,Y:0,Z:0,0.03,0.7,0.005,0.010");
 }
 
-// What has actually been checked against BeamV0, row by row, by selecting the
-// target in BeamV0's Target List (protocol PainACC) and reading its
-// stimParamTable grid. Everything else in data/treatment_targets.csv is still
-// a guess, and kUnverifiedTargets below is what says so.
+// All twelve, read out of sys.protocolTables(i).stimParamTableData in
+// defaultSubjectMNIV1.mat -- each target's own stored grid, which is what
+// BeamV0 displays when the target is selected. This replaces reading three of
+// them off the running GUI, which is also where SCC2's PD was misread as 0.05
+// (a 500% duty cycle against PI 0.01); the stored table says 0.005.
 //
 // The per-target parameters are NOT the protocol CSVs' -- those carry one
-// parameter string for all 208 entries, while SCC2's burst and pulse values
-// differ from SCC1's. They are also not uniformly
-// createStimParamTable.m's defaults: SCC1 and SCC4 happen to match it and SCC2
-// does not.
+// parameter string for all 208 entries, while BD and BI here cycle
+// 0.03/0.7, 0.06/1.1, 0.09/1.4 every three targets. They are not uniformly
+// createStimParamTable.m's defaults either: that is the 0.03/0.7/0.005/0.01
+// row, which only four of the twelve carry.
 //
-// BD, BI, PD and PI are the trustworthy columns here: no write path touches
-// them, so they can only be the stored table's own. amplitude and endTime are
-// both confounded under PainACC, which schedules every target at 0.5 / 30 --
-// the same values observed. endTime is genuinely written from the schedule
-// (updateSonicateSettingsForCurrentSonication.m), and while no live code
-// writes amplitude from it, these readings cannot show that on their own. A
-// protocol that schedules a different amplitude (Default has SCC1 at 0.75)
-// would separate the two.
+// amplitude, startTime and endTime are uniform across the twelve and equal
+// both the defaults and what PainACC schedules, so these rows cannot show
+// whether a schedule writes amplitude. The source code can: its one call site,
+// setStimulationAmplitudeFromResponses, is commented out.
 namespace {
 
 struct VerifiedRow {
     const char* name;
     double amplitude, startTime, endTime, bd, bi;
-    // Nullopt where the reading still needs confirming.
-    std::optional<double> pd;
+    double pd;
     double pi;
 };
 
-// SCC2's PD read as 0.05 against PI 0.01 -- a 500% pulse duty cycle, which
-// getISPTAFromStimParams.m would turn into a nonsense intensity. Held back
-// until re-read rather than encoded.
+// SCC3 is the one target whose pulse values differ from every other: PD 0.001
+// against PI 0.005, where the rest carry 0.005 against 0.01.
 const VerifiedRow kVerifiedRows[] = {
     {"SCC1", 0.5, 0.0, 30.0, 0.03, 0.70, 0.005, 0.01},
-    {"SCC2", 0.5, 0.0, 30.0, 0.06, 1.10, std::nullopt, 0.01},
+    {"SCC2", 0.5, 0.0, 30.0, 0.06, 1.10, 0.005, 0.01},
+    {"SCC3", 0.5, 0.0, 30.0, 0.09, 1.40, 0.001, 0.005},
     {"SCC4", 0.5, 0.0, 30.0, 0.03, 0.70, 0.005, 0.01},
+    {"SCC5", 0.5, 0.0, 30.0, 0.06, 1.10, 0.005, 0.01},
+    {"SCC6", 0.5, 0.0, 30.0, 0.09, 1.40, 0.005, 0.01},
+    {"aMCC1", 0.5, 0.0, 30.0, 0.03, 0.70, 0.005, 0.01},
+    {"aMCC2", 0.5, 0.0, 30.0, 0.06, 1.10, 0.005, 0.01},
+    {"aMCC3", 0.5, 0.0, 30.0, 0.09, 1.40, 0.005, 0.01},
+    {"aMCC4", 0.5, 0.0, 30.0, 0.03, 0.70, 0.005, 0.01},
+    {"aMCC5", 0.5, 0.0, 30.0, 0.06, 1.10, 0.005, 0.01},
+    {"aMCC6", 0.5, 0.0, 30.0, 0.09, 1.40, 0.005, 0.01},
 };
-
-// Nine of the twelve have never been read off BeamV0. Shrinking this list is
-// the work; it must not grow silently.
-const char* const kUnverifiedTargets[] = {"SCC3",  "SCC5",  "SCC6",  "aMCC1", "aMCC2",
-                                          "aMCC3", "aMCC4", "aMCC5", "aMCC6"};
 
 }  // namespace
 
-TEST(TreatmentMigration, VerifiedTargetsMatchBeamV0sStimParamGrid) {
+TEST(TreatmentMigration, EveryTargetMatchesBeamV0sStoredStimParamGrid) {
     const beam::gui::TreatmentTargetStore store = shippedStore();
     ASSERT_EQ(store.targets().size(), 12u);
 
@@ -248,40 +271,54 @@ TEST(TreatmentMigration, VerifiedTargetsMatchBeamV0sStimParamGrid) {
         EXPECT_DOUBLE_EQ(point.endTimeSeconds, expected.endTime);
         EXPECT_DOUBLE_EQ(point.burstDurationSeconds, expected.bd);
         EXPECT_DOUBLE_EQ(point.burstIntervalSeconds, expected.bi);
-        if (expected.pd) EXPECT_DOUBLE_EQ(point.pulseDurationSeconds, *expected.pd);
+        EXPECT_DOUBLE_EQ(point.pulseDurationSeconds, expected.pd);
         EXPECT_DOUBLE_EQ(point.pulseIntervalSeconds, expected.pi);
     }
 
-    // The rest exist and are sonicable, but their values are unchecked.
-    for (const char* name : kUnverifiedTargets) {
-        SCOPED_TRACE(name);
-        const beam::gui::TreatmentTarget* target = store.findTarget(name);
-        ASSERT_NE(target, nullptr);
-        EXPECT_FALSE(target->points.empty());
-    }
-    EXPECT_EQ(std::size(kVerifiedRows) + std::size(kUnverifiedTargets), store.targets().size())
-        << "a target is in neither list; see docs/known_gaps_treatment.md";
+    EXPECT_EQ(std::size(kVerifiedRows), store.targets().size())
+        << "a target has no row above; see docs/known_gaps_treatment.md";
 }
 
-// The split the Target List creates: the BEAM CSVs schedule 28 distinct names,
-// the Target List defines 12, and the other 16 are reachable through a protocol
-// but not placeable.
-TEST(TreatmentMigration, TheProtocolCsvsNameSixteenTargetsNoTargetListDefines) {
-    const std::vector<SourceEntry> source = readBeamV0Protocols();
-    if (source.empty()) GTEST_SKIP() << "needs the BeamV0 checkout at " << BEAM_V0_PROTOCOL_DIR;
-
+// BeamV0 ships protocols that schedule targets its own Target List does not
+// define: T1-T6 and four NACC/Nacc spellings, ten of the 22 names the six
+// protocols between them name. Default is one of them -- its rows 15-24 are
+// T1/T2/T3. So the dangling warning BeamAI raises is reporting BeamV0's own
+// inconsistency, not a migration error; BeamV0 just does not warn.
+TEST(TreatmentMigration, BeamV0sOwnProtocolsScheduleTenTargetsItNeverDefines) {
+    const std::vector<SourceEntry> source = readBeamV0ProtocolTables();
     std::set<std::string> scheduled;
     for (const SourceEntry& entry : source) scheduled.insert(entry.target);
-    EXPECT_EQ(scheduled.size(), 28u);
+    EXPECT_EQ(scheduled.size(), 22u);
 
     const beam::gui::TreatmentTargetStore store = shippedStore();
     std::vector<std::string> notInTheTargetList;
     for (const std::string& name : scheduled)
         if (store.findTarget(name) == nullptr) notInTheTargetList.push_back(name);
 
-    EXPECT_EQ(notInTheTargetList.size(), 16u)
+    EXPECT_EQ(notInTheTargetList.size(), 10u)
         << "first is " << (notInTheTargetList.empty() ? std::string("none") : notInTheTargetList.front());
     EXPECT_EQ(store.danglingTargetNames().size(), notInTheTargetList.size());
+}
+
+// The three the CSVs carry and sys does not. They are deliberately absent from
+// data/treatment_protocols.csv: BeamV0 cannot reach them, so neither should we.
+TEST(TreatmentMigration, TheCsvOnlyProtocolsAreNotMirrored) {
+    const std::vector<SourceEntry> csvs = readBeamV0Protocols();
+    if (csvs.empty()) GTEST_SKIP() << "needs the BeamV0 checkout at " << BEAM_V0_PROTOCOL_DIR;
+
+    std::set<std::string> csvProtocols;
+    for (const SourceEntry& entry : csvs) csvProtocols.insert(entry.protocol);
+    std::set<std::string> loaded;
+    for (const SourceEntry& entry : readBeamV0ProtocolTables()) loaded.insert(entry.protocol);
+
+    std::vector<std::string> csvOnly;
+    std::set_difference(csvProtocols.begin(), csvProtocols.end(), loaded.begin(), loaded.end(),
+                        std::back_inserter(csvOnly));
+    EXPECT_EQ(csvOnly, (std::vector<std::string>{"MDD", "PainACCTwoTargets", "PainVPL"}));
+
+    const beam::gui::TreatmentTargetStore store = shippedStore();
+    for (const std::string& name : csvOnly) EXPECT_EQ(store.findProtocol(name), nullptr) << name;
+    EXPECT_EQ(store.protocols().size(), loaded.size());
 }
 
 // The Target List BeamV0 actually carries, read from a session's own sys

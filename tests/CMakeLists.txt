@@ -57,6 +57,9 @@ target_compile_definitions(unit_tests PRIVATE
     # BeamV0's own protocol tables, the migration source for data/*.csv.
     # A sibling checkout, so the comparison test skips when it is absent.
     BEAM_V0_PROTOCOL_DIR="${CMAKE_SOURCE_DIR}/../BeamV0/GUIMatlab/BEAM/GUI/SonicationTab/TreatmentProtocols"
+    # sys.treatmentProtocolTables exported from the default subject: the six
+    # protocols BeamV0 loads. Checked in, so this one never skips.
+    BEAM_V0_PROTOCOL_TABLES_CSV="${CMAKE_SOURCE_DIR}/testdata/beamv0_protocol_tables.csv"
     # The shipped default subject, whose sys carries the authoritative Target
     # List and protocol names. Same sibling checkout, same skip-if-absent.
     BEAM_DEFAULT_SUBJECT_MAT="${CMAKE_SOURCE_DIR}/../DefaultSubjectV0/defaultSubjectMNIV1.mat"

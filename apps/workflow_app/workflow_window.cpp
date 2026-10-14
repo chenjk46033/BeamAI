@@ -1922,9 +1922,11 @@ void WorkflowWindow::syncMriViewerHeights() {
     // because the viewers are Fixed and so raise the window's own minimum,
     // which raises the leftover space, which raises the height again (the
     // window grew ~60px per tab switch until it outgrew the screen).
-    // 80% of the shared height: this page carries the plan and the execution
-    // controls as well, so its viewers give up the difference.
-    const int treatmentHeight = std::min(height * 65 / 100, kTreatmentViewerHeight);
+    // The page carries the plan and the execution controls as well, so its
+    // viewers give up the difference. 80%: the Sonicate body underneath scrolls
+    // and sits at its own minimum, so the slack between that minimum and what
+    // the body currently holds is the viewers to take.
+    const int treatmentHeight = std::min(height * 80 / 100, kTreatmentViewerHeight);
     if (height == ui_->sagittalPreview->minimumHeight() &&
         height == ui_->sagittalPreview->maximumHeight() &&
         treatmentHeight == treatmentSagittalPreview_->minimumHeight() &&

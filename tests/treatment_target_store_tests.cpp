@@ -31,11 +31,13 @@ TEST(TreatmentTargetStore, LoadsTheShippedTargetsAndProtocols) {
     EXPECT_EQ(store.targets().size(), 12u);
     EXPECT_EQ(store.targets().front().name, "SCC1");
     EXPECT_EQ(store.targets().back().name, "aMCC6");
-    EXPECT_EQ(store.protocols().size(), 9u);
+    // The six in sys.treatmentProtocolTables, which is what BeamV0 loads --
+    // not the nine CSV files; see TreatmentMigration.TheCsvOnlyProtocolsAreNotMirrored.
+    EXPECT_EQ(store.protocols().size(), 6u);
 
-    // The nine BEAM protocol CSVs schedule targets no Target List defines, so
-    // those names dangle by design; the count pins which.
-    EXPECT_EQ(store.danglingTargetNames().size(), 16u);
+    // BeamV0 own protocols schedule targets its own Target List does not
+    // define, so those names dangle by design; the count pins which.
+    EXPECT_EQ(store.danglingTargetNames().size(), 10u);
 
     const beam::gui::TreatmentTarget* scc1 = store.findTarget("SCC1");
     ASSERT_NE(scc1, nullptr);
