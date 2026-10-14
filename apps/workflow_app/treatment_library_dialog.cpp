@@ -37,22 +37,12 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
                                                QWidget* parent)
     : QDialog(parent), page_(page), store_(std::move(store)) {
     const bool targetsPage = page == Page::Targets;
-    setWindowTitle(targetsPage ? QStringLiteral("Manage targets")
+    setWindowTitle(targetsPage ? QStringLiteral("Target List Template")
                                : QStringLiteral("Manage protocols"));
     setModal(true);
-    resize(targetsPage ? 980 : 1180, 620);
+    resize(targetsPage ? 900 : 1180, 620);
 
     auto* layout = new QVBoxLayout(this);
-    auto* banner = new QLabel(
-        targetsPage
-            ? QStringLiteral("The Target List is shared across patients. Changes take effect when "
-                             "you save.")
-            : QStringLiteral("Protocols schedule the shared Target List. Changes take effect when "
-                             "you save."),
-        this);
-    banner->setWordWrap(true);
-    layout->addWidget(banner);
-
     auto* body = new QWidget(this);
     if (targetsPage) {
         buildTargetsTab(body);
@@ -61,44 +51,82 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
     }
     layout->addWidget(body, 1);
 
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    auto* footer = new QHBoxLayout;
+    savedNotice_ = new QLabel(this);
+    savedNotice_->setStyleSheet(QStringLiteral("QLabel { color: #5fcb96; }"));
+    footer->addWidget(savedNotice_);
+    footer->addStretch(1);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Close, this);
+    // Save writes and stays open; Close leaves. This dialog edits a copy, so
+    // anything after the last Save simply never lands.
+    connect(buttons, &QDialogButtonBox::accepted, this, [this] {
+        if (saveHandler_) saveHandler_(store_);
+        if (savedNotice_) savedNotice_->setText(QStringLiteral("Saved."));
+    });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    layout->addWidget(buttons);
+    footer->addWidget(buttons);
+    layout->addLayout(footer);
 
     reloadTargets();
-    reloadTargetPoints();
     reloadProtocols();
+}
+
+
+// One points table serves both pages. On Targets it edits the Target List's
+// template; on Protocols it edits the selected protocol's own copy. The widget
+// and the editing are identical -- only where the rows come from and go to.
+
+
+
+
+
+// Reads the table back rather than tracking single cells: the table is small,
+// and a partial write would leave the template disagreeing with what is shown.
+
+// One pane: the protocol is chosen above, and everything it schedules is one
+// table. A row is a scheduled target carrying both its entry's duration and
+// this protocol's own copy of that target's parameters, because to an operator
+// reading a schedule those are one thing. Rows drag to reorder.
+// One pane, like the schedule: every target in the template and every point it
+// defines, in one table, editable in place. A target with several points
+// contributes several rows and repeats its name.
+void TreatmentLibraryDialog::setSaveHandler(
+    std::function<void(const beam::gui::TreatmentTargetStore&)> handler) {
+    saveHandler_ = std::move(handler);
 }
 
 void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
     auto* outer = new QVBoxLayout(page);
-    auto* caption = new QLabel(
-        QStringLiteral("The Target List is a template. A treatment protocol copies a target's "
-                       "points when the target is added to it, so changes here reach only "
-                       "protocols that take the target afterwards."),
-        page);
-    caption->setWordWrap(true);
-    caption->setStyleSheet(QStringLiteral("color: #4a5f69;"));
-    outer->addWidget(caption);
-    auto* layout = new QHBoxLayout;
-    outer->addLayout(layout, 1);
-    targetList_ = new QListWidget(page);
-    layout->addWidget(targetList_, 1);
 
-    auto* column = new QVBoxLayout;
-    auto* add = new QPushButton(QStringLiteral("New"), page);
+    auto* top = new QHBoxLayout;
+    auto* add = new QPushButton(QStringLiteral("New target"), page);
     auto* rename = new QPushButton(QStringLiteral("Rename..."), page);
-    auto* remove = new QPushButton(QStringLiteral("Delete"), page);
-    for (QPushButton* button : {add, rename, remove}) column->addWidget(button);
-    column->addStretch(1);
-    layout->addLayout(column);
+    auto* remove = new QPushButton(QStringLiteral("Delete target"), page);
+    top->addWidget(add);
+    top->addWidget(rename);
+    top->addWidget(remove);
+    top->addStretch(1);
+    outer->addLayout(top);
 
-    // The template's own parameters. Without this the Target List would be
-    // name-only.
-    buildPointsSection(page, outer);
-    connect(targetList_, &QListWidget::currentRowChanged, this,
-            [this](int) { reloadTargetPoints(); });
+    targetTable_ = new QTableWidget(0, 10, page);
+    targetTable_->setHorizontalHeaderLabels(
+        {QStringLiteral("Target"), QStringLiteral("Point"), QStringLiteral("Show"),
+         QStringLiteral("Amplitude"), QStringLiteral("Start Time (s)"),
+         QStringLiteral("End Time (s)"), QStringLiteral("Burst Duration (s)"),
+         QStringLiteral("Burst Interval (s)"), QStringLiteral("Pulse Duration (s)"),
+         QStringLiteral("Pulse Interval (s)")});
+    // Every column sized to its own label, and none stretched: whichever column
+    // takes the slack ends up several times wider than the numbers in it.
+    targetTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    targetTable_->horizontalHeader()->setStretchLastSection(false);
+    targetTable_->verticalHeader()->setVisible(false);
+    targetTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    targetTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    outer->addWidget(targetTable_, 1);
+
+    connect(targetTable_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
+        if (!reloadingPoints_ && item != nullptr) commitTargetRow(item->row());
+    });
 
     connect(add, &QPushButton::clicked, this, [this] {
         std::vector<std::string> taken;
@@ -107,7 +135,6 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
         created.name = uniqueName(QStringLiteral("Target"), taken).toStdString();
         if (!store_.addTarget(created)) return;
         reloadTargets(QString::fromStdString(created.name));
-        reloadEntries();
     });
 
     connect(rename, &QPushButton::clicked, this, [this] {
@@ -125,7 +152,6 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
             return;
         }
         reloadTargets(after.trimmed());
-        reloadEntries();
     });
 
     connect(remove, &QPushButton::clicked, this, [this] {
@@ -144,127 +170,52 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
         // copy, so deleting the template entry does not disturb a plan.
         const QString question =
             scheduled > 0
-                ? QStringLiteral("Delete \"%1\" from the Target List? %2 schedule entr%3 already "
+                ? QStringLiteral("Delete \"%1\" from the template? %2 schedule entr%3 already "
                                  "hold their own copy and are not affected.")
                       .arg(name).arg(scheduled).arg(scheduled == 1 ? QStringLiteral("y")
                                                                    : QStringLiteral("ies"))
-                : QStringLiteral("Delete \"%1\" from the Target List?").arg(name);
+                : QStringLiteral("Delete \"%1\" from the template?").arg(name);
         if (QMessageBox::question(this, QStringLiteral("Delete target"), question) !=
             QMessageBox::Yes)
             return;
         store_.removeTarget(name.toStdString());
         reloadTargets();
-        reloadEntries();
-    });
-}
-
-// One points table serves both pages. On Targets it edits the Target List's
-// template; on Protocols it edits the selected protocol's own copy. The widget
-// and the editing are identical -- only where the rows come from and go to.
-void TreatmentLibraryDialog::buildPointsSection(QWidget* page, QVBoxLayout* outer) {
-    pointCaption_ = new QLabel(page);
-    pointCaption_->setWordWrap(true);
-    outer->addWidget(pointCaption_);
-
-    pointTable_ = new QTableWidget(0, 9, page);
-    pointTable_->setHorizontalHeaderLabels(
-        {QStringLiteral("#"), QStringLiteral("Show"), QStringLiteral("Amplitude"),
-         QStringLiteral("Start (s)"), QStringLiteral("End (s)"), QStringLiteral("Burst dur (s)"),
-         QStringLiteral("Burst int (s)"), QStringLiteral("Pulse dur (s)"),
-         QStringLiteral("Pulse int (s)")});
-    pointTable_->horizontalHeader()->setStretchLastSection(true);
-    pointTable_->verticalHeader()->setVisible(false);
-    pointTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    outer->addWidget(pointTable_, 1);
-
-    auto* pointButtons = new QHBoxLayout;
-    auto* addPoint = new QPushButton(QStringLiteral("Add point"), page);
-    auto* removePoint = new QPushButton(QStringLiteral("Remove point"), page);
-    pointButtons->addStretch(1);
-    pointButtons->addWidget(addPoint);
-    pointButtons->addWidget(removePoint);
-    outer->addLayout(pointButtons);
-
-    connect(pointTable_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem*) {
-        if (!reloadingPoints_) commitTargetPoints();
     });
 
-    connect(addPoint, &QPushButton::clicked, this, [this] {
-        if (pointsOwnerTarget().isEmpty()) return;
-        std::vector<beam::gui::TreatmentTargetPoint> points = currentPoints();
-        // createSonicationUpdateTable.m appends by copying the previous row.
-        points.push_back(points.empty() ? beam::gui::TreatmentTargetPoint{} : points.back());
-        if (writePoints(std::move(points))) reloadTargetPoints();
-    });
 
-    connect(removePoint, &QPushButton::clicked, this, [this] {
-        std::vector<beam::gui::TreatmentTargetPoint> points = currentPoints();
-        const int row = pointTable_->currentRow();
-        if (row < 0 || row >= static_cast<int>(points.size())) return;
-        if (points.size() <= 1) {
-            QMessageBox::warning(this, QStringLiteral("Remove point"),
-                                 QStringLiteral("A target must keep at least one point."));
-            return;
-        }
-        points.erase(points.begin() + row);
-        if (writePoints(std::move(points))) reloadTargetPoints();
-    });
 }
 
-QString TreatmentLibraryDialog::pointsOwnerTarget() const {
-    if (page_ == Page::Targets) return selectedTarget();
-    if (entryTable_ == nullptr) return {};
-    const int row = entryTable_->currentRow();
-    if (row < 0) return {};
-    const QTableWidgetItem* cell = entryTable_->item(row, 1);
-    return cell == nullptr ? QString() : cell->text();
-}
-
-std::vector<beam::gui::TreatmentTargetPoint> TreatmentLibraryDialog::currentPoints() const {
-    const QString name = pointsOwnerTarget();
-    if (name.isEmpty()) return {};
-    if (page_ == Page::Targets) {
-        const beam::gui::TreatmentTarget* target = store_.findTarget(name.toStdString());
-        return target == nullptr ? std::vector<beam::gui::TreatmentTargetPoint>{} : target->points;
-    }
-    const int entry = store_.firstEntryForTarget(selectedProtocol().toStdString(),
-                                                 name.toStdString());
-    if (entry < 0) return {};
-    const std::vector<beam::gui::TreatmentTargetPoint>* owned =
-        store_.entryPoints(selectedProtocol().toStdString(), static_cast<std::size_t>(entry));
-    return owned == nullptr ? std::vector<beam::gui::TreatmentTargetPoint>{} : *owned;
-}
-
-bool TreatmentLibraryDialog::writePoints(std::vector<beam::gui::TreatmentTargetPoint> points) {
-    const QString name = pointsOwnerTarget();
-    if (name.isEmpty()) return false;
-    if (page_ == Page::Targets) return store_.setTargetPoints(name.toStdString(), std::move(points));
-    const int entry = store_.firstEntryForTarget(selectedProtocol().toStdString(),
-                                                 name.toStdString());
-    if (entry < 0) return false;
-    return store_.setEntryPoints(selectedProtocol().toStdString(),
-                                 static_cast<std::size_t>(entry), std::move(points));
-}
-
-void TreatmentLibraryDialog::reloadTargetPoints() {
-    if (pointTable_ == nullptr) return;
-    const QString name = pointsOwnerTarget();
-    const std::vector<beam::gui::TreatmentTargetPoint> points = currentPoints();
-
+void TreatmentLibraryDialog::reloadTargets(const QString& select) {
+    if (targetTable_ == nullptr) return;
     reloadingPoints_ = true;
-    pointTable_->clearContents();
-    pointTable_->setRowCount(static_cast<int>(points.size()));
-    {
-        for (int row = 0; row < static_cast<int>(points.size()); ++row) {
-            const beam::gui::TreatmentTargetPoint& point = points[static_cast<std::size_t>(row)];
+    targetTable_->setRowCount(0);
+    targetRows_.clear();
+
+    int rows = 0;
+    for (const auto& target : store_.targets()) rows += static_cast<int>(target.points.size());
+    targetTable_->setRowCount(rows);
+
+    int row = 0;
+    int selectRow = -1;
+    for (std::size_t t = 0; t < store_.targets().size(); ++t) {
+        const beam::gui::TreatmentTarget& target = store_.targets()[t];
+        for (std::size_t p = 0; p < target.points.size(); ++p, ++row) {
+            targetRows_.emplace_back(t, p);
+            const beam::gui::TreatmentTargetPoint& point = target.points[p];
+            if (selectRow < 0 && QString::fromStdString(target.name) == select) selectRow = row;
+
+            auto* name = new QTableWidgetItem(QString::fromStdString(target.name));
+            name->setFlags(name->flags() & ~Qt::ItemIsEditable);
+            targetTable_->setItem(row, 0, name);
+
             auto* order = new QTableWidgetItem(QString::number(point.order));
             order->setFlags(order->flags() & ~Qt::ItemIsEditable);
-            pointTable_->setItem(row, 0, order);
+            targetTable_->setItem(row, 1, order);
 
             auto* show = new QTableWidgetItem;
             show->setFlags((show->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
             show->setCheckState(point.show ? Qt::Checked : Qt::Unchecked);
-            pointTable_->setItem(row, 1, show);
+            targetTable_->setItem(row, 2, show);
 
             const double values[] = {point.amplitude,
                                      point.startTimeSeconds,
@@ -274,68 +225,53 @@ void TreatmentLibraryDialog::reloadTargetPoints() {
                                      point.pulseDurationSeconds,
                                      point.pulseIntervalSeconds};
             for (int i = 0; i < 7; ++i)
-                pointTable_->setItem(row, i + 2, new QTableWidgetItem(QString::number(values[i])));
+                targetTable_->setItem(row, i + 3, new QTableWidgetItem(QString::number(values[i])));
         }
     }
     reloadingPoints_ = false;
-
-    if (name.isEmpty()) {
-        pointCaption_->setText(page_ == Page::Targets
-                                   ? QStringLiteral("Template points")
-                                   : QStringLiteral("Select a scheduled target to edit its points"));
-    } else if (page_ == Page::Targets) {
-        pointCaption_->setText(
-            QStringLiteral("Template points for \"%1\" - the values a protocol copies when "
-                           "\"%1\" is added to it").arg(name));
-    } else {
-        pointCaption_->setText(
-            QStringLiteral("Points for \"%1\" in protocol \"%2\" only - this protocol's own copy, "
-                           "taken from the Target List when \"%1\" was added")
-                .arg(name, selectedProtocol()));
-    }
+    if (targetTable_->rowCount() > 0)
+        targetTable_->setCurrentCell(selectRow >= 0 ? selectRow : 0, 0);
+    reloadEntries();
 }
 
-// Reads the table back rather than tracking single cells: the table is small,
-// and a partial write would leave the template disagreeing with what is shown.
-void TreatmentLibraryDialog::commitTargetPoints() {
-    if (pointTable_->rowCount() == 0) return;
-    const std::vector<beam::gui::TreatmentTargetPoint> stored = currentPoints();
-    if (stored.empty()) return;
+// One edited cell belongs to one point of one target; the rest of that target's
+// points are carried through untouched.
+void TreatmentLibraryDialog::commitTargetRow(int row) {
+    if (row < 0 || row >= static_cast<int>(targetRows_.size())) return;
+    const auto [targetIndex, pointIndex] = targetRows_[static_cast<std::size_t>(row)];
+    if (targetIndex >= store_.targets().size()) return;
+    const beam::gui::TreatmentTarget& target = store_.targets()[targetIndex];
+    if (pointIndex >= target.points.size()) return;
 
-    std::vector<beam::gui::TreatmentTargetPoint> points;
-    points.reserve(static_cast<std::size_t>(pointTable_->rowCount()));
-    for (int row = 0; row < pointTable_->rowCount(); ++row) {
-        // Keep the stored value for any cell the edit did not supply.
-        beam::gui::TreatmentTargetPoint point =
-            row < static_cast<int>(stored.size())
-                ? stored[static_cast<std::size_t>(row)]
-                : beam::gui::TreatmentTargetPoint{};
-        if (const QTableWidgetItem* show = pointTable_->item(row, 1))
-            point.show = show->checkState() == Qt::Checked;
-        double* const fields[] = {&point.amplitude,
-                                  &point.startTimeSeconds,
-                                  &point.endTimeSeconds,
-                                  &point.burstDurationSeconds,
-                                  &point.burstIntervalSeconds,
-                                  &point.pulseDurationSeconds,
-                                  &point.pulseIntervalSeconds};
-        for (int i = 0; i < 7; ++i) {
-            const QTableWidgetItem* cell = pointTable_->item(row, i + 2);
-            if (cell == nullptr) continue;
-            bool ok = false;
-            const double value = cell->text().toDouble(&ok);
-            if (ok) *fields[i] = value;
-        }
-        points.push_back(point);
+    std::vector<beam::gui::TreatmentTargetPoint> points = target.points;
+    beam::gui::TreatmentTargetPoint& point = points[pointIndex];
+    if (const QTableWidgetItem* show = targetTable_->item(row, 2))
+        point.show = show->checkState() == Qt::Checked;
+    double* const fields[] = {&point.amplitude,
+                              &point.startTimeSeconds,
+                              &point.endTimeSeconds,
+                              &point.burstDurationSeconds,
+                              &point.burstIntervalSeconds,
+                              &point.pulseDurationSeconds,
+                              &point.pulseIntervalSeconds};
+    for (int i = 0; i < 7; ++i) {
+        const QTableWidgetItem* cell = targetTable_->item(row, i + 3);
+        if (cell == nullptr) continue;
+        bool ok = false;
+        const double value = cell->text().toDouble(&ok);
+        if (ok) *fields[i] = value;
     }
-    writePoints(std::move(points));
-    reloadTargetPoints();
+    store_.setTargetPoints(target.name, std::move(points));
 }
 
-// One pane: the protocol is chosen above, and everything it schedules is one
-// table. A row is a scheduled target carrying both its entry's duration and
-// this protocol's own copy of that target's parameters, because to an operator
-// reading a schedule those are one thing. Rows drag to reorder.
+QString TreatmentLibraryDialog::selectedTarget() const {
+    if (targetTable_ == nullptr) return {};
+    const int row = targetTable_->currentRow();
+    if (row < 0) return {};
+    const QTableWidgetItem* cell = targetTable_->item(row, 0);
+    return cell == nullptr ? QString() : cell->text();
+}
+
 void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
     auto* outer = new QVBoxLayout(page);
 
@@ -353,10 +289,6 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
     top->addWidget(remove);
     top->addStretch(1);
     outer->addLayout(top);
-
-    scheduleCaption_ = new QLabel(page);
-    scheduleCaption_->setWordWrap(true);
-    outer->addWidget(scheduleCaption_);
 
     entryTable_ = new QTableWidget(0, 11, page);
     entryTable_->setHorizontalHeaderLabels(
@@ -526,13 +458,6 @@ void TreatmentLibraryDialog::reloadEntries() {
         }
     }
     reloadingPoints_ = false;
-
-    scheduleCaption_->setText(
-        protocol.isEmpty()
-            ? QStringLiteral("No protocol selected")
-            : QStringLiteral("\"%1\": every target it schedules, with this protocol's own copy of "
-                             "their parameters. Edit any cell in place; drag a row to reorder.")
-                  .arg(protocol));
 }
 
 // One edited cell: the duration belongs to that entry, every other column to
@@ -615,23 +540,6 @@ void TreatmentLibraryDialog::commitScheduleOrder() {
     reloadEntries();
 }
 
-void TreatmentLibraryDialog::reloadTargets(const QString& select) {
-    if (targetList_ == nullptr) return;
-    targetList_->clear();
-    for (const auto& target : store_.targets())
-        targetList_->addItem(QString::fromStdString(target.name));
-    if (entryTargetCombo_ != nullptr) {
-        const QString keep = entryTargetCombo_->currentText();
-        entryTargetCombo_->clear();
-        for (const auto& target : store_.targets())
-            entryTargetCombo_->addItem(QString::fromStdString(target.name));
-        const int restored = entryTargetCombo_->findText(keep);
-        if (restored >= 0) entryTargetCombo_->setCurrentIndex(restored);
-    }
-    const auto items = targetList_->findItems(select, Qt::MatchExactly);
-    targetList_->setCurrentRow(items.isEmpty() ? (targetList_->count() > 0 ? 0 : -1)
-                                               : targetList_->row(items.first()));
-}
 
 void TreatmentLibraryDialog::reloadProtocols(const QString& select) {
     if (protocolCombo_ == nullptr) return;
@@ -645,11 +553,6 @@ void TreatmentLibraryDialog::reloadProtocols(const QString& select) {
 }
 
 
-QString TreatmentLibraryDialog::selectedTarget() const {
-    if (targetList_ == nullptr) return {};
-    const QListWidgetItem* item = targetList_->currentItem();
-    return item == nullptr ? QString() : item->text();
-}
 
 QString TreatmentLibraryDialog::selectedProtocol() const {
     if (protocolCombo_ == nullptr) return {};

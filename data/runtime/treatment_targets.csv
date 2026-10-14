@@ -1,0 +1,18 @@
+# BeamAI Target List: the editable parameter definition for each target.
+# One row per target point - a target's sonications are rows of its own
+# stimParamTable in BeamV0, each carrying its own parameters.
+# X/Y/Z are NOT here - placement is per-patient session data.
+name,point,show,amplitude,startTime,endTime,burstDuration,burstInterval,pulseDuration,pulseInterval
+SCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC2,1,1,0.5,0,30,0.06,1.1,0.005,0.01
+SCC3,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC4,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC5,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+SCC6,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC1,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC2,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC3,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC4,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC5,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+aMCC6,1,1,0.5,0,30,0.03,0.7,0.005,0.01
+Target1,1,1,0.5,0,30,0.03,0.7,0.005,0.02

@@ -1845,7 +1845,22 @@ bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
     return QMainWindow::eventFilter(watched, event);
 }
 
+// A stage change can ask for more height than the screen has for one layout
+// pass -- entering Treatment, its body's 360px minimum lands before the
+// Coupling widgets' is withdrawn, asking for 1340 where 983 fits. Qt honours
+// that by growing the window (1129 -> 1486 on a 1129 screen) and nothing
+// shrinks it back, so from then on the bottom of every page is off-screen.
+// The screen is the ceiling; re-read it here because the window can be moved
+// to another one.
+void WorkflowWindow::capWindowToScreen() {
+    const QScreen* host = screen();
+    if (host == nullptr) return;
+    const int available = host->availableGeometry().height();
+    if (available > 0 && maximumHeight() != available) setMaximumHeight(available);
+}
+
 void WorkflowWindow::syncMriViewerHeights() {
+    capWindowToScreen();
     // The nine viewer columns are vertically Fixed, so they never take a share
     // of their page's spare height on their own -- that is what kept the tabs
     // disagreeing. The height is chosen here instead: Imaging and Registration
@@ -1870,6 +1885,20 @@ void WorkflowWindow::syncMriViewerHeights() {
     if (ui_->workflowMessage && !ui_->workflowMessage->isVisible())
         stackHeight -= ui_->workflowMessage->sizeHint().height();
     if (stackHeight <= 0) return;
+    // A page whose own minimum exceeds the stack pushes the stack past the
+    // window rather than shrinking, and the viewers are Fixed and sized from
+    // this basis -- so an inflated basis makes them taller, which inflates it
+    // again (983 -> 1025 -> 1340 over three tab changes, in a 1129 window,
+    // leaving the bottom of every page off-screen). The window is the real
+    // ceiling. The gap is window chrome, so it is measured once and kept --
+    // re-reading it per stage drifted the viewer by the few pixels the stack
+    // differs between pages. The half-window test discards a pass taken before
+    // the first layout, which would otherwise pin the viewers to their
+    // minimum for good.
+    if (stackChromeHeight_ == 0 && stackHeight * 2 > height())
+        stackChromeHeight_ = height() - stackHeight;
+    if (stackChromeHeight_ > 0)
+        stackHeight = std::min(stackHeight, height() - stackChromeHeight_);
     // What each page needs for everything except its viewer row.  Taking the
     // difference of the two hints keeps this independent of the height we are
     // about to pick, so the calculation has a stable fixed point.
@@ -2360,7 +2389,7 @@ bool WorkflowWindow::fiducialDiagramData(std::array<QString, 6>* labels,
     return true;
 }
 
-void WorkflowWindow::navigateToFiducialOnTreatment(int index) {
+void WorkflowWindow::navigateToFiducialOnTreatment(int index, bool announce) {
     if (!mriLoaded_ || index < 0 || index >= static_cast<int>(fiducials_.size())) return;
     const Eigen::Vector3d markerMm = fiducials_[static_cast<std::size_t>(index)].position * 1000.0;
     const auto voxel = beam::gui::imagePositionToVoxelIndex(markerMm, mriAxes_);
@@ -2377,10 +2406,11 @@ void WorkflowWindow::navigateToFiducialOnTreatment(int index) {
     treatmentAxialPreview_->revealAt(
         QPointF(normalizedAxisPosition(mriAxes_.dimLR, markerMm.x()),
                 1.0 - normalizedAxisPosition(mriAxes_.dimAP, markerMm.y())));
-    showMessage(QStringLiteral("Showing fiducial %1. The planned target is unchanged.")
-                    .arg(QString::fromStdString(
-                        fiducials_[static_cast<std::size_t>(index)].name)),
-                false);
+    if (announce)
+        showMessage(QStringLiteral("Showing fiducial %1. The planned target is unchanged.")
+                        .arg(QString::fromStdString(
+                            fiducials_[static_cast<std::size_t>(index)].name)),
+                    false);
 }
 
 QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
@@ -3591,6 +3621,15 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     const bool treatmentExecutionPage = stage == beam::gui::WorkflowStage::Treatment ||
                                         stage == beam::gui::WorkflowStage::TreatmentPlan;
     const bool safetyReviewPage = stage == beam::gui::WorkflowStage::SafetyReview;
+    // Every widget below lives on placeholderPage, and setVisible(true)
+    // activates its parent's layout synchronously. Showing one stage's set
+    // before the previous stage's is withdrawn therefore gets a layout pass
+    // that counts both minimums at once -- entering Treatment after Coupling
+    // asked for 1486px of window on a 1129px screen, which Qt granted by
+    // resizing the window past the screen and never shrank back, cutting the
+    // bottom off every page for the rest of the session. Disabling the layout
+    // here means only the final set is ever measured.
+    if (ui_->placeholderLayout) ui_->placeholderLayout->setEnabled(false);
     if (ui_->treatmentMriPage) ui_->treatmentMriPage->setVisible(treatmentPlanPage);
     // The Treatment plan and Treatment stages each own one container, so
     // showing a stage is one call rather than a per-widget membership test.
@@ -3635,12 +3674,20 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     }
     if (ui_->placeholderText) ui_->placeholderText->setVisible(!couplingPage && !correctionPage && !treatmentPlanPage &&
                                                                !treatmentExecutionPage && !safetyReviewPage);
+    if (ui_->placeholderLayout) {
+        ui_->placeholderLayout->setEnabled(true);
+        ui_->placeholderLayout->activate();
+    }
     if (treatmentPlanPage) {
         // Entering the stage refreshes X/Y/Z: an unplaced target reads the
         // array centre that registration produced (see
         // switchToSelectedTarget), so the grid never opens on zeros.
         switchToSelectedTarget();
         updateTreatmentPlanSummary();
+        // Open on the first fiducial rather than wherever the last stage left
+        // the sliders, so all three planes start from a known landmark.
+        treatmentFiducialPick_ = 0;
+        navigateToFiducialOnTreatment(0, false);
         acceptTreatmentPlanButton_->setEnabled(
             workflow_.state(beam::gui::WorkflowStage::Correction).status == beam::gui::WorkflowStatus::Complete);
     }

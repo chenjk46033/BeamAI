@@ -236,14 +236,14 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     targetPanel->setMaximumWidth(220);
     auto* targetPanelLayout = new QVBoxLayout(targetPanel);
     targetPanelLayout->setContentsMargins(0, 0, 0, 0);
-    auto* targetListLabel = new QLabel(QStringLiteral("Target List"), targetPanel);
+    auto* targetListLabel = new QLabel(QStringLiteral("Target List Template"), targetPanel);
     targetListLabel->setStyleSheet(QString::fromLatin1(kSectionLabelStyle));
     targetPanelLayout->addWidget(targetListLabel);
     // Above the list, not below it: the body scrolls, and a button under a
     // 430-pixel list sits past the bottom of the visible area -- reachable
     // only by scrolling, which is no use for something you press while
     // looking at the MRI views.
-    manageTargetsButton_ = new QPushButton(QStringLiteral("Manage Targets..."), targetPanel);
+    manageTargetsButton_ = new QPushButton(QStringLiteral("Manage Template..."), targetPanel);
     manageTargetsButton_->setToolTip(
         QStringLiteral("Add, rename, delete targets and edit the template points they start from"));
     manageTargetsButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
@@ -289,11 +289,6 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // removeSonicationUpdateTable.m are unreferenced there, and
     // sortSonicationTable.m runs on its own rather than from a button. Several
     // rows per target is DiademV0's behaviour, which is a separate application.
-    sonicationScopeLabel_ = new QLabel(bodyContent);
-    sonicationScopeLabel_->setWordWrap(true);
-    sonicationScopeLabel_->setStyleSheet(QStringLiteral("color: #9fb3ba;"));
-    rightColumn->addWidget(sonicationScopeLabel_);
-
     stimParamModel_ = new beam::gui_qt::StimParamTableModel(this);
     stimParamView_ = new QTableView(bodyContent);
     stimParamView_->setModel(stimParamModel_);
@@ -338,12 +333,9 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     manageLibraryButton_ = makeProtocolButton(
         QStringLiteral("Manage Protocols..."),
         QStringLiteral("Add, rename, delete protocols and the targets each one schedules"));
-    saveProtocolsButton_ = makeProtocolButton(QStringLiteral("Save protocols"),
-                                               QStringLiteral("Write protocols and target parameters to your own copy"));
     protocolSelectorRow->addWidget(treatmentProtocolLabel_);
     protocolSelectorRow->addWidget(treatmentProtocolCombo_);
     protocolSelectorRow->addWidget(manageLibraryButton_);
-    protocolSelectorRow->addWidget(saveProtocolsButton_);
     protocolSelectorRow->addSpacing(18);
     protocolSelectorRow->addWidget(visitLabel);
     protocolSelectorRow->addWidget(visitNumberCombo_);
@@ -477,7 +469,7 @@ void WorkflowWindow::wireTreatmentPlanBody() {
             [this] { updateSonicationPlots(); });
     connect(stimParamModel_, &QAbstractItemModel::dataChanged, this, [this] {
         saveCurrentTargetSonications();
-        setTargetStoreDirty(true);
+        saveTreatmentTargetStore();
         updateSonicationPlots();
         updateTreatmentPlanSummary();
     });
@@ -529,9 +521,8 @@ void WorkflowWindow::wireTreatmentPlanBody() {
             [this] { openTreatmentLibrary(TreatmentLibraryDialog::Page::Protocols); });
     connect(manageTargetsButton_, &QPushButton::clicked, this,
             [this] { openTreatmentLibrary(TreatmentLibraryDialog::Page::Targets); });
-    connect(saveProtocolsButton_, &QPushButton::clicked, this, [this] { saveTreatmentTargetStore(); });
     connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
-            [this] { setTargetStoreDirty(true); });
+            [this] { saveTreatmentTargetStore(); });
     connect(newVisitButton_, &QPushButton::clicked, this, [this] {
         const int next = visitNumberCombo_->count() + 1;
         visitNumberCombo_->addItem(QString::number(next));
@@ -564,7 +555,25 @@ QString WorkflowWindow::currentProtocolName() const {
     return treatmentProtocolCombo_ ? treatmentProtocolCombo_->currentText() : QString();
 }
 
+// data/runtime/ inside the repository: edits sit with the project rather than
+// in a per-user folder, but NOT on top of data/*.csv itself. Those are the
+// migrated BeamV0 fixtures that treatment_migration_tests pins, and writing
+// the operator's edits over them makes the app fail its own tests.
+// Falls back to Documents when the repository is not there -- an installed
+// build, whose executable directory is not writable anyway.
 QString WorkflowWindow::treatmentDataDirectory() const {
+    const QString executableDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(executableDir).filePath(QStringLiteral("../../../data")),
+        QDir(executableDir).filePath(QStringLiteral("../../data")),
+        QDir(executableDir).filePath(QStringLiteral("data")),
+        QDir::current().filePath(QStringLiteral("data"))};
+    for (const QString& candidate : candidates) {
+        const QDir directory(candidate);
+        if (!directory.exists()) continue;
+        const QString runtime = directory.absoluteFilePath(QStringLiteral("runtime"));
+        if (QDir().mkpath(runtime)) return runtime;
+    }
     const QString home =
         QDir(QDir::homePath()).filePath(QStringLiteral("Documents/BeamAI/treatment"));
     QDir().mkpath(home);
@@ -613,7 +622,6 @@ void WorkflowWindow::loadTreatmentTargetStore() {
                         .arg(QString::fromStdString(dangling.front())),
                     true);
     }
-    setTargetStoreDirty(false);
 }
 
 void WorkflowWindow::refreshProtocolCombo(const QString& select) {
@@ -674,17 +682,6 @@ void WorkflowWindow::saveTreatmentTargetStore() {
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Could not save treatment data: %1").arg(error.what()), true);
         return;
-    }
-    setTargetStoreDirty(false);
-    showMessage(QStringLiteral("Protocols saved to %1.").arg(directory), false);
-}
-
-void WorkflowWindow::setTargetStoreDirty(bool dirty) {
-    targetStoreDirty_ = dirty;
-    if (saveProtocolsButton_) saveProtocolsButton_->setEnabled(dirty);
-    if (treatmentProtocolLabel_) {
-        treatmentProtocolLabel_->setText(dirty ? QStringLiteral("Treatment protocol: *")
-                                               : QStringLiteral("Treatment protocol:"));
     }
 }
 
@@ -870,13 +867,17 @@ void WorkflowWindow::switchToSelectedTarget() {
         }
 
         std::vector<beam::gui_qt::StimParamRow> rows;
-        for (const beam::gui::TreatmentTargetPoint& point :
-             targetStore_.pointsForSonication(
-                 currentProtocolName().toStdString(),
-                 static_cast<std::size_t>(std::max(
-                     0, targetStore_.firstEntryForTarget(currentProtocolName().toStdString(),
-                                                         name.toStdString()))),
-                 scheduledDuration)) {
+        // No entry means this protocol does not schedule this target. Clamping
+        // to entry 0 showed a different target's parameters under this target's
+        // name, which is worse than showing none.
+        const int entryIndex = targetStore_.firstEntryForTarget(
+            currentProtocolName().toStdString(), name.toStdString());
+        const std::vector<beam::gui::TreatmentTargetPoint> scheduled =
+            entryIndex < 0 ? std::vector<beam::gui::TreatmentTargetPoint>{}
+                           : targetStore_.pointsForSonication(
+                                 currentProtocolName().toStdString(),
+                                 static_cast<std::size_t>(entryIndex), scheduledDuration);
+        for (const beam::gui::TreatmentTargetPoint& point : scheduled) {
             beam::gui_qt::StimParamRow row;
             row.order = point.order;
             row.show = point.show;
@@ -892,9 +893,9 @@ void WorkflowWindow::switchToSelectedTarget() {
             row.z = targetMm_.z();
             rows.push_back(row);
         }
-        // A target the Target List does not define -- a protocol naming an
-        // undefined target already warned about it; one blank row keeps the
-        // grid usable rather than empty.
+        // Either the Target List does not define this target, or this protocol
+        // does not schedule it. One blank row keeps the grid usable rather than
+        // empty; the label above it says which case this is.
         if (rows.empty()) {
             beam::gui_qt::StimParamRow row;
             row.order = 1;
@@ -990,24 +991,7 @@ void WorkflowWindow::setSonicationTargetFromMri(const Eigen::Vector3d& positionM
     updateTreatmentPlanSummary();
 }
 
-// Says whose points the grid is showing. The Target List is a template; what
-// the operator edits here belongs to this protocol alone.
-void WorkflowWindow::updateSonicationScopeLabel() {
-    if (!sonicationScopeLabel_) return;
-    const QString protocol = currentProtocolName();
-    const QListWidgetItem* item = targetListWidget_ ? targetListWidget_->currentItem() : nullptr;
-    if (protocol.isEmpty() || item == nullptr) {
-        sonicationScopeLabel_->setText(QStringLiteral("Select a protocol and a target."));
-        return;
-    }
-    sonicationScopeLabel_->setText(
-        QStringLiteral("Editing %1 in protocol \"%2\" only. These points were copied from the "
-                       "Target List when %1 entered this protocol.")
-            .arg(targetListName(item), protocol));
-}
-
 void WorkflowWindow::updateTreatmentPlanSummary() {
-    updateSonicationScopeLabel();
     if (!treatmentPlanTargetLabel_) return;
     const int row = selectedSonicationRow();
     if (row < 0) {
@@ -1433,15 +1417,22 @@ void WorkflowWindow::finishTreatmentStage() {
 }
 
 void WorkflowWindow::openTreatmentLibrary(TreatmentLibraryDialog::Page page) {
-    // The dialog edits a copy, and accepting it replaces the store wholesale, so
+    // The dialog edits a copy, and applying it replaces the store wholesale, so
     // anything still only in the grid has to reach the store first or it is lost.
     writeProtocolGridToStore();
     writeTargetPointsToStore();
-    const QString protocol = treatmentProtocolCombo_->currentText();
     TreatmentLibraryDialog dialog(targetStore_, page, this);
-    if (dialog.exec() != QDialog::Accepted) return;
-    targetStore_ = dialog.store();
-    setTargetStoreDirty(true);
+    // Applied on each Save rather than once at the end, so the dialog can stay
+    // open for the next edit.
+    dialog.setSaveHandler([this](const beam::gui::TreatmentTargetStore& edited) {
+        applyTreatmentLibrary(edited);
+    });
+    dialog.exec();
+}
+
+void WorkflowWindow::applyTreatmentLibrary(const beam::gui::TreatmentTargetStore& edited) {
+    const QString protocol = treatmentProtocolCombo_->currentText();
+    targetStore_ = edited;
 
     targetListWidget_->clear();
     targetSonications_.clear();

@@ -2,6 +2,9 @@
 
 #include <QDialog>
 
+#include <functional>
+#include <functional>
+#include <utility>
 #include <vector>
 
 #include "gui/treatment_target_store.hpp"
@@ -30,6 +33,10 @@ public:
 
     const beam::gui::TreatmentTargetStore& store() const { return store_; }
 
+    // Save writes without dismissing, so a run of edits is one visit.
+    void setSaveHandler(std::function<void(const beam::gui::TreatmentTargetStore&)> handler);
+
+
 private:
     void buildTargetsTab(QWidget* page);
     void buildProtocolsTab(QWidget* page);
@@ -41,23 +48,18 @@ private:
     // Which target's points the shared table is showing, and where they live:
     // the Target List's template on the Targets page, this protocol's own copy
     // on the Protocols page.
-    QString pointsOwnerTarget() const;
-    std::vector<beam::gui::TreatmentTargetPoint> currentPoints() const;
-    bool writePoints(std::vector<beam::gui::TreatmentTargetPoint> points);
-    void buildPointsSection(QWidget* page, QVBoxLayout* outer);
-    void reloadTargetPoints();
-    void commitTargetPoints();
+    void commitTargetRow(int row);
     QString selectedTarget() const;
     QString selectedProtocol() const;
 
+    std::function<void(const beam::gui::TreatmentTargetStore&)> saveHandler_;
+    QLabel* savedNotice_ = nullptr;
     Page page_ = Page::Targets;
     beam::gui::TreatmentTargetStore store_;
-    QListWidget* targetList_ = nullptr;
+    QTableWidget* targetTable_ = nullptr;
+    std::vector<std::pair<std::size_t, std::size_t>> targetRows_;
     QComboBox* protocolCombo_ = nullptr;
-    QLabel* scheduleCaption_ = nullptr;
     QTableWidget* entryTable_ = nullptr;
-    QTableWidget* pointTable_ = nullptr;
-    QLabel* pointCaption_ = nullptr;
     bool reloadingPoints_ = false;
     QComboBox* entryTargetCombo_ = nullptr;
 };

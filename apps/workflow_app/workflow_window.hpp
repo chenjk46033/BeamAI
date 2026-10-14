@@ -90,7 +90,9 @@ private:
     void navigateToRegistrationFiducial(int row);
     // Not focusTreatmentViewsOn: that writes targetMm_, and looking at a
     // marker must not edit the planned target.
-    void navigateToFiducialOnTreatment(int index);
+    // announce: the operator picked it, so say so. Entering the stage moves
+    // here on its own and should not narrate it.
+    void navigateToFiducialOnTreatment(int index, bool announce = true);
     // False when fewer than six fiducials exist.
     bool fiducialDiagramData(std::array<QString, 6>* labels,
                              std::array<QPointF, 6>* apIsMm,
@@ -128,6 +130,7 @@ private:
     void setExecutionStatus(const QString& text);
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
+    void capWindowToScreen();
 
     // "Open viewer in a new window" -- detached_viewer.cpp. One window per
     // pane, driving that pane's own slice controls rather than holding state.
@@ -155,14 +158,13 @@ private:
     void loadTreatmentProtocol(const QString& protocolName);
     QString treatmentDataDirectory() const;
     QString currentProtocolName() const;
-    void updateSonicationScopeLabel();
     void loadTreatmentTargetStore();
     void refreshProtocolCombo(const QString& select);
     void writeProtocolGridToStore();
     void saveTreatmentTargetStore();
     void writeTargetPointsToStore();
     void openTreatmentLibrary(TreatmentLibraryDialog::Page page);
-    void setTargetStoreDirty(bool dirty);
+    void applyTreatmentLibrary(const beam::gui::TreatmentTargetStore& edited);
     void selectSonicationRow(int row);
     int selectedSonicationRow() const;
     void setSonicationTargetFromMri(const Eigen::Vector3d& positionMm);
@@ -269,6 +271,8 @@ private:
     int currentTargetId_ = -1;
     int nextTargetId_ = 0;
     QSize lastMriSyncWindowSize_;
+    // Window height minus the stack's, learned while the stack still fits.
+    int stackChromeHeight_ = 0;
     QSpacerItem* placeholderTailSpacer_ = nullptr;
     std::vector<DetachedViewer> detachedViewers_;
     QGroupBox* calibrationGroup_ = nullptr;
@@ -279,8 +283,6 @@ private:
     // BeamAI's own protocol/target library. Seeded from data/*.csv in the
     // install, saved to the user's own copy -- see treatmentDataDirectory().
     beam::gui::TreatmentTargetStore targetStore_;
-    bool targetStoreDirty_ = false;
-    QPushButton* saveProtocolsButton_ = nullptr;
     QPushButton* manageLibraryButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
     QTableView* protocolView_ = nullptr;
@@ -299,7 +301,6 @@ private:
     QChartView* couplingCh0ChartView_ = nullptr;
     QChartView* couplingCh1ChartView_ = nullptr;
     QChartView* couplingBarChartView_ = nullptr;
-    QLabel* sonicationScopeLabel_ = nullptr;
     QPushButton* newVisitButton_ = nullptr;
     QComboBox* hydrogelSizeCombo_ = nullptr;
     QSpinBox* currentSonicationNumberEdit_ = nullptr;
