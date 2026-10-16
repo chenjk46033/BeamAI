@@ -28,7 +28,7 @@ public:
         setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         setFrameShape(QFrame::NoFrame);
-        setMinimumHeight(120);
+        setMinimumHeight(180);
         setStyleSheet(QStringLiteral(
             "QGraphicsView { background: #101820; border: 1px solid #2b6172; }"));
         setToolTip(QStringLiteral("Wheel to zoom, drag to pan, double-click to fit."));

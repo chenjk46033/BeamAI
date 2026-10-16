@@ -202,6 +202,9 @@ private:
     // Points the treatment sonications still to come at whichever screened
     // targets scored best. Runs once, when the operator asks.
     void applyTargetRanking();
+    // Opens the note on one sonication for editing. A note is a running
+    // record, so the box opens on a fresh stamped line.
+    void editRowNotes(int sequence);
     // Puts the rows the last ranking repointed back as they were.
     void undoTargetRanking();
     // Which visit a protocol should open on: visits belong to a protocol, so
@@ -416,7 +419,7 @@ private:
     int currentSonication_ = 1;
     QComboBox* accFlagCombo_ = nullptr;
     QPushButton* computeBestTargetsButton_ = nullptr;
-    QListWidget* bestTargetsList_ = nullptr;
+    QLabel* bestTargetsLabel_ = nullptr;
     ExampleImageView* exampleTargetImage_ = nullptr;
     ExampleImageView* exampleTargetImage2_ = nullptr;
     ExampleImageView* exampleTargetImage3_ = nullptr;

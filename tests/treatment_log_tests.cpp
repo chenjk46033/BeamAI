@@ -789,3 +789,34 @@ TEST(TreatmentLog, ADeliveredRowCannotBeRepointed) {
     EXPECT_FALSE(log.replacePlanned("Default", 1, 1, makeRow(1, "SCC5")));
     EXPECT_EQ(log.find("Default", 1, 1)->target, "SCC1");
 }
+
+// A note runs to several lines; the file is read one line at a time. The
+// breaks have to survive the round trip without breaking the row apart.
+TEST(TreatmentLog, MultiLineNotesSurviveTheRoundTrip) {
+    beam::gui::TreatmentLog log;
+    beam::gui::TreatmentLogRow row = makeRow(1, "SCC1");
+    row.sequence = 1;
+    log.record(std::move(row));
+    const std::string written =
+        "09:15:01  patient reported warmth, right side\n"
+        R"(09:16:40  settled; said "much better", no pain)"
+        "\n"
+        R"(09:18:02  path C:\logs\run1 kept for review)";
+    ASSERT_TRUE(log.setNotes("Default", 1, 1, written));
+
+    const std::string path = scratch("treatment_log_notes.csv");
+    ASSERT_NO_THROW(log.save(path));
+    // One physical line per row, whatever the notes hold.
+    std::ifstream file(path);
+    std::string line;
+    int dataRows = 0;
+    while (std::getline(file, line))
+        if (!line.empty() && line[0] != '#' && line.rfind("Number,", 0) != 0) ++dataRows;
+    EXPECT_EQ(dataRows, 1);
+
+    beam::gui::TreatmentLog reloaded;
+    ASSERT_NO_THROW(reloaded.load(path));
+    const beam::gui::TreatmentLogRow* back = reloaded.find("Default", 1, 1);
+    ASSERT_NE(back, nullptr);
+    EXPECT_EQ(back->notes, written);
+}

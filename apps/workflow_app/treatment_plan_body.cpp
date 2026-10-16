@@ -67,6 +67,8 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QProgressBar>
+#include <QDialogButtonBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
@@ -826,9 +828,22 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     applyItemViewPalette(accFlagCombo_);
     computeBestTargetsButton_ = new QPushButton(QStringLiteral("Compute Best Targets"), targetingTab);
     computeBestTargetsButton_->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
+    auto* bestTargetsCaption =
+        new QLabel(QStringLiteral("Best targets to carry forward:"), targetingTab);
+    bestTargetsCaption->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; }"));
+    bestTargetsLabel_ = new QLabel(QStringLiteral("--"), targetingTab);
+    bestTargetsLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #ffffff; background: #1f4e79; border: 1px solid #163c5e; "
+        "border-radius: 3px; padding: 2px 10px; font-weight: 700; }"));
+    bestTargetsLabel_->setToolTip(QStringLiteral(
+        "What the ranking would carry forward from this visit's screening responses, best "
+        "first. Rank Targets, on the Treatment Log tab, is what puts them into the plan."));
     accFlagRow->addWidget(accFlagLabel);
     accFlagRow->addWidget(accFlagCombo_);
     accFlagRow->addWidget(computeBestTargetsButton_);
+    accFlagRow->addSpacing(18);
+    accFlagRow->addWidget(bestTargetsCaption);
+    accFlagRow->addWidget(bestTargetsLabel_);
     accFlagRow->addStretch(1);
     targetingLayout->addLayout(accFlagRow);
     auto* imageRow = new QHBoxLayout;
@@ -842,11 +857,15 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     exampleTargetText_->setWordWrap(true);
     exampleTargetText_->setStyleSheet(QStringLiteral("QLabel { color: #c8d9de; padding: 4px; }"));
     targetingLayout->addWidget(exampleTargetText_);
-    bestTargetsList_ = new QListWidget(targetingTab);
-    bestTargetsList_->setMaximumHeight(70);
-    applyItemViewPalette(bestTargetsList_);
-    targetingLayout->addWidget(bestTargetsList_);
-    treatmentTabs_->addTab(targetingTab, QStringLiteral("Targeting Examples"));
+    const int targetingIndex =
+        treatmentTabs_->addTab(targetingTab, QStringLiteral("Targeting Examples"));
+    // Reference anatomy is useless at thumbnail size, and this tab is read
+    // rather than operated: while it is the one on show the tab area takes
+    // the height it needs, and the MRI views above get it back on the way
+    // out.
+    connect(treatmentTabs_, &QTabWidget::currentChanged, this, [this, targetingIndex](int index) {
+        treatmentTabs_->setMinimumHeight(index == targetingIndex ? 326 : 228);
+    });
 
     rightColumn->addWidget(treatmentTabs_, 1);
 
@@ -931,6 +950,10 @@ void WorkflowWindow::wireTreatmentPlanBody() {
         }, Qt::QueuedConnection);
     });
     connect(rankTargetsButton_, &QPushButton::clicked, this, [this] { applyTargetRanking(); });
+    connect(protocolView_, &QTableView::doubleClicked, this, [this](const QModelIndex& where) {
+        if (where.column() == beam::gui_qt::TreatmentProtocolTableModel::kNotes)
+            editRowNotes(where.row() + 1);
+    });
     connect(undoRankingButton_, &QPushButton::clicked, this, [this] { undoTargetRanking(); });
     connect(computeBestTargetsButton_, &QPushButton::clicked, this, [this] { updateBestTargets(); });
     connect(accFlagCombo_, &QComboBox::currentTextChanged, this, [this] {
@@ -1600,6 +1623,63 @@ void WorkflowWindow::updateSonicationPlots() {
 // operator presses the button, says what it changed, and can be put back: a
 // plan that rewrites itself between sonications is a plan nobody can hold in
 // their head.
+// A note is a running record of one sonication, not a caption: it is written
+// to over a visit, by more than one person, and reading it back is the point.
+// So it is kept as lines, edited in a box that holds lines, and the cell shows
+// the most recent one with the rest a hover away.
+void WorkflowWindow::editRowNotes(int sequence) {
+    const QString protocolName = currentProtocolName();
+    const std::string protocol = protocolName.toStdString();
+    const int visit = currentVisitNumber();
+    const beam::gui::TreatmentLogRow* row = treatmentLog_.find(protocol, visit, sequence);
+    if (row == nullptr) return;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Notes -- sonication %1 (%2)")
+                              .arg(sequence)
+                              .arg(QString::fromStdString(row->target)));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* writtenLabel = new QLabel(QStringLiteral("Written so far:"), &dialog);
+    layout->addWidget(writtenLabel);
+    // What is already there is read: a record is added to, not rewritten, and
+    // a box that let the caret wander through it is how a stamp ends up on a
+    // line nobody typed.
+    auto* written = new QPlainTextEdit(QString::fromStdString(row->notes), &dialog);
+    written->setReadOnly(true);
+    written->setMinimumSize(520, 150);
+    layout->addWidget(written, 1);
+    layout->addWidget(new QLabel(QStringLiteral("Add a note:"), &dialog));
+    auto* entry = new QPlainTextEdit(&dialog);
+    entry->setMinimumHeight(74);
+    entry->setPlaceholderText(QStringLiteral("Stamped with the date and time when you press OK"));
+    layout->addWidget(entry, 0);
+    auto* buttons =
+        new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    entry->setFocus();
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const QString typed = entry->toPlainText().trimmed();
+    if (typed.isEmpty()) return;  // the box was opened and thought better of
+    // The stamp is put on by the application as the note is filed, so every
+    // entry carries one and none of them can be typed around. The date is
+    // part of it: a visit can run past midnight, and a log read next week has
+    // to say which day a line is from.
+    const QString stamp =
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    QStringList entryLines = typed.split(QLatin1Char('\n'));
+    entryLines.first() = stamp + QStringLiteral("  ") + entryLines.first().trimmed();
+    QString kept = QString::fromStdString(row->notes);
+    if (!kept.isEmpty()) kept += QLatin1Char('\n');
+    kept += entryLines.join(QStringLiteral("\n"));
+    treatmentLog_.setNotes(protocol, visit, sequence, kept.toStdString());
+    // Reload before saving: the save writes the table back into the log.
+    loadTreatmentProtocol(protocolName);
+    saveTreatmentTargetStore();
+}
+
 void WorkflowWindow::applyTargetRanking() {
     if (applyingRanking_) return;
     const QString protocolName = currentProtocolName();
@@ -1705,14 +1785,15 @@ void WorkflowWindow::undoTargetRanking() {
 }
 
 void WorkflowWindow::updateBestTargets() {
-    if (!bestTargetsList_ || !protocolModel_) return;
+    if (!bestTargetsLabel_ || !protocolModel_) return;
     const beam::gui::AccFlag flag = accFlagCombo_->currentIndex() == 1   ? beam::gui::AccFlag::kScc
                                     : accFlagCombo_->currentIndex() == 2 ? beam::gui::AccFlag::kAmcc
                                                                           : beam::gui::AccFlag::kOther;
     const beam::gui::BestTargets best = protocolModel_->computeBestTargets(flag);
-    bestTargetsList_->clear();
-    for (const std::string& name : best.name)
-        bestTargetsList_->addItem(QString::fromStdString(name));
+    QStringList names;
+    for (const std::string& name : best.name) names << QString::fromStdString(name);
+    bestTargetsLabel_->setText(names.isEmpty() ? QStringLiteral("--")
+                                               : names.join(QStringLiteral(", ")));
 }
 
 void WorkflowWindow::updateExampleTargetImage() {
@@ -2398,16 +2479,21 @@ void WorkflowWindow::closeOpenLogRow(bool aborted) {
                                         : beam::gui::TreatmentLog::kCompleted);
         // The status column carries the code; Notes carries what it means, so
         // the warning survives into the exported log where nobody is hovering
-        // over a cell to read a tooltip. Prepended to whatever the operator
-        // wrote rather than replacing it, and only once per row.
+        // over a cell to read a tooltip. Filed like any note the operator
+        // writes -- its own line, stamped, after what is already there -- so a
+        // line the application wrote and a line a person wrote read the same
+        // way. Once per row.
         if (aborted) {
             const beam::gui::TreatmentLogRow* row =
                 treatmentLog_.find(protocol, visit, openLogSequence_);
             const std::string warning = "Stopped by operator before it finished (499).";
             if (row != nullptr && row->notes.find(warning) == std::string::npos) {
-                const std::string kept = row->notes;
-                treatmentLog_.setNotes(protocol, visit, openLogSequence_,
-                                       kept.empty() ? warning : warning + " " + kept);
+                QString notes = QString::fromStdString(row->notes);
+                if (!notes.isEmpty()) notes += QLatin1Char('\n');
+                notes += QDateTime::currentDateTime().toString(
+                             QStringLiteral("yyyy-MM-dd HH:mm:ss")) +
+                         QStringLiteral("  ") + QString::fromStdString(warning);
+                treatmentLog_.setNotes(protocol, visit, openLogSequence_, notes.toStdString());
             }
         }
     }

@@ -100,6 +100,10 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         }
     }
     if (role == Qt::ToolTipRole) {
+        // Every line of it, not the latest one the cell has room for.
+        if (index.column() == kNotes)
+            return r.notes.isEmpty() ? QStringLiteral("Double-click to add a note")
+                                     : r.notes;
         // The time columns show the time of day; the date is in the tooltip.
         if (index.column() == kStart) return r.startedAtFull;
         if (index.column() == kEnd) return r.endedAtFull;
@@ -155,7 +159,18 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         case kStart: return r.startedAt;
         case kEnd: return r.endedAt;
         case kStatus: return r.statusCode == 0 ? QString() : QString::number(r.statusCode);
-        case kNotes: return r.notes;
+        case kNotes: {
+            // One line in a one-line cell: the most recent note, with a count
+            // in front of it when there are older ones behind it. The editor
+            // and the tooltip have the rest.
+            if (role == Qt::EditRole) return r.notes;
+            const QStringList lines =
+                r.notes.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+            if (lines.isEmpty()) return QString();
+            return lines.size() == 1
+                       ? lines.last()
+                       : QStringLiteral("[%1] %2").arg(lines.size()).arg(lines.last());
+        }
         default: return QVariant();
     }
 }
@@ -234,6 +249,7 @@ QVariant TreatmentProtocolTableModel::headerData(int section, Qt::Orientation or
         // The scale, which the name alone does not give.
         if (section == kResponsePain || section == kResponseMood)
             return QStringLiteral("-2 to 2");
+        if (section == kNotes) return QStringLiteral("Double-click a cell to add a note");
         return QVariant();
     }
     if (role != Qt::DisplayRole) {
@@ -267,8 +283,11 @@ Qt::ItemFlags TreatmentProtocolTableModel::flags(const QModelIndex& index) const
     // The completion time is stamped by the countdown, not typed.
     // Neither is typed into: one is stamped by the countdown, the other holds
     // a button.
+    // Notes are edited in their own box, where a note can run to several
+    // lines; typing into the cell would replace the record rather than add to
+    // it.
     if (index.column() == kStart || index.column() == kEnd || index.column() == kStatus ||
-        index.column() == kAction)
+        index.column() == kAction || index.column() == kNotes)
         return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
     // A delivered sonication is a record: what was sent cannot be rewritten,
     // only what was observed about it. Locking the cells here rather than

@@ -25,8 +25,15 @@ std::vector<std::string> splitRow(const std::string& line) {
     std::vector<std::string> fields;
     std::string field;
     bool quoted = false;
-    for (const char c : line) {
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
         if (c == '"') {
+            // Doubled inside a quoted field: one of the operator's own.
+            if (quoted && i + 1 < line.size() && line[i + 1] == '"') {
+                field += '"';
+                ++i;
+                continue;
+            }
             quoted = !quoted;
         } else if (c == ',' && !quoted) {
             fields.push_back(trimmed(field));
@@ -37,6 +44,44 @@ std::vector<std::string> splitRow(const std::string& line) {
     }
     fields.push_back(trimmed(field));
     return fields;
+}
+
+// Notes run to several lines; the file is read a line at a time. The breaks
+// travel as the two characters \ and n, which is also why a backslash of the
+// operator's own has to be doubled.
+std::string flattenLines(const std::string& text) {
+    std::string out;
+    for (const char c : text) {
+        if (c == '\\') {
+            out += "\\\\";
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c != '\r') {
+            out += c;
+        }
+    }
+    return out;
+}
+
+std::string unflattenLines(const std::string& text) {
+    std::string out;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '\\' || i + 1 >= text.size()) {
+            out += text[i];
+            continue;
+        }
+        const char next = text[i + 1];
+        if (next == 'n') {
+            out += '\n';
+            ++i;
+        } else if (next == '\\') {
+            out += '\\';
+            ++i;
+        } else {
+            out += text[i];
+        }
+    }
+    return out;
 }
 
 std::string quote(const std::string& text) {
@@ -405,7 +450,7 @@ void TreatmentLog::load(const std::string& path) {
         row.endedAt = text("SonicationEndDTM");
         row.responsePain = toOptional(text("ResponsePain"), path, "ResponsePain");
         row.responseMood = toOptional(text("ResponseMood"), path, "ResponseMood");
-        row.notes = text("Notes");
+        row.notes = unflattenLines(text("Notes"));
         row.attenuation = toOptional(text("AttenuationVal"), path, "AttenuationVal");
         row.dutyCycle = toOptional(text("DC"), path, "DC");
         // Absent in logs written before the column existed: those rows ran to
@@ -448,7 +493,7 @@ void TreatmentLog::save(const std::string& path) const {
         if (row.responsePain) file << *row.responsePain;
         file << ',';
         if (row.responseMood) file << *row.responseMood;
-        file << ',' << responseTotal(row) << ',' << quote(row.notes) << ',' << row.xMm << ','
+        file << ',' << responseTotal(row) << ',' << quote(flattenLines(row.notes)) << ',' << row.xMm << ','
              << row.yMm << ',' << row.zMm << ',' << row.burstDurationSeconds << ','
              << row.burstIntervalSeconds << ',' << row.pulseDurationSeconds << ','
              << row.pulseIntervalSeconds << ',' << row.visit
