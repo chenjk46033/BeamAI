@@ -694,9 +694,11 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
                        "are never changed."));
     rankTargetsButton_->setObjectName(QStringLiteral("rankTargetsButton"));
     // A plan that changed under you is only safe if you can put it back.
+    // What it can undo is held in memory and only for one press, so a greyed
+    // button has to say which of those it is.
     undoRankingButton_ = makeProtocolButton(
         QStringLiteral("Undo Ranking"),
-        QStringLiteral("Put the rows the last ranking repointed back as they were"));
+        QStringLiteral("Nothing to undo: Rank Targets has not been pressed this session"));
     undoRankingButton_->setObjectName(QStringLiteral("undoRankingButton"));
     undoRankingButton_->setEnabled(false);
     auto* sonicationNumberLabel = new QLabel(QStringLiteral("Current Sonication Number:"), protocolTab);
@@ -1734,7 +1736,13 @@ void WorkflowWindow::applyTargetRanking() {
         rankingUndoRows_ = std::move(undo);
         rankingUndoProtocol_ = protocolName;
         rankingUndoVisit_ = visit;
-        if (undoRankingButton_ != nullptr) undoRankingButton_->setEnabled(true);
+        if (undoRankingButton_ != nullptr) {
+            undoRankingButton_->setEnabled(true);
+            undoRankingButton_->setToolTip(
+                QStringLiteral("Put back the %1 sonication(s) of visit %2 that press repointed")
+                    .arg(undo.size())
+                    .arg(visit));
+        }
         loadTreatmentProtocol(protocolName);
         saveTreatmentTargetStore();
     }
@@ -1771,7 +1779,11 @@ void WorkflowWindow::undoTargetRanking() {
     rankingUndoRows_.clear();
     rankingUndoProtocol_.clear();
     rankingUndoVisit_ = 0;
-    if (undoRankingButton_ != nullptr) undoRankingButton_->setEnabled(false);
+    if (undoRankingButton_ != nullptr) {
+        undoRankingButton_->setEnabled(false);
+        undoRankingButton_->setToolTip(
+            QStringLiteral("Nothing to undo: Rank Targets has not been pressed this session"));
+    }
     loadTreatmentProtocol(protocolName);
     saveTreatmentTargetStore();
     applyingRanking_ = false;
