@@ -283,6 +283,24 @@ bool TreatmentLog::setResponse(const std::string& protocol, int visit, int seque
     return true;
 }
 
+bool TreatmentLog::replacePlanned(const std::string& protocol, int visit, int sequence,
+                                  TreatmentLogRow row) {
+    const auto found = std::find_if(rows_.begin(), rows_.end(), [&](const TreatmentLogRow& existing) {
+        return sameSlot(existing, protocol, visit, sequence);
+    });
+    if (found == rows_.end() || delivered(*found)) return false;
+    row.protocol = protocol;
+    row.visit = visit;
+    row.sequence = sequence;
+    // The plan changed, not what the operator recorded against the position.
+    row.responsePain = found->responsePain;
+    row.responseMood = found->responseMood;
+    row.notes = found->notes;
+    row.fromPlan = found->fromPlan;
+    *found = std::move(row);
+    return true;
+}
+
 bool TreatmentLog::setStatus(const std::string& protocol, int visit, int sequence,
                              int statusCode) {
     const auto found = std::find_if(rows_.begin(), rows_.end(), [&](const TreatmentLogRow& row) {

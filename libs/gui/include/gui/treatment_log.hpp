@@ -139,6 +139,12 @@ public:
     bool setResponse(const std::string& protocol, int visit, int sequence,
                      std::optional<double> pain, std::optional<double> mood);
     bool setNotes(const std::string& protocol, int visit, int sequence, const std::string& notes);
+    // Points a planned sonication at a different target: everything the plan
+    // says about the row is replaced, while its position, its responses and
+    // the operator's notes stay. Refuses a delivered row -- what it ran is
+    // not a plan any more.
+    bool replacePlanned(const std::string& protocol, int visit, int sequence,
+                        TreatmentLogRow row);
     // Records how a delivery ended. False if the position is unknown.
     bool setStatus(const std::string& protocol, int visit, int sequence, int statusCode);
     // Stamps the end time on a row left open by a delivery.

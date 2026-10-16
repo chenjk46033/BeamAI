@@ -757,3 +757,35 @@ TEST(TreatmentLog, AVisitThatDeliveredSomethingIsNotDeletable) {
     EXPECT_EQ(log.removeVisit("Default", 1), 0);
     EXPECT_EQ(log.rowsFor("Default", 1).size(), 2u);
 }
+
+// Ranking repoints a planned sonication: the row keeps its position and
+// anything the operator wrote against it, and takes everything else from the
+// target it now runs. A delivered row is not a plan and refuses.
+TEST(TreatmentLog, RepointingAPlannedRowKeepsItsPositionAndItsResponses) {
+    beam::gui::TreatmentLog log;
+    beam::gui::TreatmentLogRow planned = makeRow(1, "SCC1");
+    planned.startedAt.clear();
+    log.append(std::move(planned));
+    ASSERT_TRUE(log.setResponse("Default", 1, 1, 2.0, 1.0));
+    ASSERT_TRUE(log.setNotes("Default", 1, 1, "operator note"));
+
+    beam::gui::TreatmentLogRow repointed = makeRow(1, "SCC5");
+    repointed.startedAt.clear();
+    repointed.burstDurationSeconds = 0.09;
+    ASSERT_TRUE(log.replacePlanned("Default", 1, 1, std::move(repointed)));
+
+    const beam::gui::TreatmentLogRow* row = log.find("Default", 1, 1);
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(row->target, "SCC5");
+    EXPECT_DOUBLE_EQ(row->burstDurationSeconds, 0.09);
+    ASSERT_TRUE(row->responsePain.has_value());
+    EXPECT_DOUBLE_EQ(*row->responsePain, 2.0);
+    EXPECT_EQ(row->notes, "operator note");
+}
+
+TEST(TreatmentLog, ADeliveredRowCannotBeRepointed) {
+    beam::gui::TreatmentLog log;
+    log.append(makeRow(1, "SCC1"));  // makeRow stamps a start: this one ran
+    EXPECT_FALSE(log.replacePlanned("Default", 1, 1, makeRow(1, "SCC5")));
+    EXPECT_EQ(log.find("Default", 1, 1)->target, "SCC1");
+}

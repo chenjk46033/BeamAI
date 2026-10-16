@@ -199,6 +199,11 @@ private:
     void startNewVisit();
     // Drops a visit that has delivered nothing, and goes to whatever is left.
     void deleteVisit(int visit);
+    // Points the treatment sonications still to come at whichever screened
+    // targets scored best. Runs once, when the operator asks.
+    void applyTargetRanking();
+    // Puts the rows the last ranking repointed back as they were.
+    void undoTargetRanking();
     // Which visit a protocol should open on: visits belong to a protocol, so
     // the number showing for the last one means nothing here.
     int visitForProtocol(const std::string& protocol) const;
@@ -372,6 +377,18 @@ private:
     // visit emptied of every row is indistinguishable from one never opened --
     // both have no rows -- and seeding the second must not refill the first.
     QSet<QString> editedVisits_;
+    QPushButton* rankTargetsButton_ = nullptr;
+    QPushButton* undoRankingButton_ = nullptr;
+    // What the rows the last ranking touched held before it touched them, so
+    // the operator can put the plan back. One ranking deep: the button undoes
+    // the press they just made, which is the one they can still be surprised
+    // by.
+    std::vector<beam::gui::TreatmentLogRow> rankingUndoRows_;
+    QString rankingUndoProtocol_;
+    int rankingUndoVisit_ = 0;
+    // Set while the ranking is rewriting the plan, so the reload it ends with
+    // does not send it round again.
+    bool applyingRanking_ = false;
     QPushButton* manageLibraryButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
     QTableView* protocolView_ = nullptr;

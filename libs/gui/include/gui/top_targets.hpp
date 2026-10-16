@@ -76,4 +76,40 @@ enum class AccFlag { kScc, kAmcc, kOther };
 BestTargets getTopTargetsFromTreatmentProtocolTable(const std::vector<TargetResponse>& responses,
                                                      AccFlag accFlag);
 
+// One row of a visit, as the ranking sees it. duration is in seconds and
+// decides what the row is for: under a minute is a screening sonication, a
+// minute or more is a treatment one.
+struct PlanRow {
+    int sequence = 0;
+    std::string target;
+    double duration = 0.0;
+    double response = 0.0;  // pain + mood, each already clamped to [-2, 2]
+    bool delivered = false;
+};
+
+// A planned row and the target it should run instead.
+struct RankedTarget {
+    int sequence = 0;
+    std::string target;
+};
+
+// Port of what updateSonicateSettingsForCurrentSonication.m does with the
+// function above. BeamV0 screens six short sonications and then runs long
+// ones at whichever of them scored best, cycling through the winners in rank
+// order -- its schedule is fixed at 24 rows, so it addresses those blocks by
+// number (1-6 feed 7-12, 13-18 feed 19-24) and the long rows are named T1-T6,
+// placeholders no Target List defines.
+//
+// A visit here holds whatever rows it was given, so the blocks are read off
+// the durations instead: each run of treatment rows takes the winners of the
+// screening rows immediately above it, which is the same thing for BeamV0's
+// own protocols. The region ranking that breaks ties comes from the names in
+// that screening block -- all SCC, all aMCC, or mixed -- where BeamV0 takes
+// it from the protocol name.
+//
+// Returns only the rows whose target changes. A delivered row is never one of
+// them: it already happened. A treatment run with no screening above it is
+// left alone rather than filled from a ranking of nothing.
+std::vector<RankedTarget> rankTreatmentRows(const std::vector<PlanRow>& plan);
+
 }  // namespace beam::gui

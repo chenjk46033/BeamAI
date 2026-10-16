@@ -34,6 +34,27 @@ std::vector<std::string> bestTargetsRanking(AccFlag flag) {
     }
 }
 
+constexpr double kScreeningSeconds = 60.0;
+
+bool startsWithIgnoringCase(const std::string& name, const std::string& prefix) {
+    if (name.size() < prefix.size()) return false;
+    return ieq(name.substr(0, prefix.size()), prefix);
+}
+
+// Which ranking breaks ties for this screening block: the one BeamV0 picks
+// from the protocol name, read off the targets instead.
+AccFlag regionOf(const std::vector<TargetResponse>& screening) {
+    bool allScc = true;
+    bool allAmcc = true;
+    for (const TargetResponse& row : screening) {
+        if (!startsWithIgnoringCase(row.name, "SCC")) allScc = false;
+        if (!startsWithIgnoringCase(row.name, "aMCC")) allAmcc = false;
+    }
+    if (allScc) return AccFlag::kScc;
+    if (allAmcc) return AccFlag::kAmcc;
+    return AccFlag::kOther;
+}
+
 void eraseValue(std::vector<int>& v, int value) {
     v.erase(std::remove(v.begin(), v.end(), value), v.end());
 }
@@ -247,6 +268,47 @@ BestTargets getTopTargetsFromTreatmentProtocolTable(const std::vector<TargetResp
     }
 
     return best;
+}
+
+}  // namespace beam::gui
+
+namespace beam::gui {
+
+std::vector<RankedTarget> rankTreatmentRows(const std::vector<PlanRow>& plan) {
+    std::vector<RankedTarget> changes;
+    std::vector<TargetResponse> screening;
+    std::size_t at = 0;
+    while (at < plan.size()) {
+        if (plan[at].duration < kScreeningSeconds) {
+            TargetResponse scored;
+            scored.sonicationNumber = plan[at].sequence;
+            scored.name = plan[at].target;
+            scored.numericResponse = plan[at].response;
+            scored.duration = plan[at].duration;
+            screening.push_back(std::move(scored));
+            ++at;
+            continue;
+        }
+        // A run of treatment rows, taking the winners of the screening block
+        // above it and cycling through them in rank order.
+        std::size_t end = at;
+        while (end < plan.size() && plan[end].duration >= kScreeningSeconds) ++end;
+        if (!screening.empty()) {
+            const BestTargets best =
+                getTopTargetsFromTreatmentProtocolTable(screening, regionOf(screening));
+            for (std::size_t row = at; row < end && !best.name.empty(); ++row) {
+                // The counter walks every row of the run, delivered ones
+                // included, so the pattern a visit is running keeps its shape
+                // as it goes.
+                const std::string& wanted = best.name[(row - at) % best.name.size()];
+                if (plan[row].delivered || plan[row].target == wanted) continue;
+                changes.push_back({plan[row].sequence, wanted});
+            }
+        }
+        screening.clear();
+        at = end;
+    }
+    return changes;
 }
 
 }  // namespace beam::gui

@@ -1079,3 +1079,63 @@ TEST(TreatmentWorkflow, BlockedStageRetainsOperatorFacingReason) {
               "Device did not respond on COM4.");
     EXPECT_FALSE(workflow.begin(beam::gui::WorkflowStage::Imaging));
 }
+
+// --- rankTreatmentRows ---
+
+namespace {
+beam::gui::PlanRow pr(int sequence, std::string target, double duration, double response = 0.0,
+                      bool delivered = false) {
+    beam::gui::PlanRow row;
+    row.sequence = sequence;
+    row.target = std::move(target);
+    row.duration = duration;
+    row.response = response;
+    row.delivered = delivered;
+    return row;
+}
+}  // namespace
+
+// BeamV0's PainSCCandAMCC shape: six 30 s screening sonications, six 180 s
+// treatment ones named T1-T3, then the same again for the other region. Each
+// treatment block takes the winners of the block above it.
+TEST(RankTreatmentRows, EachTreatmentBlockTakesTheScreeningBlockAboveIt) {
+    std::vector<beam::gui::PlanRow> plan = {
+        pr(1, "SCC1", 30, 1, true),  pr(2, "SCC2", 30, 4, true), pr(3, "SCC3", 30, 3, true),
+        pr(4, "SCC4", 30, -1, true), pr(5, "SCC5", 30, 2, true), pr(6, "SCC6", 30, 0, true),
+        pr(7, "T1", 180),            pr(8, "T2", 180),           pr(9, "T3", 180),
+        pr(10, "T3", 180),           pr(11, "T1", 180),          pr(12, "T2", 180),
+        pr(13, "aMCC1", 30, 2, true), pr(14, "aMCC2", 30, 1, true), pr(15, "aMCC3", 30, 4, true),
+        pr(16, "aMCC4", 30, 0, true), pr(17, "aMCC5", 30, 0, true), pr(18, "aMCC6", 30, 0, true),
+        pr(19, "T1", 180),           pr(20, "T2", 180),          pr(21, "T3", 180)};
+
+    const std::vector<beam::gui::RankedTarget> changes = beam::gui::rankTreatmentRows(plan);
+    std::vector<std::string> byRow;
+    for (const beam::gui::RankedTarget& change : changes)
+        byRow.push_back(std::to_string(change.sequence) + "=" + change.target);
+    // SCC2 (4), SCC3 (3), SCC5 (2) carry forward, cycling; then aMCC3 (4),
+    // aMCC1 (2), aMCC2 (1) for the second block.
+    EXPECT_EQ(byRow, (std::vector<std::string>{"7=SCC2", "8=SCC3", "9=SCC5", "10=SCC2", "11=SCC3",
+                                               "12=SCC5", "19=aMCC3", "20=aMCC1", "21=aMCC2"}));
+}
+
+TEST(RankTreatmentRows, ADeliveredRowKeepsWhatItRan) {
+    std::vector<beam::gui::PlanRow> plan = {pr(1, "SCC1", 30, 4, true), pr(2, "SCC2", 30, 1, true),
+                                            pr(3, "T1", 180, 0, true), pr(4, "T2", 180)};
+    const std::vector<beam::gui::RankedTarget> changes = beam::gui::rankTreatmentRows(plan);
+    // Row 3 already ran as T1 and is left alone; row 4 takes the second
+    // winner, because the counter still walks past the delivered row.
+    ASSERT_EQ(changes.size(), 1u);
+    EXPECT_EQ(changes.front().sequence, 4);
+    EXPECT_EQ(changes.front().target, "SCC2");
+}
+
+TEST(RankTreatmentRows, TreatmentRowsWithNothingScreenedAboveThemAreLeftAlone) {
+    std::vector<beam::gui::PlanRow> plan = {pr(1, "T1", 180), pr(2, "T2", 180)};
+    EXPECT_TRUE(beam::gui::rankTreatmentRows(plan).empty());
+}
+
+// A row already running the target the ranking would give it is not a change.
+TEST(RankTreatmentRows, NothingIsReportedWhenThePlanAlreadyMatches) {
+    std::vector<beam::gui::PlanRow> plan = {pr(1, "SCC1", 30, 4, true), pr(2, "SCC1", 180)};
+    EXPECT_TRUE(beam::gui::rankTreatmentRows(plan).empty());
+}

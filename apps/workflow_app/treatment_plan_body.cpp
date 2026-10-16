@@ -85,6 +85,7 @@
 #include "gui/countdown_presenter.hpp"
 #include "gui/sham_orchestrator.hpp"
 #include "gui/sonicate_orchestrator.hpp"
+#include "gui/top_targets.hpp"
 #include "gui/sonication_tab_presenter.hpp"
 #include "serialcom/command.hpp"
 #include "serialcom/serial_port.hpp"
@@ -682,6 +683,20 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
                                   QStringLiteral("Large")});
     hydrogelSizeCombo_->setCurrentIndex(0);  // HydrogelSizeButtonGroup's own default
     applyItemViewPalette(hydrogelSizeCombo_);
+    // On demand, never on its own: the plan changes when the operator presses
+    // this and not otherwise, and the message line says what it did.
+    rankTargetsButton_ = makeProtocolButton(
+        QStringLiteral("Rank Targets"),
+        QStringLiteral("Point the treatment sonications still to come at whichever targets "
+                       "scored best in the screening sonications above them. Delivered rows "
+                       "are never changed."));
+    rankTargetsButton_->setObjectName(QStringLiteral("rankTargetsButton"));
+    // A plan that changed under you is only safe if you can put it back.
+    undoRankingButton_ = makeProtocolButton(
+        QStringLiteral("Undo Ranking"),
+        QStringLiteral("Put the rows the last ranking repointed back as they were"));
+    undoRankingButton_->setObjectName(QStringLiteral("undoRankingButton"));
+    undoRankingButton_->setEnabled(false);
     auto* sonicationNumberLabel = new QLabel(QStringLiteral("Current Sonication Number:"), protocolTab);
     currentSonicationNumberLabel_ = new QLabel(protocolTab);
     currentSonicationNumberLabel_->setStyleSheet(QStringLiteral(
@@ -700,6 +715,9 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolSelectorRow->addSpacing(18);
     protocolSelectorRow->addWidget(hydrogelLabel);
     protocolSelectorRow->addWidget(hydrogelSizeCombo_);
+    protocolSelectorRow->addSpacing(18);
+    protocolSelectorRow->addWidget(rankTargetsButton_);
+    protocolSelectorRow->addWidget(undoRankingButton_);
     protocolSelectorRow->addStretch(1);
     protocolSelectorRow->addWidget(manageLibraryButton_);
     protocolSelectorRow->addWidget(manageTargetsButton_);
@@ -912,6 +930,8 @@ void WorkflowWindow::wireTreatmentPlanBody() {
             loadTreatmentProtocol(currentProtocolName());
         }, Qt::QueuedConnection);
     });
+    connect(rankTargetsButton_, &QPushButton::clicked, this, [this] { applyTargetRanking(); });
+    connect(undoRankingButton_, &QPushButton::clicked, this, [this] { undoTargetRanking(); });
     connect(computeBestTargetsButton_, &QPushButton::clicked, this, [this] { updateBestTargets(); });
     connect(accFlagCombo_, &QComboBox::currentTextChanged, this, [this] {
         updateBestTargets();
@@ -1571,6 +1591,114 @@ void WorkflowWindow::updateSonicationPlots() {
     }
 }
 
+// BeamV0 re-ranks after every sonication, silently. This runs when the
+// operator presses the button, says what it changed, and can be put back: a
+// plan that rewrites itself between sonications is a plan nobody can hold in
+// their head.
+void WorkflowWindow::applyTargetRanking() {
+    if (applyingRanking_) return;
+    const QString protocolName = currentProtocolName();
+    const std::string protocol = protocolName.toStdString();
+    const int visit = currentVisitNumber();
+    std::vector<beam::gui::PlanRow> plan;
+    for (const beam::gui::TreatmentLogRow& row : treatmentLog_.rowsFor(protocol, visit)) {
+        beam::gui::PlanRow entry;
+        entry.sequence = row.sequence;
+        entry.target = row.target;
+        entry.duration = row.endTimeSeconds - row.startTimeSeconds;
+        entry.response = beam::gui::TreatmentLog::responseTotal(row);
+        entry.delivered = beam::gui::TreatmentLog::delivered(row);
+        plan.push_back(std::move(entry));
+    }
+    bool anyTreatmentRow = false;
+    for (const beam::gui::PlanRow& row : plan)
+        if (!row.delivered && row.duration >= 60.0) anyTreatmentRow = true;
+    if (!anyTreatmentRow) {
+        showMessage(QStringLiteral("Nothing to rank: this visit has no treatment sonication "
+                                   "left to run. Ranking repoints the long sonications, not "
+                                   "the screening ones."),
+                    true);
+        return;
+    }
+    const std::vector<beam::gui::RankedTarget> changes = beam::gui::rankTreatmentRows(plan);
+    if (changes.empty()) {
+        showMessage(
+            QStringLiteral("Target ranking: the plan already runs the best-scoring targets."),
+            false);
+        return;
+    }
+
+    applyingRanking_ = true;
+    std::vector<beam::gui::TreatmentLogRow> undo;
+    for (const beam::gui::RankedTarget& change : changes) {
+        // Not the one going out: it is already on its way to the hardware.
+        if (change.sequence == openLogSequence_) continue;
+        const beam::gui::TreatmentLogRow* was =
+            treatmentLog_.find(protocol, visit, change.sequence);
+        if (was == nullptr) continue;
+        const beam::gui::TreatmentLogRow before = *was;
+        // The duration is the plan's and stays; everything else comes from
+        // the target the row now runs.
+        beam::gui::TreatmentLogRow row =
+            rowForTarget(change.target, before.endTimeSeconds - before.startTimeSeconds);
+        if (treatmentLog_.replacePlanned(protocol, visit, change.sequence, std::move(row)))
+            undo.push_back(before);
+    }
+    const int moved = static_cast<int>(undo.size());
+    if (moved > 0) {
+        rankingUndoRows_ = std::move(undo);
+        rankingUndoProtocol_ = protocolName;
+        rankingUndoVisit_ = visit;
+        if (undoRankingButton_ != nullptr) undoRankingButton_->setEnabled(true);
+        loadTreatmentProtocol(protocolName);
+        saveTreatmentTargetStore();
+    }
+    applyingRanking_ = false;
+    if (moved > 0)
+        showMessage(QStringLiteral("Target ranking repointed %1 sonication(s) still to run. "
+                                   "Undo Ranking puts them back.")
+                        .arg(moved),
+                    false);
+}
+
+void WorkflowWindow::undoTargetRanking() {
+    if (applyingRanking_ || rankingUndoRows_.empty()) return;
+    const QString protocolName = currentProtocolName();
+    if (protocolName != rankingUndoProtocol_ || currentVisitNumber() != rankingUndoVisit_) {
+        showMessage(QStringLiteral("The ranking to undo was in visit %1 of \"%2\".")
+                        .arg(rankingUndoVisit_)
+                        .arg(rankingUndoProtocol_),
+                    true);
+        return;
+    }
+    applyingRanking_ = true;
+    const std::string protocol = protocolName.toStdString();
+    int back = 0;
+    int ran = 0;
+    for (const beam::gui::TreatmentLogRow& row : rankingUndoRows_) {
+        // A row delivered since the ranking is a record now, and replacePlanned
+        // refuses it. It keeps the target it actually ran.
+        if (treatmentLog_.replacePlanned(protocol, rankingUndoVisit_, row.sequence, row))
+            ++back;
+        else
+            ++ran;
+    }
+    rankingUndoRows_.clear();
+    rankingUndoProtocol_.clear();
+    rankingUndoVisit_ = 0;
+    if (undoRankingButton_ != nullptr) undoRankingButton_->setEnabled(false);
+    loadTreatmentProtocol(protocolName);
+    saveTreatmentTargetStore();
+    applyingRanking_ = false;
+    showMessage(ran == 0
+                    ? QStringLiteral("Ranking undone: %1 sonication(s) put back.").arg(back)
+                    : QStringLiteral("Ranking undone for %1 sonication(s); %2 had already run "
+                                     "and keep what they delivered.")
+                          .arg(back)
+                          .arg(ran),
+                false);
+}
+
 void WorkflowWindow::updateBestTargets() {
     if (!bestTargetsList_ || !protocolModel_) return;
     const beam::gui::AccFlag flag = accFlagCombo_->currentIndex() == 1   ? beam::gui::AccFlag::kScc
@@ -1758,6 +1886,9 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     treatmentExecutionProgressBar_->setRange(0, 100);
     treatmentExecutionProgressBar_->setValue(0);
     treatmentExecutionProgressBar_->setTextVisible(false);
+    // Only while something is running: a bar left on the page with nothing
+    // moving reads as a sonication that never finished.
+    treatmentExecutionProgressBar_->setVisible(false);
     treatmentExecutionProgressBar_->setMinimumHeight(24);
     treatmentExecutionProgressBar_->setMinimumWidth(210);
     treatmentExecutionProgressBar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -1894,10 +2025,11 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
             sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
             closeOpenLogRow();
             stopShamAudio();
-            // Back to empty rather than sitting at 100%: the Completed column
-            // now says the sonication finished, and a full bar left on screen
-            // reads as one still in progress.
+            // Off the page rather than sitting at 100%: the Status column now
+            // says the sonication finished, and a bar left on screen reads as
+            // one still in progress.
             treatmentExecutionProgressBar_->setValue(0);
+            treatmentExecutionProgressBar_->setVisible(false);
             setSonicateEnabled(true);
             finishTreatmentButton_->setEnabled(true);
             return;
@@ -1950,14 +2082,23 @@ void WorkflowWindow::saveVisitState() const {
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return;
     QTextStream out(&file);
     out << "Protocol,Visit,CurrentSonication,Edited\n";
+    // Every visit any of the three knows about: one created and left empty
+    // has no position of its own, and writing only the positions lost it.
+    QSet<QString> keys;
     for (auto entry = visitSonication_.constBegin(); entry != visitSonication_.constEnd();
-         ++entry) {
-        const int split = entry.key().lastIndexOf(QLatin1Char('|'));
+         ++entry)
+        keys.insert(entry.key());
+    keys.unite(editedVisits_);
+    QStringList ordered(keys.constBegin(), keys.constEnd());
+    ordered.sort();  // a stable file, so a diff of it means something
+    for (const QString& key : ordered) {
+        const int split = key.lastIndexOf(QLatin1Char('|'));
         if (split <= 0) continue;
-        QString protocol = entry.key().left(split);
+        QString protocol = key.left(split);
         protocol.replace(QLatin1Char('"'), QStringLiteral("\"\""));
-        out << '"' << protocol << "\"," << entry.key().mid(split + 1) << ',' << entry.value()
-            << ',' << (editedVisits_.contains(entry.key()) ? 1 : 0) << '\n';
+        out << '"' << protocol << "\"," << key.mid(split + 1) << ','
+            << visitSonication_.value(key, 1) << ',' << (editedVisits_.contains(key) ? 1 : 0)
+            << '\n';
     }
 }
 
@@ -1976,31 +2117,39 @@ void WorkflowWindow::loadVisitState() {
     while (!in.atEnd()) {
         const QString line = in.readLine();
         if (line.trimmed().isEmpty()) continue;
-        // The protocol is quoted and may hold a comma; the two numbers after it
-        // cannot, so splitting from the right is enough.
-        // Protocol,Visit,CurrentSonication[,Edited]. Edited is read off the
-        // end when present, so a file written before the column still loads.
-        QString body = line;
-        bool edited = false;
-        if (body.count(QLatin1Char(',')) >= 3) {
-            const int tail = body.lastIndexOf(QLatin1Char(','));
-            edited = body.mid(tail + 1).trimmed() == QLatin1String("1");
-            body = body.left(tail);
+        // "Protocol",Visit,CurrentSonication[,Edited] -- the protocol
+        // is quoted because it may hold a comma; everything after it is a
+        // plain number. Edited is read when present, so a file
+        // written before it still loads.
+        if (!line.startsWith(QLatin1Char('"'))) continue;
+        QString protocol;
+        int at = 1;
+        bool closed = false;
+        while (at < line.size()) {
+            if (line.at(at) == QLatin1Char('"')) {
+                if (at + 1 < line.size() && line.at(at + 1) == QLatin1Char('"')) {
+                    protocol += QLatin1Char('"');
+                    at += 2;
+                    continue;
+                }
+                closed = true;
+                ++at;
+                break;
+            }
+            protocol += line.at(at);
+            ++at;
         }
-        const int lastComma = body.lastIndexOf(QLatin1Char(','));
-        const int firstComma = body.lastIndexOf(QLatin1Char(','), lastComma - 1);
-        if (firstComma <= 0) continue;
-        QString protocol = body.left(firstComma).trimmed();
-        if (protocol.startsWith(QLatin1Char('"')) && protocol.endsWith(QLatin1Char('"')))
-            protocol = protocol.mid(1, protocol.size() - 2).replace(QStringLiteral("\"\""),
-                                                                    QStringLiteral("\""));
+        if (!closed || at >= line.size() || line.at(at) != QLatin1Char(',')) continue;
+        const QStringList fields = line.mid(at + 1).split(QLatin1Char(','));
+        if (fields.size() < 2) continue;
         bool visitOk = false;
         bool positionOk = false;
-        const int visit = body.mid(firstComma + 1, lastComma - firstComma - 1).toInt(&visitOk);
-        const int position = body.mid(lastComma + 1).toInt(&positionOk);
+        const int visit = fields.at(0).trimmed().toInt(&visitOk);
+        const int position = fields.at(1).trimmed().toInt(&positionOk);
         if (!visitOk || !positionOk || visit <= 0 || position <= 0) continue;
-        visitSonication_.insert(visitKey(protocol, visit), position);
-        if (edited) editedVisits_.insert(visitKey(protocol, visit));
+        const QString key = visitKey(protocol, visit);
+        visitSonication_.insert(key, position);
+        if (fields.value(2).trimmed() == QLatin1String("1")) editedVisits_.insert(key);
     }
 }
 
@@ -2927,6 +3076,7 @@ void WorkflowWindow::startSonicationCountdown(int durationSeconds, bool sham) {
     setSonicateEnabled(false);
     sonicationCountdownLabel_->setText(
         QString::fromStdString(beam::gui::countdownDisplayText(sonicationCountdownSeconds_)));
+    treatmentExecutionProgressBar_->setVisible(true);
     sonicationCountdownTimer_->start();
     // After the timer is running, so the button reads "Sonicating..." rather
     // than merely going grey.
@@ -2939,6 +3089,8 @@ void WorkflowWindow::abortSonication() {
     sonicationCountdownTimer_->stop();
     if (runningFlashTimer_ != nullptr) runningFlashTimer_->stop();
     sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
+    treatmentExecutionProgressBar_->setValue(0);
+    treatmentExecutionProgressBar_->setVisible(false);
     closeOpenLogRow(/*aborted=*/true);
     stopShamAudio();
     setSonicateEnabled(true);

@@ -33,7 +33,9 @@ QIcon makeTick(const QColor& colour, bool cutShort) {
     canvas.fill(Qt::transparent);
     QPainter painter(&canvas);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    QPen stroke(colour, 2.6);
+    // A stopped sonication keeps the tick -- it ran -- but in grey, so the
+    // red slash across it is what the eye lands on.
+    QPen stroke(cutShort ? QColor(0x9a, 0xa7, 0xad) : colour, 2.6);
     stroke.setCapStyle(Qt::RoundCap);
     stroke.setJoinStyle(Qt::RoundJoin);
     painter.setPen(stroke);
@@ -44,13 +46,15 @@ QIcon makeTick(const QColor& colour, bool cutShort) {
         // Struck through: the sonication happened, but not all of it. The
         // tick stays underneath because energy did go out -- the row is a
         // record, not a plan that was abandoned.
-        // Shorter and thinner than the tick it crosses: it qualifies the tick
-        // rather than competing with it. Corner to corner at the tick's own
-        // weight read as a cross, which means failed, and this did not fail.
-        QPen bar(colour, 1.7);
+        // The slash is red and crosses the whole icon, and the tick under it
+        // is drawn in grey rather than the colour it would have had. Colour
+        // does the work: a short slash in the tick's own colour was a
+        // difference you had to look for, and in a column of ticks nobody
+        // looks that hard.
+        QPen bar(QColor(0xff, 0x55, 0x4a), 2.6);
         bar.setCapStyle(Qt::RoundCap);
         painter.setPen(bar);
-        painter.drawLine(QPointF(5.2, 5.2), QPointF(11.0, 11.0));
+        painter.drawLine(QPointF(2.6, 2.6), QPointF(13.4, 13.4));
     }
     return QIcon(canvas);
 }
@@ -66,6 +70,8 @@ QIcon makeTick(const QColor& colour, bool cutShort) {
 QIcon deliveredTick(bool sham, bool aborted) {
     static const QIcon real = makeTick(QColor(0x5e, 0xc4, 0x6a), false);    // light green
     static const QIcon masked = makeTick(QColor(0xe0, 0xa3, 0x2e), false);  // amber
+    // Both stopped icons are the same grey tick under the same red slash:
+    // what matters about the row is that it was cut short.
     static const QIcon realCut = makeTick(QColor(0x5e, 0xc4, 0x6a), true);
     static const QIcon maskedCut = makeTick(QColor(0xe0, 0xa3, 0x2e), true);
     if (aborted) return sham ? maskedCut : realCut;
