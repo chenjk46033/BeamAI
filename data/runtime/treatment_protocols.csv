@@ -149,6 +149,4 @@ Default,23,T3,0.75,300
 Default,24,T1,0.75,240
 Protocol1,1,SCC3,,30
 Protocol1,2,SCC1,,30
-Protocol1,3,SCC3,,30
-Protocol2,1,SCC1,,30
-Protocol2,2,SCC2,,30
+Protocol1,3,SCC2,,30
