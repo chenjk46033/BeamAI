@@ -328,11 +328,11 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
     if (navigationCrosshairVisible_) {
         const double x = displayed.left() + crosshair_.x() * displayed.width();
         const double y = displayed.top() + crosshair_.y() * displayed.height();
-        painter.setPen(QPen(QColor(40, 225, 245, 235), 2.0));
+        // The same green as the target marker, hairline and aliased: it has
+        // to say where the target is without covering the anatomy under it.
+        painter.setPen(QPen(QColor(65, 235, 100, 235), 0.0));
         painter.drawLine(QPointF(x, displayed.top()), QPointF(x, displayed.bottom()));
         painter.drawLine(QPointF(displayed.left(), y), QPointF(displayed.right(), y));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(QPointF(x, y), 5.0, 5.0);
     }
 
     painter.setRenderHint(QPainter::Antialiasing, true);

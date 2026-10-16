@@ -3,6 +3,8 @@
 #include <QMainWindow>
 #include <QHash>
 #include <QPointF>
+#include <QPointer>
+#include <QSet>
 #include <QSize>
 #include <array>
 #include <memory>
@@ -62,6 +64,9 @@ class SerialPort;
 
 namespace beam::app {
 
+// The Targeting Examples panes: pan and zoom in place, example_image_view.hpp.
+class ExampleImageView;
+
 class WorkflowWindow final : public QMainWindow {
 public:
     explicit WorkflowWindow(QWidget* parent = nullptr);
@@ -78,6 +83,10 @@ private:
     void setRegistrationPhase(RegistrationPhase phase);
     void selectStage(beam::gui::WorkflowStage stage);
     void completeCurrentStage();
+    // Where the three imaging dialogs open: the last place one was used,
+    // falling back to the MRI library.
+    QString imagingStartDirectory() const;
+    void rememberImagingDirectory(const QString& path);
     void chooseNifti();
     void chooseDicomDirectory();
     void chooseBeamSession();
@@ -167,13 +176,49 @@ private:
     void recordSonicationStart(const beam::gui_qt::StimParamRow& row, bool sham,
                                std::optional<double> attenuation,
                                std::optional<double> dutyCycle);
-    void closeOpenLogRow();
+    void closeOpenLogRow(bool aborted = false);
+    // Sonicate always runs the treatment table row for the current sonication
+    // number; this puts the Target List back on it before firing.
+    bool selectScheduledTarget();
     static QByteArray wavFromSamples(const std::vector<double>& samples, int sampleRate);
     void playShamAudio(const std::vector<double>& samples, int sampleRate);
     void stopShamAudio();
     void advanceToNextScheduledSonication();
     void showScheduleRowMenu(const QPoint& where);
+    void placeSonicateButton(int oneBased);
+    void setSonicateEnabled(bool enabled);
+    void paintRunningButton();
     void selectScheduledSonication(int oneBased);
+    void refreshVisitCombo();
+    // Selects a visit by number, whatever the item happens to read.
+    void selectVisit(int visit);
+    // Whether that visit has been created: it has rows, or it was created
+    // empty and is remembered as such.
+    bool visitExists(const QString& protocol, int visit) const;
+    // Creates the next empty visit of the current protocol and goes to it.
+    void startNewVisit();
+    // Drops a visit that has delivered nothing, and goes to whatever is left.
+    void deleteVisit(int visit);
+    // Which visit a protocol should open on: visits belong to a protocol, so
+    // the number showing for the last one means nothing here.
+    int visitForProtocol(const std::string& protocol) const;
+    // visitSonication_ outlives the session: the operator sets where a visit is
+    // and expects to find it there after a restart.
+    void loadVisitState();
+    void saveVisitState() const;
+    void markVisitEdited(const QString& protocol, int visit);
+    // One scheduled sonication, as the row a visit holds: the target's own
+    // parameters, with the schedule contributing only the duration.
+    beam::gui::TreatmentLogRow rowForTarget(const std::string& target,
+                                            std::optional<double> durationSeconds) const;
+    // Appends every sonication of the chosen protocol to the current visit.
+    // Puts every sonication of a chosen protocol into this visit, after the
+    // given row. Zero, or a row nothing may follow, puts them at the end.
+    void addProtocolToVisit(int afterSequence);
+    // Appends one sonication, the target chosen by the operator.
+    void addRowToVisit();
+    QString visitStatePath() const;
+    static QString visitKey(const QString& protocol, int visit);
     void writeTargetPointsToStore();
     void openTreatmentLibrary(TreatmentLibraryDialog::Page page);
     void applyTreatmentLibrary(const beam::gui::TreatmentTargetStore& edited);
@@ -190,7 +235,7 @@ private:
     void buildTreatmentExecutionBody(const QString& acceptButtonStyle);
     void setSerialConnectedLamp(bool connected);
     void runSonication(bool sham);
-    void startSonicationCountdown(int durationSeconds);
+    void startSonicationCountdown(int durationSeconds, bool sham);
     void abortSonication();
     void finishTreatmentStage();
 
@@ -218,6 +263,11 @@ private:
     static constexpr int kTreatmentControlsHeight = 54;
     // treatmentProtocolTables(i).sessions is 15 long in BeamV0.
     static constexpr int kMaxTreatmentVisits = 15;
+    // Every action button on the Registration page stands this tall, so the two
+    // step rows line up across the page.
+    static constexpr int kRegistrationButtonHeight = 30;
+    // The visit list's last item, which makes a visit rather than being one.
+    static constexpr int kNewVisitItem = -1;
 
     Ui::WorkflowShell* ui_;
     beam::gui::TreatmentWorkflow workflow_;
@@ -240,6 +290,7 @@ private:
     Eigen::Vector3d targetMm_ = Eigen::Vector3d::Zero();
     bool registrationGeometryLoaded_ = false;
     RegistrationPhase registrationPhase_ = RegistrationPhase::Locating;
+    QString lastImagingDirectory_;
     bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
     bool focusImageLoaded_ = false;
@@ -261,6 +312,7 @@ private:
     // The picker is rebuilt per right-click, so the pick is remembered here.
     int treatmentFiducialPick_ = -1;
     QLabel* arrayPositionLabel_ = nullptr;
+    QPushButton* moveToArrayPositionButton_ = nullptr;
     QLabel* couplingStatusLabel_ = nullptr;
     QLabel* couplingTitleLabel_ = nullptr;
     QLabel* couplingDescriptionLabel_ = nullptr;
@@ -284,6 +336,10 @@ private:
     // the target row's stable id so a rename or insert cannot orphan it.
     QHash<int, std::vector<beam::gui_qt::StimParamRow>> targetSonications_;
     int currentTargetId_ = -1;
+    // Which target the sonication grid is actually showing. Only equal to
+    // currentTargetId_ once the grid has been refilled for it; caching while
+    // they differ writes one target's parameters onto another.
+    int gridTargetId_ = -1;
     int nextTargetId_ = 0;
     QSize lastMriSyncWindowSize_;
     // The stack height this window can afford, learned before any page has
@@ -308,9 +364,19 @@ private:
     // Which protocol the schedule table currently holds, so a reload of the
     // same one does not throw away the visit's position.
     QString lastLoadedProtocol_;
+    int lastLoadedVisit_ = 0;
+    // Where each visit of each protocol had got to, keyed by visitKey().
+    // Written to treatment_visit_state.csv on every change.
+    QHash<QString, int> visitSonication_;
+    // Visits whose row list the operator has changed by hand. Kept because a
+    // visit emptied of every row is indistinguishable from one never opened --
+    // both have no rows -- and seeding the second must not refill the first.
+    QSet<QString> editedVisits_;
     QPushButton* manageLibraryButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
     QTableView* protocolView_ = nullptr;
+    // Takes the height the table leaves behind while it is hidden.
+    QSpacerItem* protocolEmptySpacer_ = nullptr;
     QListWidget* targetListWidget_ = nullptr;
     QPushButton* moveToTargetButton_ = nullptr;
     QPushButton* manageTargetsButton_ = nullptr;
@@ -326,15 +392,17 @@ private:
     QChartView* couplingCh0ChartView_ = nullptr;
     QChartView* couplingCh1ChartView_ = nullptr;
     QChartView* couplingBarChartView_ = nullptr;
-    QPushButton* newVisitButton_ = nullptr;
     QComboBox* hydrogelSizeCombo_ = nullptr;
-    QSpinBox* currentSonicationNumberEdit_ = nullptr;
+    // Shown, not typed: sonicating out of order is not something the
+    // operator chooses, so the number is a readout and the schedule moves it.
+    QLabel* currentSonicationNumberLabel_ = nullptr;
+    int currentSonication_ = 1;
     QComboBox* accFlagCombo_ = nullptr;
     QPushButton* computeBestTargetsButton_ = nullptr;
     QListWidget* bestTargetsList_ = nullptr;
-    QLabel* exampleTargetImage_ = nullptr;
-    QLabel* exampleTargetImage2_ = nullptr;
-    QLabel* exampleTargetImage3_ = nullptr;
+    ExampleImageView* exampleTargetImage_ = nullptr;
+    ExampleImageView* exampleTargetImage2_ = nullptr;
+    ExampleImageView* exampleTargetImage3_ = nullptr;
     QLabel* exampleTargetText_ = nullptr;
     beam::gui_qt::PulseWaveformView* pulsePlotView_ = nullptr;
     beam::gui_qt::PulseWaveformView* burstPlotView_ = nullptr;
@@ -350,9 +418,24 @@ private:
     QLabel* treatmentExecutionTitleLabel_ = nullptr;
     QLabel* treatmentExecutionDescriptionLabel_ = nullptr;
     QProgressBar* treatmentExecutionProgressBar_ = nullptr;
-    QPushButton* startTreatmentButton_ = nullptr;
-    QPushButton* abortTreatmentButton_ = nullptr;
-    QPushButton* shamButton_ = nullptr;
+    // Sonicate lives on the current row of the treatment log, not in a pane.
+    // placeSonicateButton owns it; sonicateEnabled_ is the gate it is built
+    // with, since the row it sits on comes and goes.
+    // QPointer, not a raw pointer: setIndexWidget destroys whatever widget it
+    // replaces, so this can be left naming a button Qt has already deleted. It
+    // nulls itself instead.
+    QPointer<QPushButton> inRowSonicateButton_;
+    QPointer<QPushButton> inRowShamButton_;
+    QPointer<QPushButton> inRowStopButton_;
+    // Not a control: the panel lamp that says the row is live.
+    QPointer<QLabel> inRowOnLamp_;
+    // While a sonication runs the row button pulses, so a glance at the table
+    // says something is going out without reading the countdown. Which colour
+    // it pulses in says whether ultrasound or only the mask is going out.
+    QTimer* runningFlashTimer_ = nullptr;
+    bool runningFlashOn_ = false;
+    bool runningSham_ = false;
+    bool sonicateEnabled_ = false;
     QPushButton* finishTreatmentButton_ = nullptr;
     QComboBox* serialPortCombo_ = nullptr;
     QPushButton* serialConnectButton_ = nullptr;
@@ -361,7 +444,9 @@ private:
     QLabel* sonicationCountdownLabel_ = nullptr;
     QTimer* sonicationCountdownTimer_ = nullptr;
     int sonicationCountdownSeconds_ = 0;
-    int sonicationCountdownTicks_ = 0;
+    // When the running sonication is due to end, as a wall clock. Counting
+    // ticks instead let the run overshoot what the row asked for.
+    qint64 sonicationDeadlineMs_ = 0;
     std::unique_ptr<beam::serialcom::SerialPort> serialLink_;
     // The through-transmit amplitude the Correction stage measured.
     // prepareSonication compares it against kCouplingThreshold, so it has to

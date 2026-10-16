@@ -66,6 +66,7 @@ QVariant StimParamTableModel::data(const QModelIndex& index, int role) const {
         return QVariant();
     }
     switch (index.column()) {
+        case kTarget: return targetName_;
         case kOrder: return r.order;
         case kShow: return QVariant();  // rendered via CheckStateRole only
         case kX: return r.x;
@@ -118,6 +119,7 @@ QVariant StimParamTableModel::headerData(int section, Qt::Orientation orientatio
     // setStimParamTableNames.m's renames, plus the table()-default names for
     // the columns it doesn't override.
     switch (section) {
+        case kTarget: return QStringLiteral("Target");
         case kOrder: return QStringLiteral("#");
         case kShow: return QStringLiteral("Show");
         case kX: return QStringLiteral("X");
@@ -141,7 +143,8 @@ Qt::ItemFlags StimParamTableModel::flags(const QModelIndex& index) const {
     Qt::ItemFlags f = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
     if (index.column() == kShow) {
         f |= Qt::ItemIsUserCheckable;
-    } else {
+    } else if (index.column() != kTarget) {
+        // The target is chosen in the Target List, not typed here.
         f |= Qt::ItemIsEditable;
     }
     return f;
@@ -151,6 +154,14 @@ void StimParamTableModel::setRows(std::vector<StimParamRow> rows) {
     beginResetModel();
     rows_ = std::move(rows);
     endResetModel();
+}
+
+void StimParamTableModel::setTargetName(const QString& name) {
+    if (targetName_ == name) return;
+    targetName_ = name;
+    if (rows_.empty()) return;
+    emit dataChanged(index(0, kTarget), index(static_cast<int>(rows_.size()) - 1, kTarget),
+                     {Qt::DisplayRole, Qt::EditRole});
 }
 
 void StimParamTableModel::sortByOrderColumn() {

@@ -45,6 +45,13 @@ struct TreatmentLogRow {
     // Sham deliveries are logged too: a masked sonication is part of the
     // record, and omitting it would leave an unexplained gap in the sequence.
     bool sham = false;
+    // How the delivery ended, as an HTTP status: 0 before it is run, 102
+    // Processing while it is going out, 200 OK when it ran to the end, 499
+    // Client Closed Request when the operator stopped it part-way. HTTP has no
+    // standard code for a cancelled operation -- 499 is nginx's, and it is the
+    // one every log reader already knows -- so the meaning is spelled out in
+    // the constants below rather than left to the number.
+    int statusCode = 0;
     // ISO-8601 local time. Empty end means it was aborted or is still running.
     std::string startedAt;
     std::string endedAt;
@@ -98,10 +105,21 @@ public:
     // so an action that cannot work is disabled rather than refused after the
     // operator has chosen a target.
     bool canInsertAfter(const std::string& protocol, int visit, int sequence) const;
+    // The same, above the given position: the row there and everything below
+    // it moves down, so this refuses if any of them has been fired. This is
+    // how a sonication is added at the current position rather than after it.
+    bool insertBefore(const std::string& protocol, int visit, int sequence, TreatmentLogRow row);
+    bool canInsertBefore(const std::string& protocol, int visit, int sequence) const;
     // Drops a sonication the visit has not run, closing the gap. Refuses a
     // row that has been fired, and one whose removal would move a fired row.
     bool removeAt(const std::string& protocol, int visit, int sequence);
     bool canRemoveAt(const std::string& protocol, int visit, int sequence) const;
+    // Drops the whole visit. Refuses one that has delivered anything: what a
+    // visit did is not something a later decision can erase. Returns how many
+    // rows went. Numbering is left alone -- a visit number is where something
+    // happened, so the ones after it keep theirs and the gap stays.
+    int removeVisit(const std::string& protocol, int visit);
+    bool canRemoveVisit(const std::string& protocol, int visit) const;
     // The row at one scheduled position, or nullptr.
     const TreatmentLogRow* find(const std::string& protocol, int visit, int sequence) const;
     // True once the visit has stopped following the plan -- something has been
@@ -110,11 +128,19 @@ public:
     bool visitFrozen(const std::string& protocol, int visit) const;
     // True once the row has actually been fired, as opposed to merely seeded.
     static bool delivered(const TreatmentLogRow& row) { return !row.startedAt.empty(); }
+
+    // The states a delivery passes through, as HTTP statuses.
+    static constexpr int kRunning = 102;    // Processing
+    static constexpr int kCompleted = 200;  // OK
+    static constexpr int kStopped = 499;    // Client Closed Request (nginx)
+    static bool stopped(const TreatmentLogRow& row) { return row.statusCode == kStopped; }
     // Records a response or a note against an existing row. False if no such
     // row exists.
     bool setResponse(const std::string& protocol, int visit, int sequence,
                      std::optional<double> pain, std::optional<double> mood);
     bool setNotes(const std::string& protocol, int visit, int sequence, const std::string& notes);
+    // Records how a delivery ended. False if the position is unknown.
+    bool setStatus(const std::string& protocol, int visit, int sequence, int statusCode);
     // Stamps the end time on a row left open by a delivery.
     bool close(const std::string& protocol, int visit, int sequence, const std::string& endedAt);
 

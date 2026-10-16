@@ -23,8 +23,10 @@
 #include <QStyle>
 #include <QProxyStyle>
 #include <QStyleOptionSlider>
+#include <QHelpEvent>
 #include <QToolTip>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -587,6 +589,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
 
     auto* markerActions = new QHBoxLayout;
     markerActions->setContentsMargins(0, 0, 0, 0);
+    for (QPushButton* button : {ui_->confirmFiducialButton, ui_->registerFiducialsButton})
+        button->setFixedHeight(kRegistrationButtonHeight);
     markerActions->setSpacing(4);
     markerActions->addWidget(ui_->confirmFiducialButton, 1);
     markerActions->addWidget(ui_->registerFiducialsButton, 1);
@@ -595,7 +599,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     markerTableLayout->setAlignment(ui_->registrationTable, Qt::AlignTop);
     markerTableLayout->setAlignment(markerActions, Qt::AlignTop);
     ui_->registrationLayout->removeWidget(ui_->acceptRegistrationButton);
-    ui_->acceptRegistrationButton->setMinimumHeight(30);
+    ui_->acceptRegistrationButton->setFixedHeight(kRegistrationButtonHeight);
     // Import is where the stage starts, Save where it ends: nothing is worth
     // saving until the fiducials have been measured and registered.
     markerSplitterLayout->addWidget(markerTablePanel, 2);
@@ -659,8 +663,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto makeLockPanel = [&](const QString& title, QSlider*& horizontal, QSlider*& vertical) {
         auto* panel = new QGroupBox(title, calibrationGroup);
         panel->setMinimumWidth(195);
-        panel->setMinimumHeight(145);
-        panel->setMaximumHeight(145);
+        // 145 plus the height the status message used to take above the buttons: the
+        // taller groove is easier to set, and the button row below it stays
+        // level with the action rows of the two panes to the left.
+        panel->setMinimumHeight(178);
+        panel->setMaximumHeight(178);
         panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         auto* panelLayout = new QGridLayout(panel);
         panelLayout->setContentsMargins(5, 2, 5, 2);
@@ -675,7 +682,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         horizontal->setObjectName(title.startsWith(QStringLiteral("Subject Left"))
                                       ? QStringLiteral("leftHorizontalPositionSlider")
                                       : QStringLiteral("rightHorizontalPositionSlider"));
-        vertical->setFixedHeight(88);
+        vertical->setFixedHeight(121);
         vertical->setFixedWidth(50);
         vertical->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         horizontal->setMinimumWidth(120);
@@ -692,7 +699,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     calibrationControls->addWidget(makeLockPanel(QStringLiteral("Subject Right"),
                                                   rightHorizontalPositionSlider_, rightVerticalPositionSlider_), 0);
     registerCurrentPositionButton_ = new QPushButton(QStringLiteral("Register Arrays to Current Position"), calibrationGroup);
-    registerCurrentPositionButton_->setMinimumHeight(30);
+    registerCurrentPositionButton_->setFixedHeight(kRegistrationButtonHeight);
     registerCurrentPositionButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     registerCurrentPositionButton_->setStyleSheet(QStringLiteral(
         "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
@@ -702,19 +709,32 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "Apply the BeamV0 lock-position offset after registering the array to MRI fiducials"));
     // Without this the spare height lands between the panels and the button,
     // pushing it off the bottom of a non-maximised window.
-    auto* step2Buttons = new QVBoxLayout;
+    // Side by side, not stacked: both are step 2 actions, and on one line they
+    // sit level with step 1 action row in the pane to their left instead of
+    // hanging below it.
+    auto* step2Buttons = new QHBoxLayout;
     step2Buttons->setContentsMargins(0, 0, 0, 0);
     step2Buttons->setSpacing(4);
-    step2Buttons->addWidget(registerCurrentPositionButton_);
-    step2Buttons->addWidget(ui_->acceptRegistrationButton);
+    // One height for every button on this page. Accept was given the column's
+    // spare height and stood 14px taller than the rest.
+    for (QPushButton* button : {registerCurrentPositionButton_, ui_->acceptRegistrationButton}) {
+        button->setFixedHeight(kRegistrationButtonHeight);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+    step2Buttons->addWidget(registerCurrentPositionButton_, 1);
+    step2Buttons->addWidget(ui_->acceptRegistrationButton, 1);
     // Above the buttons, not below: most of these messages are preconditions
     // on the buttons ("Step 2 needs both panels on the same notches"), so they
     // read as the reason a button is refused. Its height is fixed, so the
     // buttons do not move as messages come and go.
-    calibrationLayout->addWidget(ui_->registrationResult);
+    // Buttons first, message under them: above the buttons the message held
+    // them below the action rows of the panes beside it, and the line across
+    // the page is what the eye follows. No trailing stretch -- the lock panels
+    // above take the slack instead.
     calibrationLayout->addLayout(step2Buttons);
-    // Slack belongs below the buttons; above them it walks them down the
-    // column as the page grows, and off it.
+    calibrationLayout->addWidget(ui_->registrationResult);
+    // Slack below everything: anywhere above the buttons it walks them off
+    // the line they share with the other two panes.
     calibrationLayout->addStretch(1);
     calibrationGroup->setMinimumHeight(0);
     calibrationGroup->setMaximumHeight(QWIDGETSIZE_MAX);
@@ -729,18 +749,17 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // Registration feedback belongs inside the Registration page, below its
     // acceptance action, rather than in the global footer line.
     ui_->registrationResult->show();
-    // Word-wrapped, so it needs room for two lines plus its padding; the
-    // column's other rows are Fixed and would otherwise leave it showing
-    // background only.
-    // Two wrapped lines plus padding, held at a fixed height. A content-
-    // sized label is not reliable here: the column carries a stretch, so a
-    // Minimum policy collapsed it to nothing, and an expanding one let it
-    // swallow the spare height and float the text inside it.
+    // Two wrapped lines at a fixed height. It sits below the buttons now, so
+    // its height costs them nothing; a content-sized label is still not
+    // reliable here, because a Minimum policy collapses it to nothing and an
+    // Expanding one swallows the height the lock panels want.
     ui_->registrationResult->setWordWrap(true);
     ui_->registrationResult->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     ui_->registrationResult->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    // Two wrapped lines plus padding; at 50 the second line was clipped.
     ui_->registrationResult->setFixedHeight(62);
+    // A message too long for one line is elided, so hovering has to give it
+    // back. QLabel has no textChanged, so the tooltip follows the text here.
+    ui_->registrationResult->installEventFilter(this);
     // BeamV0's drawROIs.m keeps a running readout of where the array actually
     // is:  app.TargetPosXYZLabel.Text = ['Array Pos X: ', ...]. Without it
     // there is nothing numeric on this page to check a registration against,
@@ -754,6 +773,27 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         "QLabel { font-family: 'Consolas','Courier New',monospace; font-size: 12px; color: #d7e3e7; "
         "background: #24323a; border: 1px solid #3c5059; border-radius: 4px; padding: 5px 8px; }"));
     markerTableLayout->addWidget(arrayPositionLabel_);
+    // The readout says where the array is; this goes there. Every plane of
+    // every page moves, the way Move to Target does on Treatment --
+    // the slice sliders are shared, so there is one position to be at.
+    moveToArrayPositionButton_ = new QPushButton(QStringLiteral("Move to Target"), this);
+    moveToArrayPositionButton_->setToolTip(
+        QStringLiteral("Centre every MRI view on the array position above."));
+    moveToArrayPositionButton_->setMinimumHeight(26);
+    moveToArrayPositionButton_->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 4px 8px; font-weight: 600; } "
+        "QPushButton:hover { background: #2083a3; } "
+        "QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
+    connect(moveToArrayPositionButton_, &QPushButton::clicked, this, [this] {
+        if (!mriLoaded_ || targetMm_.isZero()) {
+            showMessage(QStringLiteral("The array has no position yet. Register it to the "
+                                       "current lock position first."),
+                        true);
+            return;
+        }
+        focusTreatmentViewsOn(targetMm_);
+    });
+    markerTableLayout->addWidget(moveToArrayPositionButton_);
     markerTableLayout->addStretch(1);
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
@@ -857,6 +897,16 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         button->setStyleSheet(acceptButtonStyle);
         button->setMinimumWidth(220);
     }
+    // acceptButtonStyle carries min-height: 34px, and a stylesheet minimum
+    // feeds minimumSizeHint, which beats setFixedHeight. So the Registration
+    // page says its height in the sheet as well, or Accept stands taller than
+    // every other button in its row. Content box + 8px padding + 2px border =
+    // kRegistrationButtonHeight.
+    ui_->acceptRegistrationButton->setStyleSheet(
+        acceptButtonStyle +
+        QStringLiteral(" QPushButton { min-height: %1px; max-height: %1px; padding: 4px 14px; }")
+            .arg(kRegistrationButtonHeight - 10));
+    ui_->acceptRegistrationButton->setFixedHeight(kRegistrationButtonHeight);
     for (QLabel* label : findChildren<QLabel*>()) {
         label->setTextInteractionFlags(label->textInteractionFlags() |
                                        Qt::TextSelectableByMouse |
@@ -1390,11 +1440,15 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->transducerTransparencySlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showFieldCheckBox, &QCheckBox::toggled, ui_->registrationShowFieldCheckBox, &QCheckBox::setChecked);
-    connect(ui_->showTargetCheckBox, &QCheckBox::toggled, ui_->registrationShowTargetCheckBox, &QCheckBox::setChecked);
+    // Show Target is NOT mirrored between the two panes the way Show Field and
+    // Show Transducers are: Registration keeps its own, off to begin with, so
+    // the crosshair and target dot stay out of the way of the six fiducials
+    // being placed until the operator asks for them.
+    connect(ui_->registrationShowTargetCheckBox, &QCheckBox::toggled, this,
+            [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, ui_->registrationShowTransducersCheckBox, &QCheckBox::setChecked);
     connect(ui_->transducerTransparencySlider, &QSlider::valueChanged, ui_->registrationTransparencySlider, &QSlider::setValue);
     connect(ui_->registrationShowFieldCheckBox, &QCheckBox::toggled, ui_->showFieldCheckBox, &QCheckBox::setChecked);
-    connect(ui_->registrationShowTargetCheckBox, &QCheckBox::toggled, ui_->showTargetCheckBox, &QCheckBox::setChecked);
     connect(ui_->registrationShowTransducersCheckBox, &QCheckBox::toggled, ui_->showTransducersCheckBox, &QCheckBox::setChecked);
     connect(ui_->registrationTransparencySlider, &QSlider::valueChanged, ui_->transducerTransparencySlider, &QSlider::setValue);
     connect(ui_->sagittalSlider, &QSlider::valueChanged, this, [this] { if (mriLoaded_) showMriPreviews(); });
@@ -1526,11 +1580,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 highlightRegistrationRow(currentRow);
                 if (!suppressRegistrationNavigation_)
                     navigateToRegistrationFiducial(currentRow);
-                if (registrationFitApplied() && registrationLockPositionRegistered())
-                    setRegistrationPhase(RegistrationPhase::FitApplied);
+                // Selecting a fiducial only looks at it. Step 3 used to be
+                // demoted here, which cost a re-registration for nothing
+                // every time the operator reviewed the six after registering
+                // to the slider position. A real change -- a slider, a
+                // placement, an edited coordinate -- still demotes it where
+                // that change happens.
                 updateRegistrationAvailability();
-                // Selecting a Step 1/2 item signals that the operator wants
-                // to review or rerun the MRI-fiducial fit.
             });
     ui_->registrationTable->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui_->registrationTable, &QTableWidget::customContextMenuRequested, this,
@@ -1574,8 +1630,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         // Navigate explicitly so a repeated triangle click still returns the
         // MRI views to that marker after Reset to Initial Slice.
         navigateToRegistrationFiducial(markerIndex);
-        if (registrationFitApplied() && registrationLockPositionRegistered())
-            setRegistrationPhase(RegistrationPhase::FitApplied);
     });
     connect(ui_->registrationTable, &QTableWidget::cellChanged, this, [this](int changedRow, int column) {
         if (!registrationGeometryLoaded_ || column == 0 || column >= 4) return;
@@ -1768,6 +1822,18 @@ double WorkflowWindow::sliceCoordinateMm(const QString& axis, int index) const {
 }
 
 bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
+    // The registration message is one line now, so a long one is elided.
+    // Hovering gives back whatever did not fit, and nothing at all when the
+    // whole message is already on screen.
+    if (watched == ui_->registrationResult && event->type() == QEvent::ToolTip) {
+        QLabel* const line = ui_->registrationResult;
+        const int needed = line->fontMetrics().horizontalAdvance(line->text());
+        if (needed > line->contentsRect().width())
+            QToolTip::showText(static_cast<QHelpEvent*>(event)->globalPos(), line->text(), line);
+        else
+            QToolTip::hideText();
+        return true;
+    }
     if (mriLoaded_ && (event->type() == QEvent::MouseMove || event->type() == QEvent::Leave)) {
         if (auto* slider = qobject_cast<QSlider*>(watched)) {
             const QString axis = slider->property("sliceAxis").toString();
@@ -1931,7 +1997,13 @@ void WorkflowWindow::syncMriViewerHeights() {
         QTimer::singleShot(0, this, [this] { syncMriViewerHeights(); });
 }
 
-WorkflowWindow::~WorkflowWindow() { delete ui_; }
+// PlaySound is reading shamAudioBuffer_ in another thread while a mask plays,
+// so the buffer must outlive the playback, not the window. Stopping it first is
+// what keeps a sham from taking the application down with it on the way out.
+WorkflowWindow::~WorkflowWindow() {
+    stopShamAudio();
+    delete ui_;
+}
 
 bool WorkflowWindow::registrationFitApplied() const {
     return registrationPhase_ == RegistrationPhase::FitApplied ||
@@ -1949,25 +2021,50 @@ void WorkflowWindow::setRegistrationPhase(RegistrationPhase phase) {
     updateRegistrationAvailability();
 }
 
+// The MRI library this site keeps its scans in. Only a starting point: the
+// last directory actually used wins, and a machine without it falls back to
+// wherever the dialog would have opened anyway.
+QString WorkflowWindow::imagingStartDirectory() const {
+    if (!lastImagingDirectory_.isEmpty() && QFileInfo::exists(lastImagingDirectory_))
+        return lastImagingDirectory_;
+    const QString library =
+        QStringLiteral("C:/Users/jkche/dev/spire.us/BeamExampleDataDICOMandMatFiles/BEAM MRIs");
+    if (QFileInfo::exists(library)) return library;
+    return QString();
+}
+
+void WorkflowWindow::rememberImagingDirectory(const QString& path) {
+    const QFileInfo chosen(path);
+    lastImagingDirectory_ = chosen.isDir() ? chosen.absoluteFilePath() : chosen.absolutePath();
+}
+
 void WorkflowWindow::chooseNifti() {
     const QString path = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Load patient MRI"), QString(),
+        this, QStringLiteral("Load patient MRI"), imagingStartDirectory(),
         QStringLiteral("NIfTI images (*.nii *.nii.gz);;All files (*)"));
-    if (!path.isEmpty()) loadMri(path);
+    if (path.isEmpty()) return;
+    rememberImagingDirectory(path);
+    loadMri(path);
 }
 
 void WorkflowWindow::chooseDicomDirectory() {
-    const QString path = QFileDialog::getExistingDirectory(this, QStringLiteral("Select DICOM series folder"));
-    if (!path.isEmpty()) loadMri(path);
+    const QString path = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("Select DICOM series folder"), imagingStartDirectory());
+    if (path.isEmpty()) return;
+    rememberImagingDirectory(path);
+    loadMri(path);
 }
 
 // Imports the MRI and six fiducials from a BeamV0 session. NOT session
 // restore: a session carries 38 fields and this reads two. Kept as the
 // reminder that the real thing is unbuilt -- see docs/known_gaps_session.md.
 void WorkflowWindow::chooseBeamSession() {
-    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Load legacy Beam MRI session"), QString(),
-                                                       QStringLiteral("MATLAB Beam sessions (*.mat)"));
+    const QString path =
+        QFileDialog::getOpenFileName(this, QStringLiteral("Load legacy Beam MRI session"),
+                                     imagingStartDirectory(),
+                                     QStringLiteral("MATLAB Beam sessions (*.mat)"));
     if (path.isEmpty()) return;
+    rememberImagingDirectory(path);
     auto* progress = new QProgressDialog(QStringLiteral("Loading MRI from Beam session…"), QString(), 0, 0, this);
     progress->setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     progress->setWindowModality(Qt::WindowModal);
@@ -2687,6 +2784,10 @@ void WorkflowWindow::confirmSelectedFiducial() {
 // Sole owner of cell backgrounds: selection highlight and warning fill are
 // both backgrounds, so whichever ran last would otherwise win.
 void WorkflowWindow::highlightRegistrationRow(int currentRow) {
+    // setBackground() reports as a cell change like any other, and the
+    // cellChanged handler reads a cell change as an edited measurement.
+    // Only the colour moves here, so it must not be heard.
+    const QSignalBlocker quiet(ui_->registrationTable);
     const QColor selectedFill(190, 235, 245);
     const QColor rejectFill(0xff, 0xe3, 0xe3);
     const QColor cautionFill(0xff, 0xf4, 0xe0);
@@ -3273,6 +3374,10 @@ void WorkflowWindow::performCurrentPositionRegistration() {
         // crosshair and the target overlay are on screen rather than wherever
         // the sliders happened to be left. Treatment opens on this same view.
         focusTreatmentViewsOn(targetMm_);
+        // Registering to the lock position is the point at which the target
+        // becomes worth looking at on this page, so its crosshair comes on
+        // here rather than waiting to be asked for.
+        ui_->registrationShowTargetCheckBox->setChecked(true);
         setRegistrationPhase(RegistrationPhase::LockPositionRegistered);
         updateRegistrationStepIndicators();
         ui_->acceptRegistrationButton->setFocus(Qt::OtherFocusReason);
@@ -3367,6 +3472,7 @@ void WorkflowWindow::showMriPreviews() {
     // sits in -- the crosshair shows on all of them, so the target's position
     // is readable even while scrolling away from it.
     const bool showTarget = ui_->showTargetCheckBox->isChecked();
+    const bool showTargetOnRegistration = ui_->registrationShowTargetCheckBox->isChecked();
     const QPointF targetSagittal(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
                                  1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z()));
     const QPointF targetCoronal(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
@@ -3382,11 +3488,28 @@ void WorkflowWindow::showMriPreviews() {
     for (WorkflowMriView* view : {ui_->axialPreview, ui_->registrationAxialPreview,
                                   treatmentAxialPreview_})
         view->setNavigationCrosshair(targetAxial);
-    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
-                                  ui_->registrationSagittalPreview, ui_->registrationCoronalPreview,
-                                  ui_->registrationAxialPreview, treatmentSagittalPreview_,
-                                  treatmentCoronalPreview_, treatmentAxialPreview_})
+    // Imaging only once a registration has been computed. Before that the
+    // target is wherever the array nominally sits, which is not where the
+    // operator is working: they are clicking fiducials, and a crosshair that
+    // follows those clicks is one more cross to tell apart from the six being
+    // placed. Clicking a fiducial puts the fit back to Locating, so it
+    // disappears again on its own.
+    const bool showTargetOnImaging = showTarget && registrationFitApplied();
+    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview})
+        view->setNavigationCrosshairVisible(showTargetOnImaging);
+    // Treatment always: by then the target is the registered array centre and
+    // marking it is the whole point of the page.
+    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_,
+                                  treatmentAxialPreview_})
         view->setNavigationCrosshairVisible(showTarget);
+    // Registration has its own Show Target, off by default: the operator is
+    // reading fiducial markers against the MRI there, and a crosshair through
+    // the treatment target is one more cross to tell apart from the six they
+    // are placing.
+    for (WorkflowMriView* view : {ui_->registrationSagittalPreview,
+                                  ui_->registrationCoronalPreview,
+                                  ui_->registrationAxialPreview})
+        view->setNavigationCrosshairVisible(showTargetOnRegistration);
 
     // Imaging is the unregistered source image review. Registration geometry is
     // deliberately confined to the Registration page so model estimates cannot
@@ -3499,26 +3622,10 @@ void WorkflowWindow::showMriPreviews() {
                 if (ui_->showFiducialsCheckBox->isChecked()) imagingAxialMarkers.push_back(viewMarker);
             }
         }
-        const auto targetVoxel = beam::gui::imagePositionToVoxelIndex(targetMm_, mriAxes_);
         std::vector<WorkflowMriMarker> treatmentSagMarkers, treatmentCorMarkers, treatmentAxialMarkers;
-        if (ui_->showTargetCheckBox->isChecked() && targetVoxel.i == sagittal - 1) {
-            sagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
-                                           1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                  QString(), QColor(65, 235, 100), false});
-            imagingSagMarkers.push_back(sagMarkers.back());
-        }
-        if (ui_->showTargetCheckBox->isChecked() && targetVoxel.j == coronal - 1) {
-            corMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
-                                           1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                  QString(), QColor(65, 235, 100), false});
-            imagingCorMarkers.push_back(corMarkers.back());
-        }
-        if (ui_->showTargetCheckBox->isChecked() && targetVoxel.k == axial - 1) {
-            axialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
-                                             1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y())),
-                                    QString(), QColor(65, 235, 100), false});
-            imagingAxialMarkers.push_back(axialMarkers.back());
-        }
+        // No green ring on the target: the crosshair marks it in every plane
+        // and is readable while scrolling away from it, which the ring -- drawn
+        // only on the slice the target sits in -- never was.
         if (ui_->showFiducialsCheckBox->isChecked()) {
             for (std::size_t markerIndex = 0; markerIndex < fiducials_.size(); ++markerIndex) {
                 const Eigen::Vector3d mm = fiducials_[markerIndex].position * 1000.0;
@@ -3586,23 +3693,7 @@ void WorkflowWindow::showMriPreviews() {
         treatmentSagittalPreview_->setMarkers({});
         treatmentCoronalPreview_->setMarkers({});
         treatmentAxialPreview_->setMarkers({});
-        const auto targetVoxel = beam::gui::imagePositionToVoxelIndex(targetMm_, mriAxes_);
-        std::vector<WorkflowMriMarker> treatmentSagMarkers, treatmentCorMarkers, treatmentAxialMarkers;
-        if (targetVoxel.i == sagittal - 1)
-            treatmentSagMarkers.push_back({QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y()),
-                                                   1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                           QStringLiteral("Selected target"), QColor(65, 235, 100), false});
-        if (targetVoxel.j == coronal - 1)
-            treatmentCorMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
-                                                   1.0 - normalizedAxisPosition(mriAxes_.dimIS, targetMm_.z())),
-                                           QStringLiteral("Selected target"), QColor(65, 235, 100), false});
-        if (targetVoxel.k == axial - 1)
-            treatmentAxialMarkers.push_back({QPointF(normalizedAxisPosition(mriAxes_.dimLR, targetMm_.x()),
-                                                     1.0 - normalizedAxisPosition(mriAxes_.dimAP, targetMm_.y())),
-                                             QStringLiteral("Selected target"), QColor(65, 235, 100), false});
-        treatmentSagittalPreview_->setMarkers(std::move(treatmentSagMarkers));
-        treatmentCoronalPreview_->setMarkers(std::move(treatmentCorMarkers));
-        treatmentAxialPreview_->setMarkers(std::move(treatmentAxialMarkers));
+        // Cleared above and left cleared: the crosshair is the target mark.
     }
 
     const auto coordinate = [](const Eigen::VectorXd& axis, int oneBasedIndex) {
@@ -3783,8 +3874,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         // both accepted -- the stage model is the gate, not the button.
         const bool ready =
             workflow_.state(beam::gui::WorkflowStage::SafetyReview).status == beam::gui::WorkflowStatus::Complete;
-        startTreatmentButton_->setEnabled(ready && !sonicationCountdownTimer_->isActive());
-        shamButton_->setEnabled(ready && !sonicationCountdownTimer_->isActive());
+        setSonicateEnabled(ready && !sonicationCountdownTimer_->isActive());
         // The disabled Sonicate button already says the plan is not accepted;
         // a panel repeating it occupied the page for the whole session.
     }

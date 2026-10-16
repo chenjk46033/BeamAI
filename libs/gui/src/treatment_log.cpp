@@ -1,6 +1,7 @@
 #include "gui/treatment_log.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <cmath>
 #include <map>
@@ -99,12 +100,42 @@ void TreatmentLog::record(TreatmentLogRow row) {
     row.responsePain = found->responsePain;
     row.responseMood = found->responseMood;
     row.notes = found->notes;
+    // Nor whether the row was the operator's addition. Losing that unfroze the
+    // visit, and the next reseed then deleted every added row the schedule did
+    // not account for.
+    row.fromPlan = found->fromPlan;
     *found = std::move(row);
 }
 
 // Nothing may be moved once it has run: its sequence is where it happened. So
 // an insert or a skip is only possible while every row below the one in
 // question is still unfired.
+bool TreatmentLog::canInsertBefore(const std::string& protocol, int visit, int sequence) const {
+    if (find(protocol, visit, sequence) == nullptr) return false;
+    // The row at this position moves down too, so it counts.
+    return std::none_of(rows_.begin(), rows_.end(), [&](const TreatmentLogRow& row) {
+        return row.protocol == protocol && row.visit == visit && row.sequence >= sequence &&
+               delivered(row);
+    });
+}
+
+bool TreatmentLog::insertBefore(const std::string& protocol, int visit, int sequence,
+                                TreatmentLogRow row) {
+    if (!canInsertBefore(protocol, visit, sequence)) return false;
+    for (TreatmentLogRow& existing : rows_) {
+        if (existing.protocol != protocol || existing.visit != visit) continue;
+        if (existing.sequence >= sequence) ++existing.sequence;
+    }
+    row.protocol = protocol;
+    row.visit = visit;
+    row.sequence = sequence;
+    row.fromPlan = false;
+    row.startedAt.clear();
+    row.endedAt.clear();
+    rows_.push_back(std::move(row));
+    return true;
+}
+
 bool TreatmentLog::canInsertAfter(const std::string& protocol, int visit, int sequence) const {
     if (find(protocol, visit, sequence) == nullptr) return false;
     return std::none_of(rows_.begin(), rows_.end(), [&](const TreatmentLogRow& row) {
@@ -151,6 +182,23 @@ bool TreatmentLog::removeAt(const std::string& protocol, int visit, int sequence
     for (TreatmentLogRow& existing : rows_)
         if (existing.protocol == protocol && existing.visit == visit) existing.fromPlan = false;
     return true;
+}
+
+bool TreatmentLog::canRemoveVisit(const std::string& protocol, int visit) const {
+    return std::none_of(rows_.begin(), rows_.end(), [&](const TreatmentLogRow& row) {
+        return row.protocol == protocol && row.visit == visit && delivered(row);
+    });
+}
+
+int TreatmentLog::removeVisit(const std::string& protocol, int visit) {
+    if (!canRemoveVisit(protocol, visit)) return 0;
+    const std::size_t before = rows_.size();
+    rows_.erase(std::remove_if(rows_.begin(), rows_.end(),
+                               [&](const TreatmentLogRow& row) {
+                                   return row.protocol == protocol && row.visit == visit;
+                               }),
+                rows_.end());
+    return static_cast<int>(before - rows_.size());
 }
 
 bool TreatmentLog::visitFrozen(const std::string& protocol, int visit) const {
@@ -232,6 +280,16 @@ bool TreatmentLog::setResponse(const std::string& protocol, int visit, int seque
     if (found == rows_.end()) return false;
     found->responsePain = pain;
     found->responseMood = mood;
+    return true;
+}
+
+bool TreatmentLog::setStatus(const std::string& protocol, int visit, int sequence,
+                             int statusCode) {
+    const auto found = std::find_if(rows_.begin(), rows_.end(), [&](const TreatmentLogRow& row) {
+        return sameSlot(row, protocol, visit, sequence);
+    });
+    if (found == rows_.end()) return false;
+    found->statusCode = statusCode;
     return true;
 }
 
@@ -332,6 +390,14 @@ void TreatmentLog::load(const std::string& path) {
         row.notes = text("Notes");
         row.attenuation = toOptional(text("AttenuationVal"), path, "AttenuationVal");
         row.dutyCycle = toOptional(text("DC"), path, "DC");
+        // Absent in logs written before the column existed: those rows ran to
+        // completion as far as anything here knows, so an empty cell on a
+        // delivered row reads as 200 rather than as "never ran".
+        const std::string status = text("StatusCode");
+        if (!status.empty())
+            row.statusCode = std::atoi(status.c_str());
+        else if (!row.startedAt.empty())
+            row.statusCode = kCompleted;
         const std::string fromPlan = text("FromPlan");
         row.fromPlan = fromPlan.empty() || fromPlan == "1" || fromPlan == "true";
         rows_.push_back(std::move(row));
@@ -356,7 +422,7 @@ void TreatmentLog::save(const std::string& path) const {
             "Notes,X,Y,Z,BD,BI,PD,PI,VisitNumber,SubjectID,SiteID,SessionDate,BEAMSerialNumber,"
             "Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,"
             "HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,"
-            "Protocol,FromPlan\n";
+            "Protocol,FromPlan,StatusCode\n";
     for (const TreatmentLogRow& row : rows_) {
         file << row.sequence << ',' << quote(row.target) << ','
              << (row.endTimeSeconds - row.startTimeSeconds) << ',' << row.amplitude << ','
@@ -382,7 +448,7 @@ void TreatmentLog::save(const std::string& path) const {
         if (row.dutyCycle) file << *row.dutyCycle;
         file << ',' << quote(row.startedAt) << ',' << quote(row.endedAt) << ','
              << (row.sham ? 1 : 0) << ',' << quote(row.protocol) << ','
-             << (row.fromPlan ? 1 : 0) << '\n';
+             << (row.fromPlan ? 1 : 0) << ',' << row.statusCode << '\n';
     }
     if (!file) throw std::runtime_error("failed while writing " + path);
 }

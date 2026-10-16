@@ -26,8 +26,23 @@ struct TreatmentProtocolRow {
     double responsePain = 0.0;
     double responseMood = 0.0;
     // When the sonication finished, as a time of day. Empty until it has.
-    QString completed;
+    // When the delivery started and ended, to the millisecond, and how it
+    // ended as an HTTP status. Shown as time of day; the full stamp with its
+    // date is in the cell tooltip.
+    QString startedAt;
+    QString endedAt;
+    QString startedAtFull;
+    QString endedAtFull;
+    int statusCode = 0;
     QString notes = QStringLiteral("notes");
+    // Set once the sonication has been sent. A record of what happened is not
+    // edited afterwards -- only what the operator observed about it.
+    bool delivered = false;
+    // A sham ran the countdown and the masking audio but sent no ultrasound,
+    // which the log has to show as plainly as a real delivery.
+    bool sham = false;
+    // Stopped part-way by the operator: delivered, but not as planned.
+    bool aborted = false;
 };
 
 class TreatmentProtocolTableModel : public QAbstractTableModel {
@@ -35,17 +50,27 @@ class TreatmentProtocolTableModel : public QAbstractTableModel {
 
 public:
     enum Column {
-        kNumber = 0,
+        // Empty in the model: the view puts a Sonicate button here on the row
+        // the Current Sonication Number points at, so the row that fires next
+        // carries the control that fires it.
+        kAction = 0,
+        kNumber,
         kTarget,
         kDuration,
         kAmplitude,
         kParameters,
         kResponsePain,
         kResponseMood,
-        kCompleted,
+        kStart,
+        kEnd,
+        kStatus,
         kNotes,
         kColumnCount
     };
+
+    // True on the row the Current Sonication Number points at. The view's
+    // delegate reads it to keep that row grey under the selection highlight.
+    static constexpr int kCurrentRowRole = Qt::UserRole + 1;
 
     explicit TreatmentProtocolTableModel(QObject* parent = nullptr);
 
@@ -57,6 +82,10 @@ public:
     Qt::ItemFlags flags(const QModelIndex& index) const override;
 
     void setRows(std::vector<TreatmentProtocolRow> rows);
+    // setTreatmentProtocolTableData.m greys the row the Current Sonication
+    // Number points at, so the operator can see where the visit has got to.
+    // One-based to match that field; 0 greys nothing.
+    void setCurrentSonication(int oneBased);
     const std::vector<TreatmentProtocolRow>& rows() const { return rows_; }
 
     // Runs beam::gui::getResponseFromTreatmentProtocolData over every row
@@ -74,6 +103,8 @@ signals:
 
 private:
     std::vector<TreatmentProtocolRow> rows_;
+    // 1-based; 0 means none.
+    int currentSonication_ = 0;
 };
 
 }  // namespace beam::gui_qt

@@ -1,9 +1,4 @@
-Protocol,Visit,CurrentSonication
-"Protocol1",5,3
-"Protocol1",4,3
-"Protocol1",7,3
-"Protocol1",6,3
-"Protocol1",3,3
-"Protocol1",2,3
-"Default",1,1
-"Protocol1",1,4
+Protocol,Visit,CurrentSonication,Edited
+"Default",1,4,1
+"Default",2,3,1
+"Default",3,3,1

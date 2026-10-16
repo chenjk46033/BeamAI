@@ -10,10 +10,22 @@
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
       }
+    },
+    {
+      "name": "ai",
+      "displayName": "BeamAI workflow app (Visual Studio 2022, x64, vcpkg-installed deps)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build-ai",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "msvc", "configurePreset": "msvc", "configuration": "Debug" }
+    { "name": "msvc", "configurePreset": "msvc", "configuration": "Debug" },
+    { "name": "ai", "configurePreset": "ai", "configuration": "Debug" },
+    { "name": "ai-release", "configurePreset": "ai", "configuration": "Release" }
   ],
   "testPresets": [
     { "name": "msvc", "configurePreset": "msvc", "configuration": "Debug", "output": { "outputOnFailure": true } }

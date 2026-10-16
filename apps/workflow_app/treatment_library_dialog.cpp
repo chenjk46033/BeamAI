@@ -1,6 +1,8 @@
 #include "treatment_library_dialog.hpp"
 
+#include <QAction>
 #include <QComboBox>
+#include <QDropEvent>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
@@ -8,6 +10,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTabWidget>
@@ -18,6 +21,35 @@
 #include <vector>
 
 namespace beam::app {
+namespace {
+
+// QTableWidget's InternalMove moves ITEMS, not rows: Qt writes the dragged
+// cells over the ones under the cursor and emits no rowsMoved, which left the
+// schedule with duplicated and blanked rows and the store untouched. This
+// table performs no move at all -- it reports which row went where, and the
+// dialog reorders the store and rebuilds the table from it.
+class ScheduleTable final : public QTableWidget {
+public:
+    using QTableWidget::QTableWidget;
+
+    std::function<void(int from, int to)> onRowMoved;
+
+protected:
+    void dropEvent(QDropEvent* event) override {
+        if (event->source() != this || onRowMoved == nullptr) {
+            QTableWidget::dropEvent(event);
+            return;
+        }
+        const int from = currentRow();
+        const QModelIndex under = indexAt(event->position().toPoint());
+        const int to = under.isValid() ? under.row() : rowCount() - 1;
+        event->setDropAction(Qt::IgnoreAction);  // nothing for Qt to move
+        event->accept();
+        if (from >= 0 && to >= 0 && from != to) onRowMoved(from, to);
+    }
+};
+
+}  // namespace
 namespace {
 
 QString uniqueName(const QString& stem, const std::vector<std::string>& taken) {
@@ -56,14 +88,23 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
     savedNotice_->setStyleSheet(QStringLiteral("QLabel { color: #5fcb96; }"));
     footer->addWidget(savedNotice_);
     footer->addStretch(1);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Close, this);
-    // Save writes and stays open; Close leaves. This dialog edits a copy, so
-    // anything after the last Save simply never lands.
-    connect(buttons, &QDialogButtonBox::accepted, this, [this] {
+    // Three, because this dialog edits a copy and only Save hands it over:
+    // Save writes and stays open for the next edit, Exit writes and leaves,
+    // Cancel leaves without writing, so anything since the last Save is
+    // dropped.
+    auto* buttons = new QDialogButtonBox(this);
+    auto* save = buttons->addButton(QDialogButtonBox::Save);
+    auto* leave = buttons->addButton(QStringLiteral("Exit"), QDialogButtonBox::AcceptRole);
+    auto* cancel = buttons->addButton(QDialogButtonBox::Cancel);
+    connect(save, &QPushButton::clicked, this, [this] {
         if (saveHandler_) saveHandler_(store_);
         if (savedNotice_) savedNotice_->setText(QStringLiteral("Saved."));
     });
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(leave, &QAbstractButton::clicked, this, [this] {
+        if (saveHandler_) saveHandler_(store_);
+        accept();
+    });
+    connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
     footer->addWidget(buttons);
     layout->addLayout(footer);
 
@@ -116,6 +157,9 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
          QStringLiteral("Pulse Interval (s)")});
     // Every column sized to its own label, and none stretched: whichever column
     // takes the slack ends up several times wider than the numbers in it.
+    // Show decides which row a target fires on, not anything the Target List
+    // edits; the column only invited an edit with no visible effect.
+    targetTable_->setColumnHidden(2, true);
     targetTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     targetTable_->horizontalHeader()->setStretchLastSection(false);
     targetTable_->verticalHeader()->setVisible(false);
@@ -153,36 +197,50 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
         reloadTargets(after.trimmed());
     });
 
-    connect(remove, &QPushButton::clicked, this, [this] {
-        const QString name = selectedTarget();
-        if (name.isEmpty()) return;
-        if (store_.targets().size() <= 1) {
-            QMessageBox::warning(this, QStringLiteral("Delete target"),
-                                 QStringLiteral("The last target cannot be deleted."));
-            return;
-        }
-        int scheduled = 0;
-        for (const auto& protocol : store_.protocols())
-            for (const auto& entry : protocol.entries)
-                if (entry.target == name.toStdString()) ++scheduled;
-        // A protocol holds only the name, so deleting the target it refers to
-        // leaves that entry with nothing to sonicate. Say so, with the count,
-        // rather than removing the entries silently.
-        const QString question =
-            scheduled > 0
-                ? QStringLiteral("Delete \"%1\"? %2 schedule entr%3 still name it and will have "
-                                 "no target to sonicate.")
-                      .arg(name).arg(scheduled).arg(scheduled == 1 ? QStringLiteral("y")
-                                                                   : QStringLiteral("ies"))
-                : QStringLiteral("Delete \"%1\" from the Target List?").arg(name);
-        if (QMessageBox::question(this, QStringLiteral("Delete target"), question) !=
-            QMessageBox::Yes)
-            return;
-        store_.removeTarget(name.toStdString());
-        reloadTargets();
-    });
+    connect(remove, &QPushButton::clicked, this, [this] { deleteTarget(selectedTarget()); });
 
+    // The same delete, reached from the row itself.
+    targetTable_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(targetTable_, &QTableWidget::customContextMenuRequested, this,
+            [this](const QPoint& where) {
+                const QModelIndex hit = targetTable_->indexAt(where);
+                if (!hit.isValid()) return;
+                targetTable_->selectRow(hit.row());
+                const QString name = selectedTarget();
+                if (name.isEmpty()) return;
+                QMenu menu(this);
+                QAction* drop = menu.addAction(QStringLiteral("Delete target \"%1\"").arg(name));
+                if (menu.exec(targetTable_->viewport()->mapToGlobal(where)) == drop)
+                    deleteTarget(name);
+            });
+}
 
+void TreatmentLibraryDialog::deleteTarget(const QString& name) {
+    if (name.isEmpty()) return;
+    if (store_.targets().size() <= 1) {
+        QMessageBox::warning(this, QStringLiteral("Delete target"),
+                             QStringLiteral("The last target cannot be deleted."));
+        return;
+    }
+    int scheduled = 0;
+    for (const auto& protocol : store_.protocols())
+        for (const auto& entry : protocol.entries)
+            if (entry.target == name.toStdString()) ++scheduled;
+    // A protocol holds only the name, so deleting the target it refers to
+    // leaves that entry with nothing to sonicate. Say so, with the count,
+    // rather than removing the entries silently.
+    const QString question =
+        scheduled > 0
+            ? QStringLiteral("Delete \"%1\"? %2 schedule entr%3 still name it and will have "
+                             "no target to sonicate.")
+                  .arg(name).arg(scheduled).arg(scheduled == 1 ? QStringLiteral("y")
+                                                               : QStringLiteral("ies"))
+            : QStringLiteral("Delete \"%1\" from the Target List?").arg(name);
+    if (QMessageBox::question(this, QStringLiteral("Delete target"), question) !=
+        QMessageBox::Yes)
+        return;
+    store_.removeTarget(name.toStdString());
+    reloadTargets();
 }
 
 void TreatmentLibraryDialog::reloadTargets(const QString& select) {
@@ -294,7 +352,8 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
     // treatmentProtocolTables(i).blank.Data actually carries. Burst and pulse
     // values are not here because a protocol does not own them: they live on
     // the target, in protocolTables, and are edited on the Target List page.
-    entryTable_ = new QTableWidget(0, 4, page);
+    auto* schedule = new ScheduleTable(0, 4, page);
+    entryTable_ = schedule;
     entryTable_->setHorizontalHeaderLabels({QStringLiteral("#"), QStringLiteral("Target"),
                                             QStringLiteral("Duration (s)"),
                                             QStringLiteral("Amplitude")});
@@ -302,12 +361,13 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
     entryTable_->verticalHeader()->setVisible(false);
     entryTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     entryTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    // Drag a row to reorder the schedule. InternalMove on a row selection moves
-    // the whole row; the model's own rowsMoved is what we write back from.
+    // Drag a row to reorder the schedule. The drop is handled by ScheduleTable
+    // above, which reorders the store rather than the widget.
     entryTable_->setDragEnabled(true);
     entryTable_->setAcceptDrops(true);
     entryTable_->setDragDropMode(QAbstractItemView::InternalMove);
     entryTable_->setDragDropOverwriteMode(false);
+    schedule->onRowMoved = [this](int from, int to) { moveScheduleEntry(from, to); };
     entryTable_->setDefaultDropAction(Qt::MoveAction);
     outer->addWidget(entryTable_, 1);
 
@@ -337,10 +397,6 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
         if (!reloadingPoints_ && item != nullptr) commitScheduleRow(item->row());
     });
 
-    connect(entryTable_->model(), &QAbstractItemModel::rowsMoved, this,
-            [this](const QModelIndex&, int, int, const QModelIndex&, int) {
-                if (!reloadingPoints_) commitScheduleOrder();
-            });
 
     connect(add, &QPushButton::clicked, this, [this] {
         std::vector<std::string> taken;
@@ -389,18 +445,37 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
         reloadEntries();
     });
 
-    connect(removeEntry, &QPushButton::clicked, this, [this] {
-        const QString protocol = selectedProtocol();
-        const int row = entryTable_->currentRow();
-        const auto* definition = store_.findProtocol(protocol.toStdString());
-        if (definition == nullptr || row < 0 ||
-            row >= static_cast<int>(definition->entries.size()))
-            return;
-        std::vector<beam::gui::TreatmentProtocolEntry> kept = definition->entries;
-        kept.erase(kept.begin() + row);
-        store_.setProtocolEntries(protocol.toStdString(), std::move(kept));
-        reloadEntries();
-    });
+    connect(removeEntry, &QPushButton::clicked, this,
+            [this] { deleteScheduleEntry(entryTable_->currentRow()); });
+
+    // The same removal, reached from the row itself.
+    entryTable_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(entryTable_, &QTableWidget::customContextMenuRequested, this,
+            [this](const QPoint& where) {
+                const QModelIndex hit = entryTable_->indexAt(where);
+                if (!hit.isValid()) return;
+                entryTable_->selectRow(hit.row());
+                const QTableWidgetItem* target = entryTable_->item(hit.row(), 1);
+                QMenu menu(this);
+                QAction* drop = menu.addAction(
+                    QStringLiteral("Remove sonication %1%2")
+                        .arg(hit.row() + 1)
+                        .arg(target == nullptr ? QString()
+                                               : QStringLiteral(" (%1)").arg(target->text())));
+                if (menu.exec(entryTable_->viewport()->mapToGlobal(where)) == drop)
+                    deleteScheduleEntry(hit.row());
+            });
+}
+
+void TreatmentLibraryDialog::deleteScheduleEntry(int row) {
+    const QString protocol = selectedProtocol();
+    const auto* definition = store_.findProtocol(protocol.toStdString());
+    if (definition == nullptr || row < 0 || row >= static_cast<int>(definition->entries.size()))
+        return;
+    std::vector<beam::gui::TreatmentProtocolEntry> kept = definition->entries;
+    kept.erase(kept.begin() + row);
+    store_.setProtocolEntries(protocol.toStdString(), std::move(kept));
+    reloadEntries();
 }
 
 // Fills the one table: the entry's own duration, then this protocol's copy of
@@ -483,40 +558,25 @@ void TreatmentLibraryDialog::commitScheduleRow(int row) {
 }
 
 // After a drag: the table's row order is the schedule's new order.
-void TreatmentLibraryDialog::commitScheduleOrder() {
+// By index, not by reading the table back: the old version matched rows to
+// stored entries by target name and duration, which cannot tell two identical
+// sonications apart -- and a protocol that schedules the same target twice is
+// ordinary.
+void TreatmentLibraryDialog::moveScheduleEntry(int from, int to) {
     const QString protocol = selectedProtocol();
     const auto* definition = store_.findProtocol(protocol.toStdString());
     if (definition == nullptr) return;
-    if (entryTable_->rowCount() != static_cast<int>(definition->entries.size())) return;
+    const int count = static_cast<int>(definition->entries.size());
+    if (from < 0 || to < 0 || from >= count || to >= count || from == to) return;
 
-    std::vector<beam::gui::TreatmentProtocolEntry> reordered;
-    reordered.reserve(definition->entries.size());
-    std::vector<bool> used(definition->entries.size(), false);
-    for (int row = 0; row < entryTable_->rowCount(); ++row) {
-        const QTableWidgetItem* name = entryTable_->item(row, 1);
-        const QTableWidgetItem* duration = entryTable_->item(row, 2);
-        if (name == nullptr) return;
-        const std::string target = name->text().toStdString();
-        // The same target can appear more than once; take each stored entry at
-        // most once, matching on duration first so a repeated target keeps its
-        // own value rather than collapsing onto the first match.
-        int chosen = -1;
-        for (std::size_t i = 0; i < definition->entries.size(); ++i) {
-            if (used[i] || definition->entries[i].target != target) continue;
-            if (chosen < 0) chosen = static_cast<int>(i);
-            if (duration != nullptr && definition->entries[i].durationSeconds.has_value() &&
-                QString::number(*definition->entries[i].durationSeconds, 'f', 1) ==
-                    duration->text()) {
-                chosen = static_cast<int>(i);
-                break;
-            }
-        }
-        if (chosen < 0) return;
-        used[static_cast<std::size_t>(chosen)] = true;
-        reordered.push_back(definition->entries[static_cast<std::size_t>(chosen)]);
-    }
+    std::vector<beam::gui::TreatmentProtocolEntry> reordered = definition->entries;
+    const beam::gui::TreatmentProtocolEntry moved = reordered[static_cast<std::size_t>(from)];
+    reordered.erase(reordered.begin() + from);
+    reordered.insert(reordered.begin() + to, moved);
     store_.setProtocolEntries(protocol.toStdString(), std::move(reordered));
     reloadEntries();
+    // Follow the row that moved, so a run of drags keeps hold of the same one.
+    entryTable_->selectRow(to);
 }
 
 

@@ -44,10 +44,16 @@ private:
     void reloadProtocols(const QString& select = QString());
     void reloadEntries();
     void commitScheduleRow(int row);
-    void commitScheduleOrder();
+    // Moves one scheduled sonication to another position. The table is
+    // rebuilt from the store afterwards, so the store is the only thing that
+    // is ever reordered.
+    void moveScheduleEntry(int from, int to);
     // Which target's points the table is showing. They live on the target
     // itself; a protocol keeps none of its own.
     void commitTargetRow(int row);
+    // Shared by the Delete buttons and the right-click menus on both tables.
+    void deleteTarget(const QString& name);
+    void deleteScheduleEntry(int row);
     QString selectedTarget() const;
     QString selectedProtocol() const;
 

@@ -511,3 +511,249 @@ TEST(TreatmentLog, SkippedSonicationsStaySkippedAcrossReseeding) {
     EXPECT_EQ(left[1].sequence, 2);
     EXPECT_EQ(left[2].sequence, 3);
 }
+
+// The grid writes every visible row back on each edit. Editing one response
+// must not reach the others, and the row that was edited must keep its value
+// through the plan refresh that follows.
+TEST(TreatmentLog, WritingTheGridBackLeavesOtherRowsResponsesAlone) {
+    beam::gui::TreatmentLog log;
+    std::vector<beam::gui::TreatmentLogRow> planned;
+    for (int sequence = 1; sequence <= 3; ++sequence) {
+        beam::gui::TreatmentLogRow row = makeRow(sequence, "SCC1");
+        row.sequence = sequence;
+        row.startedAt.clear();
+        planned.push_back(row);
+    }
+    log.seedVisit(1, "Default", planned);
+    ASSERT_TRUE(log.setResponse("Default", 1, 1, -2.0, 1.0));
+
+    ASSERT_TRUE(log.setResponse("Default", 1, 2, 2.0, -1.0));
+    for (const beam::gui::TreatmentLogRow& shown : log.rowsFor("Default", 1)) {
+        beam::gui::TreatmentLogRow refreshed = shown;
+        refreshed.amplitude = 0.8;
+        log.record(std::move(refreshed));
+    }
+
+    EXPECT_DOUBLE_EQ(*log.find("Default", 1, 1)->responsePain, -2.0);
+    EXPECT_DOUBLE_EQ(*log.find("Default", 1, 1)->responseMood, 1.0);
+    EXPECT_DOUBLE_EQ(*log.find("Default", 1, 2)->responsePain, 2.0);
+    EXPECT_DOUBLE_EQ(*log.find("Default", 1, 2)->responseMood, -1.0);
+    // Never answered, so still blank rather than an entered zero.
+    EXPECT_FALSE(log.find("Default", 1, 3)->responsePain.has_value());
+    EXPECT_FALSE(log.find("Default", 1, 3)->responseMood.has_value());
+}
+
+// Adding at the current position pushes it down; adding at one already run is
+// refused, because its sequence is where it happened.
+TEST(TreatmentLog, InsertBeforeMovesTheRowAtThatPositionDown) {
+    beam::gui::TreatmentLog log;
+    std::vector<beam::gui::TreatmentLogRow> planned;
+    for (int sequence = 1; sequence <= 3; ++sequence) {
+        beam::gui::TreatmentLogRow row = makeRow(sequence, sequence == 1 ? "SCC1" : "SCC2");
+        row.sequence = sequence;
+        row.startedAt.clear();
+        planned.push_back(row);
+    }
+    log.seedVisit(1, "Default", planned);
+
+    beam::gui::TreatmentLogRow added = makeRow(9, "aMCC4");
+    added.startedAt.clear();
+    ASSERT_TRUE(log.canInsertBefore("Default", 1, 2));
+    ASSERT_TRUE(log.insertBefore("Default", 1, 2, added));
+
+    const std::vector<beam::gui::TreatmentLogRow> rows = log.rowsFor("Default", 1);
+    ASSERT_EQ(rows.size(), 4u);
+    EXPECT_EQ(rows[0].target, "SCC1");
+    EXPECT_EQ(rows[1].target, "aMCC4");
+    EXPECT_EQ(rows[2].target, "SCC2");
+    EXPECT_FALSE(rows[1].fromPlan);
+    for (std::size_t i = 0; i < rows.size(); ++i)
+        EXPECT_EQ(rows[i].sequence, static_cast<int>(i) + 1);
+
+    ASSERT_TRUE(log.close("Default", 1, 1, "2026-10-15T09:00:00"));
+    beam::gui::TreatmentLogRow fired = makeRow(1, "SCC1");
+    fired.sequence = 1;
+    log.record(std::move(fired));
+    // Position 1 has now been delivered, so nothing may be put above it.
+    EXPECT_FALSE(log.canInsertBefore("Default", 1, 1));
+    EXPECT_TRUE(log.canInsertBefore("Default", 1, 2));
+}
+
+// A new sonication may never land where one has already been delivered: the
+// sequence of a fired row is where it happened. With 1 and 2 delivered of
+// four, the only positions left are in the tail that has not run.
+TEST(TreatmentLog, NothingMayBeInsertedAmongDeliveredRows) {
+    beam::gui::TreatmentLog log;
+    std::vector<beam::gui::TreatmentLogRow> planned;
+    for (int sequence = 1; sequence <= 4; ++sequence) {
+        beam::gui::TreatmentLogRow row = makeRow(1, "SCC1");
+        row.sequence = sequence;
+        row.startedAt.clear();
+        planned.push_back(row);
+    }
+    log.seedVisit(1, "Default", planned);
+    for (int sequence = 1; sequence <= 2; ++sequence) {
+        beam::gui::TreatmentLogRow fired = makeRow(1, "SCC1");  // visit 1, not sequence
+        fired.sequence = sequence;
+        log.record(std::move(fired));  // makeRow carries a startedAt
+        ASSERT_TRUE(beam::gui::TreatmentLog::delivered(*log.find("Default", 1, sequence)));
+    }
+
+    // Above or between the delivered rows: refused, either way round.
+    EXPECT_FALSE(log.canInsertBefore("Default", 1, 1));
+    EXPECT_FALSE(log.canInsertBefore("Default", 1, 2));
+    EXPECT_FALSE(log.canInsertAfter("Default", 1, 1));
+    // Straight after the last delivered row, and anywhere below it: allowed.
+    EXPECT_TRUE(log.canInsertAfter("Default", 1, 2));
+    EXPECT_TRUE(log.canInsertBefore("Default", 1, 3));
+    EXPECT_TRUE(log.canInsertAfter("Default", 1, 4));
+
+    // And the refusal is not advisory -- the call itself declines.
+    beam::gui::TreatmentLogRow added = makeRow(9, "aMCC4");
+    added.startedAt.clear();
+    EXPECT_FALSE(log.insertBefore("Default", 1, 1, added));
+    EXPECT_FALSE(log.insertAfter("Default", 1, 1, added));
+    EXPECT_EQ(log.rowsFor("Default", 1).size(), 4u);
+    EXPECT_TRUE(log.insertAfter("Default", 1, 2, added));
+    const std::vector<beam::gui::TreatmentLogRow> rows = log.rowsFor("Default", 1);
+    ASSERT_EQ(rows.size(), 5u);
+    EXPECT_EQ(rows[2].target, "aMCC4");
+    EXPECT_EQ(rows[0].sequence, 1);
+    EXPECT_EQ(rows[1].sequence, 2);
+}
+
+// A sonication added by hand must survive the reseed that follows the next
+// delivery: the schedule it is not part of must not delete it.
+TEST(TreatmentLog, AnAddedRowSurvivesTheReseedAfterADelivery) {
+    beam::gui::TreatmentLog log;
+    std::vector<beam::gui::TreatmentLogRow> planned;
+    for (int sequence = 1; sequence <= 3; ++sequence) {
+        beam::gui::TreatmentLogRow row = makeRow(1, "SCC1");
+        row.sequence = sequence;
+        row.startedAt.clear();
+        planned.push_back(row);
+    }
+    log.seedVisit(1, "Default", planned);
+
+    beam::gui::TreatmentLogRow added = makeRow(1, "aMCC4");
+    added.startedAt.clear();
+    ASSERT_TRUE(log.insertAfter("Default", 1, 3, added));
+    ASSERT_EQ(log.rowsFor("Default", 1).size(), 4u);
+
+    // Sonicate row 3, the way recordSonicationStart does, then close it.
+    beam::gui::TreatmentLogRow fired = makeRow(1, "SCC1");
+    fired.sequence = 3;
+    log.record(std::move(fired));
+    ASSERT_TRUE(log.close("Default", 1, 3, "2026-10-15T10:00:34"));
+
+    // The reload that follows reseeds from the protocol's three entries.
+    log.seedVisit(1, "Default", planned);
+    const std::vector<beam::gui::TreatmentLogRow> rows = log.rowsFor("Default", 1);
+    ASSERT_EQ(rows.size(), 4u) << "the added sonication was dropped";
+    EXPECT_EQ(rows[3].target, "aMCC4");
+}
+
+// Delivering an added sonication must not make the log forget it was added:
+// that unfroze the visit, and the next reseed deleted every row the schedule
+// did not account for.
+TEST(TreatmentLog, DeliveringAnAddedRowKeepsTheVisitItsOwn) {
+    beam::gui::TreatmentLog log;
+    std::vector<beam::gui::TreatmentLogRow> planned;
+    for (int sequence = 1; sequence <= 2; ++sequence) {
+        beam::gui::TreatmentLogRow row = makeRow(1, "SCC1");
+        row.sequence = sequence;
+        row.startedAt.clear();
+        planned.push_back(row);
+    }
+    log.seedVisit(1, "Default", planned);
+
+    beam::gui::TreatmentLogRow added = makeRow(1, "aMCC4");
+    added.startedAt.clear();
+    ASSERT_TRUE(log.insertAfter("Default", 1, 2, added));
+    ASSERT_TRUE(log.visitFrozen("Default", 1));
+
+    // Fire the added row itself.
+    beam::gui::TreatmentLogRow fired = makeRow(1, "aMCC4");
+    fired.sequence = 3;
+    log.record(std::move(fired));
+    EXPECT_FALSE(log.find("Default", 1, 3)->fromPlan) << "the delivery overwrote it";
+    EXPECT_TRUE(log.visitFrozen("Default", 1));
+
+    // A row added after it, still unfired, survives the reseed that follows.
+    beam::gui::TreatmentLogRow another = makeRow(1, "SCC5");
+    another.startedAt.clear();
+    ASSERT_TRUE(log.insertAfter("Default", 1, 3, another));
+    log.seedVisit(1, "Default", planned);
+    const std::vector<beam::gui::TreatmentLogRow> rows = log.rowsFor("Default", 1);
+    ASSERT_EQ(rows.size(), 4u);
+    EXPECT_EQ(rows[3].target, "SCC5");
+}
+
+// How a delivery ended, as an HTTP status, and to the millisecond. A log
+// written before the column existed has to keep reading, with its delivered
+// rows taken as completed rather than as never run.
+TEST(TreatmentLog, StatusAndMillisecondStampsSurviveTheRoundTrip) {
+    beam::gui::TreatmentLog log;
+    beam::gui::TreatmentLogRow ran = makeRow(1, "SCC1");
+    ran.sequence = 1;
+    ran.startedAt = "2026-10-16T09:15:00.125";
+    log.record(std::move(ran));
+    ASSERT_TRUE(log.setStatus("Default", 1, 1, beam::gui::TreatmentLog::kCompleted));
+    ASSERT_TRUE(log.close("Default", 1, 1, "2026-10-16T09:15:30.625"));
+
+    beam::gui::TreatmentLogRow cut = makeRow(1, "SCC2");
+    cut.sequence = 2;
+    cut.startedAt = "2026-10-16T09:16:00.001";
+    log.record(std::move(cut));
+    ASSERT_TRUE(log.setStatus("Default", 1, 2, beam::gui::TreatmentLog::kStopped));
+
+    const std::string path = scratch("treatment_log_status.csv");
+    ASSERT_NO_THROW(log.save(path));
+    beam::gui::TreatmentLog reloaded;
+    ASSERT_NO_THROW(reloaded.load(path));
+
+    const beam::gui::TreatmentLogRow* first = reloaded.find("Default", 1, 1);
+    const beam::gui::TreatmentLogRow* second = reloaded.find("Default", 1, 2);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(first->statusCode, beam::gui::TreatmentLog::kCompleted);
+    EXPECT_EQ(second->statusCode, beam::gui::TreatmentLog::kStopped);
+    EXPECT_FALSE(beam::gui::TreatmentLog::stopped(*first));
+    EXPECT_TRUE(beam::gui::TreatmentLog::stopped(*second));
+    // The milliseconds are the point: two sonications can start in the same
+    // second, and the duration of one is read off these two stamps.
+    EXPECT_EQ(first->startedAt, "2026-10-16T09:15:00.125");
+    EXPECT_EQ(first->endedAt, "2026-10-16T09:15:30.625");
+}
+
+// A visit that has delivered nothing is a plan, and a plan can be thrown away
+// whole. One that has delivered something is a record, and stays.
+TEST(TreatmentLog, APlannedVisitCanBeDeletedWhole) {
+    beam::gui::TreatmentLog log;
+    for (const char* target : {"SCC1", "SCC2", "SCC3"}) {
+        beam::gui::TreatmentLogRow planned = makeRow(2, target);
+        planned.startedAt.clear();
+        log.append(std::move(planned));
+    }
+    log.append(makeRow(1, "SCC6"));  // another visit, which must survive
+
+    EXPECT_TRUE(log.canRemoveVisit("Default", 2));
+    EXPECT_EQ(log.removeVisit("Default", 2), 3);
+    EXPECT_TRUE(log.rowsFor("Default", 2).empty());
+    // The visit beside it keeps its rows and its number: deleting one visit
+    // does not renumber the others.
+    ASSERT_EQ(log.rowsFor("Default", 1).size(), 1u);
+    EXPECT_EQ(log.rowsFor("Default", 1).front().target, "SCC6");
+}
+
+TEST(TreatmentLog, AVisitThatDeliveredSomethingIsNotDeletable) {
+    beam::gui::TreatmentLog log;
+    beam::gui::TreatmentLogRow planned = makeRow(1, "SCC1");
+    planned.startedAt.clear();
+    log.append(std::move(planned));
+    log.append(makeRow(1, "SCC2"));  // makeRow stamps a start: this one ran
+
+    EXPECT_FALSE(log.canRemoveVisit("Default", 1));
+    EXPECT_EQ(log.removeVisit("Default", 1), 0);
+    EXPECT_EQ(log.rowsFor("Default", 1).size(), 2u);
+}

@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <QAbstractTableModel>
+#include <QString>
 
 // A real Qt table model for BeamV0's GUI/SonicationTab `stimParamTable`
 // (createStimParamTable.m / setStimParamTableNames.m) -- the central
@@ -36,7 +37,12 @@ class StimParamTableModel : public QAbstractTableModel {
 
 public:
     enum Column {
-        kOrder = 0,
+        // BeamAI's own, not in createStimParamTable.m: BeamV0 has one grid
+        // per target and never names it in the grid itself. Here the same
+        // grid is reached from a protocol of many targets, so the row has to
+        // say which one it belongs to.
+        kTarget = 0,
+        kOrder,
         kShow,
         kX,
         kY,
@@ -52,6 +58,11 @@ public:
     };
 
     explicit StimParamTableModel(QObject* parent = nullptr);
+
+    // Every row of this grid belongs to one target, so the name is the
+    // grid's, not the row's.
+    void setTargetName(const QString& name);
+    const QString& targetName() const { return targetName_; }
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -95,6 +106,7 @@ signals:
 
 private:
     std::vector<StimParamRow> rows_;
+    QString targetName_;
 };
 
 }  // namespace beam::gui_qt

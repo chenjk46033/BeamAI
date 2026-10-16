@@ -1,6 +1,9 @@
 #include "gui_qt/treatment_protocol_table_model.hpp"
 
 #include <QColor>
+#include <QIcon>
+#include <QPainter>
+#include <QPixmap>
 
 #include "gui/sonication_tab_presenter.hpp"
 
@@ -10,12 +13,66 @@ TreatmentProtocolTableModel::TreatmentProtocolTableModel(QObject* parent)
     : QAbstractTableModel(parent) {}
 
 int TreatmentProtocolTableModel::rowCount(const QModelIndex& parent) const {
-    return parent.isValid() ? 0 : static_cast<int>(rows_.size());
+    if (parent.isValid()) return 0;
+    // A visit with nothing in it draws one blank row. A table with a header
+    // and no body reads as broken; a blank row reads as somewhere to put
+    // something, which is what a right-click there does. It is not a row of
+    // anything: rows() stays empty, so nothing counts it or fires it.
+    return rows_.empty() ? 1 : static_cast<int>(rows_.size());
 }
 
 int TreatmentProtocolTableModel::columnCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : static_cast<int>(kColumnCount);
 }
+
+namespace {
+
+QIcon makeTick(const QColor& colour, bool cutShort) {
+    const int side = 16;
+    QPixmap canvas(side, side);
+    canvas.fill(Qt::transparent);
+    QPainter painter(&canvas);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPen stroke(colour, 2.6);
+    stroke.setCapStyle(Qt::RoundCap);
+    stroke.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(stroke);
+    QPolygonF check;
+    check << QPointF(3.5, 8.5) << QPointF(6.6, 11.8) << QPointF(12.5, 4.6);
+    painter.drawPolyline(check);
+    if (cutShort) {
+        // Struck through: the sonication happened, but not all of it. The
+        // tick stays underneath because energy did go out -- the row is a
+        // record, not a plan that was abandoned.
+        // Shorter and thinner than the tick it crosses: it qualifies the tick
+        // rather than competing with it. Corner to corner at the tick's own
+        // weight read as a cross, which means failed, and this did not fail.
+        QPen bar(colour, 1.7);
+        bar.setCapStyle(Qt::RoundCap);
+        painter.setPen(bar);
+        painter.drawLine(QPointF(5.2, 5.2), QPointF(11.0, 11.0));
+    }
+    return QIcon(canvas);
+}
+
+// A delivered sonication shows a tick where the one still to run shows its
+// Sonicate button -- the column says, row by row, what has happened and what
+// is about to. A tick rather than a cross: nothing here failed.
+//
+// Green for a real delivery, amber for a sham, matching the progress bar that
+// ran while each was going out. The two are a hue apart and nothing else, so
+// the tooltip says which as well -- that pair is the one hardest to tell
+// apart for a red-green colour-blind reader.
+QIcon deliveredTick(bool sham, bool aborted) {
+    static const QIcon real = makeTick(QColor(0x5e, 0xc4, 0x6a), false);    // light green
+    static const QIcon masked = makeTick(QColor(0xe0, 0xa3, 0x2e), false);  // amber
+    static const QIcon realCut = makeTick(QColor(0x5e, 0xc4, 0x6a), true);
+    static const QIcon maskedCut = makeTick(QColor(0xe0, 0xa3, 0x2e), true);
+    if (aborted) return sham ? maskedCut : realCut;
+    return sham ? masked : real;
+}
+
+}  // namespace
 
 QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid() || index.row() < 0 || index.row() >= static_cast<int>(rows_.size())) {
@@ -23,27 +80,65 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
     }
     const TreatmentProtocolRow& r = rows_[static_cast<std::size_t>(index.row())];
 
-    if (role == Qt::BackgroundRole) {
-        // setTreatmentProtocolTableData.m's per-row coloring, keyed off the
-        // same clamped response computeBestTargets() feeds the ranking
-        // algorithm. The source's separate "current sonication number"
-        // grey override isn't wired here -- this model has no equivalent
-        // concept yet.
-        const beam::gui::MoodPainResponse resp =
-            beam::gui::getResponseFromTreatmentProtocolData(r.responseMood, r.responsePain);
-        const beam::gui::RowColor c = beam::gui::computeTreatmentRowColor(resp.total);
-        // computeTreatmentRowColor's own "no response yet" case is flat
-        // white for every row -- zebra-stripe just that case for
-        // readability; a real clinical response color always wins.
-        if (resp.total == 0.0) {
-            return index.row() % 2 == 0 ? QColor(0xff, 0xff, 0xff) : QColor(0xf2, 0xf4, 0xf7);
+    const bool current = currentSonication_ > 0 && index.row() == currentSonication_ - 1;
+    if (role == kCurrentRowRole) return current;
+    if (index.column() == kAction) {
+        if (role == Qt::DecorationRole && r.delivered) return deliveredTick(r.sham, r.aborted);
+        if (role == Qt::TextAlignmentRole) return QVariant(Qt::AlignCenter);
+        if (role == Qt::ToolTipRole) {
+            if (!r.delivered) return QVariant();
+            const QString what =
+                r.sham ? QStringLiteral("Sham -- masking audio only, no ultrasound sent")
+                       : QStringLiteral("Delivered");
+            return r.aborted ? what + QStringLiteral(", stopped before it finished") : what;
         }
-        return QColor::fromRgbF(c.r, c.g, c.b);
+    }
+    if (role == Qt::ToolTipRole) {
+        // The time columns show the time of day; the date is in the tooltip.
+        if (index.column() == kStart) return r.startedAtFull;
+        if (index.column() == kEnd) return r.endedAtFull;
+        if (index.column() == kStatus) {
+            switch (r.statusCode) {
+                case 0: return QVariant();
+                case 102: return QStringLiteral("102 Processing -- going out now");
+                case 200: return QStringLiteral("200 OK -- ran to the end");
+                case 499:
+                    return QStringLiteral("499 Client Closed Request -- stopped by the operator");
+                default: return QString::number(r.statusCode);
+            }
+        }
+        // The columns are elided to keep the whole row on screen, so hovering
+        // has to be able to show what was cut -- the parameter string above all,
+        // which is the record of what was actually sent.
+        const QVariant shown = data(index, Qt::DisplayRole);
+        return shown.toString().isEmpty() ? QVariant() : shown;
+    }
+    if (role == Qt::ForegroundRole) {
+        // The fill below is dark enough that the table's near-black text would
+        // disappear into it.
+        if (current) return QColor(0xff, 0xff, 0xff);
+        // Anything but 200 is worth seeing without reading the number.
+        if (index.column() == kStatus && r.statusCode != 0 && r.statusCode != 200)
+            return QColor(0xb1, 0x1c, 0x1c);
+        return QVariant();
+    }
+    if (role == Qt::BackgroundRole) {
+        // setTreatmentProtocolTableData.m marks the row the Current Sonication
+        // Number points at -- `addStyle(table, sGrey, "row", value)` -- in grey.
+        // Dark blue instead: against the light blue of a clicked row the two
+        // stay apart, and white text on it reads where grey did not.
+        if (current) return QColor(0x1f, 0x4e, 0x79);
+        // Not setTreatmentProtocolTableData.m's per-response coloring: a row
+        // turning green the moment a response is typed reads as a state the
+        // log is in rather than a number in a cell. The ranking still uses the
+        // same clamped response; only the paint is dropped.
+        return index.row() % 2 == 0 ? QColor(0xff, 0xff, 0xff) : QColor(0xf2, 0xf4, 0xf7);
     }
     if (role != Qt::DisplayRole && role != Qt::EditRole) {
         return QVariant();
     }
     switch (index.column()) {
+        case kAction: return QVariant();  // the view's button lives here
         case kNumber: return r.number;
         case kTarget: return r.target;
         case kDuration: return r.duration;
@@ -51,7 +146,9 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         case kParameters: return r.parameters;
         case kResponsePain: return r.responsePain;
         case kResponseMood: return r.responseMood;
-        case kCompleted: return r.completed;
+        case kStart: return r.startedAt;
+        case kEnd: return r.endedAt;
+        case kStatus: return r.statusCode == 0 ? QString() : QString::number(r.statusCode);
         case kNotes: return r.notes;
         default: return QVariant();
     }
@@ -63,6 +160,11 @@ bool TreatmentProtocolTableModel::setData(const QModelIndex& index, const QVaria
         return false;
     }
     TreatmentProtocolRow& r = rows_[static_cast<std::size_t>(index.row())];
+    // touched: a response cell was edited, so the whole row repaints. clamped:
+    // the value had to be brought into range, which is worth saying out loud.
+    // They are not the same thing -- announcing a clamp on every edit buried
+    // the message the save itself puts up.
+    bool touched = false;
     bool clamped = false;
 
     switch (index.column()) {
@@ -85,32 +187,35 @@ bool TreatmentProtocolTableModel::setData(const QModelIndex& index, const QVaria
             r.notes = value.toString();
             break;
         case kResponsePain: {
-            r.responsePain = value.toDouble();
+            const double typed = value.toDouble();
+            r.responsePain = typed;
             const beam::gui::MoodPainResponse resp =
                 beam::gui::getResponseFromTreatmentProtocolData(r.responseMood, r.responsePain);
             r.responsePain = resp.pain;  // source writes the clamped value back into the table
-            clamped = true;
+            touched = true;
+            clamped = resp.pain != typed;
             break;
         }
         case kResponseMood: {
-            r.responseMood = value.toDouble();
+            const double typed = value.toDouble();
+            r.responseMood = typed;
             const beam::gui::MoodPainResponse resp =
                 beam::gui::getResponseFromTreatmentProtocolData(r.responseMood, r.responsePain);
             r.responseMood = resp.mood;
-            clamped = true;
+            touched = true;
+            clamped = resp.mood != typed;
             break;
         }
         default:
             return false;
     }
 
-    if (clamped) {
-        // Pain/Mood together drive the whole row's background
-        // (computeTreatmentRowColor) -- repaint the full row, not just the
-        // edited cell.
+    if (touched) {
+        // Both responses feed the row, so the whole row is repainted rather
+        // than just the cell that was edited.
         emit dataChanged(this->index(index.row(), 0), this->index(index.row(), kColumnCount - 1),
                          {Qt::DisplayRole, Qt::EditRole, Qt::BackgroundRole});
-        emit responseClamped();
+        if (clamped) emit responseClamped();
     } else {
         emit dataChanged(index, index, {Qt::DisplayRole, Qt::EditRole});
     }
@@ -119,6 +224,12 @@ bool TreatmentProtocolTableModel::setData(const QModelIndex& index, const QVaria
 
 QVariant TreatmentProtocolTableModel::headerData(int section, Qt::Orientation orientation,
                                                  int role) const {
+    if (role == Qt::ToolTipRole && orientation == Qt::Horizontal) {
+        // The scale, which the name alone does not give.
+        if (section == kResponsePain || section == kResponseMood)
+            return QStringLiteral("-2 to 2");
+        return QVariant();
+    }
     if (role != Qt::DisplayRole) {
         return QVariant();
     }
@@ -127,6 +238,7 @@ QVariant TreatmentProtocolTableModel::headerData(int section, Qt::Orientation or
     }
     // setTreatmentProtocolTableNames.m's renames.
     switch (section) {
+        case kAction: return QString();
         case kNumber: return QStringLiteral("#");
         case kTarget: return QStringLiteral("Target");
         case kDuration: return QStringLiteral("Duration (s)");
@@ -134,7 +246,9 @@ QVariant TreatmentProtocolTableModel::headerData(int section, Qt::Orientation or
         case kParameters: return QStringLiteral("Parameters");
         case kResponsePain: return QStringLiteral("Response Pain");
         case kResponseMood: return QStringLiteral("Response Mood");
-        case kCompleted: return QStringLiteral("Completed");
+        case kStart: return QStringLiteral("Start");
+        case kEnd: return QStringLiteral("End");
+        case kStatus: return QStringLiteral("Status");
         case kNotes: return QStringLiteral("Notes");
         default: return QVariant();
     }
@@ -145,8 +259,28 @@ Qt::ItemFlags TreatmentProtocolTableModel::flags(const QModelIndex& index) const
         return Qt::NoItemFlags;
     }
     // The completion time is stamped by the countdown, not typed.
-    if (index.column() == kCompleted) return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    // Neither is typed into: one is stamped by the countdown, the other holds
+    // a button.
+    if (index.column() == kStart || index.column() == kEnd || index.column() == kStatus ||
+        index.column() == kAction)
+        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    // A delivered sonication is a record: what was sent cannot be rewritten,
+    // only what was observed about it. Locking the cells here rather than
+    // dropping the edit later means the edit never appears to take.
+    if (index.row() < static_cast<int>(rows_.size()) &&
+        rows_[static_cast<std::size_t>(index.row())].delivered &&
+        index.column() != kResponsePain && index.column() != kResponseMood &&
+        index.column() != kNotes)
+        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
+}
+
+void TreatmentProtocolTableModel::setCurrentSonication(int oneBased) {
+    if (currentSonication_ == oneBased) return;
+    currentSonication_ = oneBased;
+    if (rows_.empty()) return;
+    emit dataChanged(index(0, 0), index(static_cast<int>(rows_.size()) - 1, kColumnCount - 1),
+                     {Qt::BackgroundRole, kCurrentRowRole});
 }
 
 void TreatmentProtocolTableModel::setRows(std::vector<TreatmentProtocolRow> rows) {
