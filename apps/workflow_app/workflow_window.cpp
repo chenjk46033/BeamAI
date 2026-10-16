@@ -606,6 +606,13 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* step1Group = new QGroupBox(QStringLiteral("1    Locate and review the six fiducials"), this);
     auto* step1GroupLayout = new QVBoxLayout(step1Group);
     step1GroupLayout->setContentsMargins(6, 4, 6, 6);
+    auto* step1ActionRow = new QHBoxLayout;
+    step1ActionRow->setContentsMargins(0, 0, 0, 0);
+    step1ActionRow->setSpacing(4);
+    step1ActionRow->addWidget(fiducialActionsButton_, 1);
+    step1ActionRow->addWidget(ui_->confirmFiducialButton, 1);
+    step1ActionRow->addWidget(ui_->registerFiducialsButton, 1);
+    step1GroupLayout->addLayout(step1ActionRow);
     step1GroupLayout->addWidget(markerSplitter);
     ui_->registrationDetailsLayout->addWidget(step1Group, 2);
     // The Designer action row is now empty because its buttons were moved into
@@ -741,6 +748,18 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     calibrationGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     calibrationGroup->setTitle(QStringLiteral("2    Set the transducer lock position and accept"));
     ui_->registrationDetailsLayout->addWidget(calibrationGroup, 1);
+
+    // The presses this stage needs, at the top of the pane each one belongs
+    // to rather than buried under the diagram, the table and the sliders they
+    // act on. Both panes start with their buttons, so the five of them read as
+    // one line across the page directly under the images -- inside the panes,
+    // in the order they are pressed.
+    auto* step2ButtonRow = new QHBoxLayout;
+    step2ButtonRow->setContentsMargins(0, 0, 0, 0);
+    step2ButtonRow->setSpacing(4);
+    step2ButtonRow->addWidget(registerCurrentPositionButton_, 1);
+    step2ButtonRow->addWidget(ui_->acceptRegistrationButton, 1);
+    calibrationLayout->insertLayout(0, step2ButtonRow);
     // Calibration sliders use their own sliderPressed/valueChanged handlers
     // below. Do not install a parent mouse filter here: re-entering
     // updateRegistrationAvailability() from a slider mouse event can change
@@ -1720,14 +1739,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->participantEdit, &QLineEdit::textChanged, this, [this](const QString& value) {
         ui_->participantHeader->setText(QStringLiteral("Participant: %1").arg(value.isEmpty() ? QStringLiteral("—") : value));
     });
-    ui_->visitEdit->setValidator(new QIntValidator(1, 99, ui_->visitEdit));
-    const auto updateVisitPresentation = [this](const QString& text) {
-        ui_->visitHeader->setText(ui_->visitEdit->hasAcceptableInput()
-                                      ? QStringLiteral("Visit: %1").arg(text)
-                                      : QStringLiteral("Visit: —"));
-    };
-    connect(ui_->visitEdit, &QLineEdit::textChanged, this, updateVisitPresentation);
-    updateVisitPresentation(ui_->visitEdit->text());
+    // The visit in the header is the one the treatment plan is on, set by
+    // loadTreatmentProtocol. Nothing is typed here: a visit is created on the
+    // Treatment page, and a second place to enter one could only disagree.
+    ui_->visitHeader->setText(QStringLiteral("Visit: —"));
     connect(ui_->abortButton, &QPushButton::clicked, this, [this] {
         showMessage(QStringLiteral("No treatment is active; no device command was sent."), true);
     });
@@ -3930,9 +3945,9 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
 
 void WorkflowWindow::completeCurrentStage() {
     if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup &&
-        (ui_->participantEdit->text().trimmed().isEmpty() || ui_->siteEdit->text().trimmed().isEmpty() ||
-         !ui_->visitEdit->hasAcceptableInput())) {
-        showMessage(QStringLiteral("Participant ID, Site ID, and Visit are required."), true);
+        (ui_->participantEdit->text().trimmed().isEmpty() ||
+         ui_->siteEdit->text().trimmed().isEmpty())) {
+        showMessage(QStringLiteral("Participant ID and Site ID are required."), true);
         return;
     }
     std::string reason;

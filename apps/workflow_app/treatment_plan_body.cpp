@@ -1095,7 +1095,8 @@ void WorkflowWindow::saveTreatmentTargetStore() {
         // which log this went into, not reading a headline.
         showMessage(QStringLiteral("%1 updated at %2")
                         .arg(QDir::toNativeSeparators(logPath))
-                        .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"))),
+                        .arg(QDateTime::currentDateTime().toString(
+                            QStringLiteral("HH:mm:ss.zzz"))),
                     false);
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Could not save treatment data: %1").arg(error.what()), true);
@@ -1267,6 +1268,10 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
     // blank row the model draws for a visit that has none, not the header. The
     // list beside it offers Create New Visit, and the table arrives with it.
     const bool visitCreated = visitExists(protocolName, visit);
+    // The page header carries the visit now that the case page does not ask
+    // for one.
+    ui_->visitHeader->setText(visitCreated ? QStringLiteral("Visit: %1").arg(visit)
+                                           : QStringLiteral("Visit: —"));
     if (protocolView_ != nullptr) {
         protocolView_->setVisible(visitCreated);
         if (protocolEmptySpacer_ != nullptr) {

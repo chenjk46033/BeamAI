@@ -241,24 +241,7 @@
                                     </property>
                                   </widget>
                                 </item>
-                                <item row="2" column="0">
-                                  <widget class="QLabel" name="visitLabel">
-                                    <property name="text">
-                                      <string>Visit *</string>
-                                    </property>
-                                  </widget>
-                                </item>
                                 <item row="2" column="1">
-                                  <widget class="QLineEdit" name="visitEdit">
-                                    <property name="placeholderText">
-                                      <string>Required</string>
-                                    </property>
-                                    <property name="maxLength">
-                                      <number>2</number>
-                                    </property>
-                                  </widget>
-                                </item>
-                                <item row="3" column="1">
                                   <widget class="QPushButton" name="acceptCaseButton">
                                     <property name="text">
                                       <string>Accept case and continue →</string>
@@ -950,6 +933,25 @@
                                   </widget>
                                 </item>
                                 <item>
+                                  <widget class="QPushButton" name="acceptImagingButton">
+                                    <property name="text">
+                                      <string>Accept MRI and continue →</string>
+                                    </property>
+                                    <property name="enabled">
+                                      <bool>false</bool>
+                                    </property>
+                                    <property name="minimumSize">
+                                      <size>
+                                        <width>0</width>
+                                        <height>40</height>
+                                      </size>
+                                    </property>
+                                    <property name="styleSheet">
+                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; outline: none; } QPushButton:focus { outline: none; border: 0; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
+                                    </property>
+                                  </widget>
+                                </item>
+                                <item>
                                   <layout class="QHBoxLayout" name="imagingFiducialArea">
                                     <item>
                                       <layout class="QVBoxLayout" name="imagingFiducialControls">
@@ -988,25 +990,6 @@
                                       </widget>
                                     </item>
                                   </layout>
-                                </item>
-                                <item>
-                                  <widget class="QPushButton" name="acceptImagingButton">
-                                    <property name="text">
-                                      <string>Accept MRI and continue →</string>
-                                    </property>
-                                    <property name="enabled">
-                                      <bool>false</bool>
-                                    </property>
-                                    <property name="minimumSize">
-                                      <size>
-                                        <width>0</width>
-                                        <height>40</height>
-                                      </size>
-                                    </property>
-                                    <property name="styleSheet">
-                                      <string>QPushButton { padding: 9px 16px; background: #176b87; color: white; border: 0; border-radius: 5px; font-weight: 600; outline: none; } QPushButton:focus { outline: none; border: 0; } QPushButton:disabled { background: #cbd4d8; color: #78868d; }</string>
-                                    </property>
-                                  </widget>
                                 </item>
                               </layout>
                             </widget>
