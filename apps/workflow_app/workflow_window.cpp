@@ -984,7 +984,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     runCouplingCheckButton_ = new QPushButton(QStringLiteral("Run correction / coupling measurement"), ui_->placeholderPage);
     runCouplingCheckButton_->setMinimumHeight(38);
     runCouplingCheckButton_->setStyleSheet(acceptButtonStyle);
-    acceptCouplingButton_ = new QPushButton(QStringLiteral("Accept correction & coupling and continue →"), ui_->placeholderPage);
+    acceptCouplingButton_ = new QPushButton(QStringLiteral("Accept correction && coupling and continue →"), ui_->placeholderPage);
     acceptCouplingButton_->setMinimumHeight(40);
     acceptCouplingButton_->setEnabled(false);
     acceptCouplingButton_->setStyleSheet(acceptButtonStyle);
@@ -996,6 +996,47 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     couplingStatusLabel_->setContentsMargins(0, 12, 0, 0);
     ui_->placeholderLayout->addWidget(couplingStatusLabel_);
     ui_->placeholderLayout->addWidget(couplingProgressBar_);
+    // The three numbers checkCouplingSafety.m decides on, and its verdict:
+    // the bars show the comparison, these say what was actually measured.
+    couplingNumbersLabel_ = new QLabel(ui_->placeholderPage);
+    couplingNumbersLabel_->setTextFormat(Qt::RichText);
+    couplingNumbersLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #dcebef; background: #16323b; border: 1px solid #2b6172; "
+        "border-radius: 5px; padding: 8px 12px; }"));
+    couplingNumbersLabel_->setText(QStringLiteral("Nothing measured yet."));
+    ui_->placeholderLayout->addWidget(couplingNumbersLabel_);
+    // updateAttenuationPlots.m draws the raw and filtered receive waveform per
+    // array; setAvgTransmissionDataBars.m draws current transmission against
+    // the stored average. Hidden until a measurement exists -- an empty axis
+    // reads as a measurement of zero.
+    couplingChartsRow_ = new QWidget(ui_->placeholderPage);
+    auto* couplingChartsLayout = new QHBoxLayout(couplingChartsRow_);
+    couplingChartsLayout->setContentsMargins(0, 0, 0, 0);
+    couplingChartsLayout->setSpacing(8);
+    for (QChartView** view : {&couplingCh0ChartView_, &couplingCh1ChartView_, &couplingBarChartView_}) {
+        *view = new QChartView(couplingChartsRow_);
+        (*view)->setRenderHint(QPainter::Antialiasing, true);
+        (*view)->setMinimumHeight(260);
+        (*view)->hide();
+    }
+    couplingChartsLayout->addWidget(couplingCh0ChartView_, 2);
+    couplingChartsLayout->addWidget(couplingCh1ChartView_, 2);
+    couplingChartsLayout->addWidget(couplingBarChartView_, 1);
+    // Without a device there are no waveforms to draw. Say so in the space the
+    // plots occupy rather than leaving the page looking unchanged.
+    couplingChartsPlaceholder_ = new QLabel(
+        QStringLiteral("Receive waveforms are drawn here once a measurement is read from the "
+                       "device. No Beam device is connected, so this run has no waveform data."),
+        couplingChartsRow_);
+    couplingChartsPlaceholder_->setWordWrap(true);
+    couplingChartsPlaceholder_->setAlignment(Qt::AlignCenter);
+    couplingChartsPlaceholder_->setMinimumHeight(210);
+    couplingChartsPlaceholder_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #9fb3ba; background: #16323b; border: 1px dashed #2b6172; "
+        "border-radius: 5px; padding: 12px; }"));
+    couplingChartsLayout->addWidget(couplingChartsPlaceholder_, 5);
+    couplingChartsRow_->hide();
+    ui_->placeholderLayout->addWidget(couplingChartsRow_);
     ui_->placeholderLayout->addWidget(runCouplingCheckButton_);
     ui_->placeholderLayout->addWidget(acceptCouplingButton_);
 
@@ -1030,37 +1071,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     correctionStatusLabel_->setContentsMargins(0, 12, 0, 0);
     ui_->placeholderLayout->addWidget(correctionStatusLabel_);
     ui_->placeholderLayout->addWidget(correctionProgressBar_);
-    // updateAttenuationPlots.m draws the raw and filtered receive waveform per
-    // array; setAvgTransmissionDataBars.m draws current transmission against
-    // the stored average. Hidden until a measurement exists -- an empty axis
-    // reads as a measurement of zero.
-    couplingChartsRow_ = new QWidget(ui_->placeholderPage);
-    auto* couplingChartsLayout = new QHBoxLayout(couplingChartsRow_);
-    couplingChartsLayout->setContentsMargins(0, 0, 0, 0);
-    couplingChartsLayout->setSpacing(8);
-    for (QChartView** view : {&couplingCh0ChartView_, &couplingCh1ChartView_, &couplingBarChartView_}) {
-        *view = new QChartView(couplingChartsRow_);
-        (*view)->setRenderHint(QPainter::Antialiasing, true);
-        (*view)->setMinimumHeight(210);
-    }
-    couplingChartsLayout->addWidget(couplingCh0ChartView_, 2);
-    couplingChartsLayout->addWidget(couplingCh1ChartView_, 2);
-    couplingChartsLayout->addWidget(couplingBarChartView_, 1);
-    // Without a device there are no waveforms to draw. Say so in the space the
-    // plots occupy rather than leaving the page looking unchanged.
-    couplingChartsPlaceholder_ = new QLabel(
-        QStringLiteral("Receive waveforms are drawn here once a measurement is read from the "
-                       "device. No Beam device is connected, so this run has no waveform data."),
-        couplingChartsRow_);
-    couplingChartsPlaceholder_->setWordWrap(true);
-    couplingChartsPlaceholder_->setAlignment(Qt::AlignCenter);
-    couplingChartsPlaceholder_->setMinimumHeight(210);
-    couplingChartsPlaceholder_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #9fb3ba; background: #16323b; border: 1px dashed #2b6172; "
-        "border-radius: 5px; padding: 12px; }"));
-    couplingChartsLayout->addWidget(couplingChartsPlaceholder_, 5);
-    couplingChartsRow_->hide();
-    ui_->placeholderLayout->addWidget(couplingChartsRow_);
     ui_->placeholderLayout->addWidget(runCorrectionButton_);
     ui_->placeholderLayout->addWidget(acceptCorrectionButton_);
 
@@ -1247,7 +1257,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
     });
     connect(runCorrectionButton_, &QPushButton::clicked, this, [this] {
-        double transmission = 0.88;
+        double transmission = 0.0;
         bool simulated = true;
         const auto ports = beam::serialcom::listAvailableComPorts();
         if (!ports.empty()) {
@@ -1279,9 +1289,15 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 // A stale or unrelated COM port should not prevent offline
                 // workflow testing when no Beam device is connected.
                 simulated = true;
-                transmission = 0.88;
             }
         }
+        if (simulated) {
+            fillSimulatedCouplingWaveforms();
+            transmission = beam::correction::throughTransmitAmplitude(couplingCh0Raw_,
+                                                                      couplingCh1Raw_)
+                               .amp;
+        }
+        couplingSimulated_ = simulated;
         const int percent = std::clamp(static_cast<int>(std::lround(transmission * 100.0)), 0, 100);
         // checkCouplingSafety.m's own test, at its own 0.1 -- not a threshold
         // of this application's choosing.
@@ -3830,6 +3846,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                             static_cast<QWidget*>(runCouplingCheckButton_),
                             static_cast<QWidget*>(acceptCouplingButton_),
                             static_cast<QWidget*>(couplingChartsRow_),
+                            static_cast<QWidget*>(couplingNumbersLabel_),
                             static_cast<QWidget*>(correctionTitleLabel_),
                             static_cast<QWidget*>(correctionDescriptionLabel_),
                             static_cast<QWidget*>(correctionStatusLabel_),
@@ -4014,9 +4031,49 @@ void WorkflowWindow::refresh() {
 // bar pair, from the already-ported builders. Only drawn for a real
 // measurement: with no device there are no waveforms, and an axis of zeros
 // would read as a measured zero rather than as nothing measured.
+// No Beam device answers on the bench, and a page with nothing on it cannot
+// be read, walked through or shown to anyone. This stands in for the receive
+// pair -- a damped burst with the ripple a real one carries -- and everything
+// downstream is the same code the device drives: the plots, the peak-to-peak
+// and the transmission all come out of it. Every one of them is labelled
+// simulated on the page.
+void WorkflowWindow::fillSimulatedCouplingWaveforms() {
+    constexpr int kSamples = 600;
+    couplingCh0Raw_ = Eigen::VectorXd::Zero(kSamples);
+    couplingCh1Raw_ = Eigen::VectorXd::Zero(kSamples);
+    for (int i = 0; i < kSamples; ++i) {
+        const double t = i / 40.0;
+        const double envelope = std::exp(-std::pow((i - 260.0) / 70.0, 2.0));
+        couplingCh0Raw_[i] = 120.0 * envelope * std::sin(t * 3.1) + 6.0 * std::sin(t * 11.0);
+        couplingCh1Raw_[i] = 90.0 * envelope * std::sin(t * 3.1 + 0.6) + 5.0 * std::sin(t * 9.0);
+    }
+    couplingCh0Filtered_ = beam::correction::filterTransmitSignal(couplingCh0Raw_).filtWave;
+    couplingCh1Filtered_ = beam::correction::filterTransmitSignal(couplingCh1Raw_).filtWave;
+    couplingPeakToPeak_ =
+        std::max(beam::correction::txRxSignalAmplitude(couplingCh0Filtered_).peak2peak,
+                 beam::correction::txRxSignalAmplitude(couplingCh1Filtered_).peak2peak);
+}
+
 void WorkflowWindow::updateCouplingCharts(double transmissionAmp) {
     if (!couplingChartsRow_) return;
     const bool haveWaveforms = couplingCh0Raw_.size() > 0 && couplingCh1Raw_.size() > 0;
+    if (couplingNumbersLabel_ != nullptr) {
+        const bool pass = couplingPeakToPeak_ > kCouplingThreshold;
+        const QString verdict =
+            !haveWaveforms
+                ? QStringLiteral("<span style='color:#9fb3ba'>&#9679; NOT MEASURED</span>")
+            : couplingSimulated_
+                ? QStringLiteral("<span style='color:#e0a32e'>&#9679; SIMULATED, NO DEVICE</span>")
+            : pass ? QStringLiteral("<span style='color:#5ec46a'>&#9679; COUPLED</span>")
+                   : QStringLiteral("<span style='color:#ff554a'>&#9679; NOT COUPLED</span>");
+        couplingNumbersLabel_->setText(
+            QStringLiteral("Transmission <b>%1</b> &nbsp; Peak-to-peak <b>%2</b> &nbsp; "
+                           "Threshold <b>%3</b> &nbsp;&nbsp; %4")
+                .arg(transmissionAmp, 0, 'f', 3)
+                .arg(couplingPeakToPeak_, 0, 'f', 3)
+                .arg(kCouplingThreshold, 0, 'f', 2)
+                .arg(verdict));
+    }
     couplingChartsPlaceholder_->setVisible(!haveWaveforms);
     for (QChartView* view : {couplingCh0ChartView_, couplingCh1ChartView_, couplingBarChartView_})
         view->setVisible(haveWaveforms);
@@ -4041,10 +4098,15 @@ void WorkflowWindow::updateCouplingCharts(double transmissionAmp) {
         view->setChart(chart);
     };
     const double yLimit = beam::gui::computeRfPlotYLimit(couplingCh0Filtered_, couplingCh1Filtered_);
-    show(couplingCh0ChartView_, beam::gui_qt::buildRfWaveformChart(
-        couplingCh0Raw_, couplingCh0Filtered_, yLimit, QStringLiteral("First array")), true);
-    show(couplingCh1ChartView_, beam::gui_qt::buildRfWaveformChart(
-        couplingCh1Raw_, couplingCh1Filtered_, yLimit, QStringLiteral("Second array")), true);
+    const QString mark = couplingSimulated_ ? QStringLiteral(" (simulated)") : QString();
+    show(couplingCh0ChartView_,
+         beam::gui_qt::buildRfWaveformChart(couplingCh0Raw_, couplingCh0Filtered_, yLimit,
+                                            QStringLiteral("First array") + mark),
+         true);
+    show(couplingCh1ChartView_,
+         beam::gui_qt::buildRfWaveformChart(couplingCh1Raw_, couplingCh1Filtered_, yLimit,
+                                            QStringLiteral("Second array") + mark),
+         true);
     show(couplingBarChartView_, beam::gui_qt::buildTransmissionBarChart(
         beam::gui::computeAvgTransmissionBars(transmissionAmp, couplingPeakToPeak_, kCouplingThreshold)),
          false);

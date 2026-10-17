@@ -409,6 +409,14 @@ private:
     double couplingPeakToPeak_ = 0.0;
     QWidget* couplingChartsRow_ = nullptr;
     QLabel* couplingChartsPlaceholder_ = nullptr;
+    // What the measurement came out as, in numbers: the bars say pass or
+    // fail, the numbers say by how much.
+    QLabel* couplingNumbersLabel_ = nullptr;
+    // Whether what is on the plots came off a device or was stood in for.
+    bool couplingSimulated_ = false;
+    // A stand-in through-transmit pair, so the page can be read and the
+    // workflow walked without a Beam device on the bench.
+    void fillSimulatedCouplingWaveforms();
     QChartView* couplingCh0ChartView_ = nullptr;
     QChartView* couplingCh1ChartView_ = nullptr;
     QChartView* couplingBarChartView_ = nullptr;
