@@ -237,7 +237,10 @@ QIcon makeStopIcon(int side, const QColor& ink) {
     painter.setPen(Qt::NoPen);
     painter.setBrush(ink);
     painter.drawRoundedRect(QRectF(4.0 * unit, 4.0 * unit, 8.0 * unit, 8.0 * unit), unit, unit);
-    return QIcon(canvas);
+    painter.end();
+    QIcon icon(canvas);
+    icon.addPixmap(canvas, QIcon::Disabled);
+    return icon;
 }
 
 const char* const kSonicateStyle =
@@ -302,7 +305,7 @@ const char* const kStopStyle =
     "border-radius: 4px; padding: 0 4px; } "
     "QPushButton:hover { background: #e14343; } "
     "QPushButton:pressed { background: #a81f1f; } "
-    "QPushButton:disabled { background: #4a3a3a; color: #9a8686; border-color: #5c4545; }";
+    "QPushButton:disabled { background: #9e2222; color: #f0cccc; border-color: #6e1313; }";
 
 // A running button pulses between these two, in the colour of the button it
 // already is -- blue for a sonication, yellow for a sham. One colour at two
@@ -766,7 +769,7 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         // Each the width of what it holds: Parameters fits its whole string
         // (X, Y, Z and the four timings) and stops there, the two response
         // columns fit their full names, and # fits two digits.
-        const int widths[] = {158, 28, 78, 68, 72, 300, 100, 106, 86, 86, 56, 200};
+        const int widths[] = {112, 28, 78, 68, 72, 300, 100, 106, 86, 86, 56, 200};
         for (int column = 0; column < static_cast<int>(std::size(widths)); ++column)
             protocolView_->setColumnWidth(column, widths[column]);
     }
@@ -2015,6 +2018,17 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
         label->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; }"));
         return label;
     };
+    const auto makeDeliveryButton = [this, controlPanel](const QString& text, bool sham) {
+        auto* button = new QPushButton(text, controlPanel);
+        button->setIcon(sham ? makeShamIcon(18, kInkOnYellow) : makeSonicateIcon(18, kInkOnBlue));
+        button->setIconSize(QSize(18, 18));
+        button->setMinimumHeight(36);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setStyleSheet(QString::fromLatin1(sham ? kShamStyle : kSonicateStyle));
+        connect(button, &QPushButton::clicked, this, [this, sham] { runSonication(sham); });
+        (sham ? inRowShamButton_ : inRowSonicateButton_) = button;
+        return button;
+    };
     serialPortCombo_ = new QComboBox(controlPanel);
     serialPortCombo_->setStyleSheet(QStringLiteral(
         "QComboBox { background: #ffffff; color: #17313f; padding: 4px 8px; "
@@ -2055,6 +2069,13 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     controlColumn->addLayout(connectedRow);
     controlColumn->addWidget(columnLabel(QStringLiteral("Trigger:")));
     controlColumn->addWidget(triggerModeCombo_);
+    // The two deliveries, as words. Icons on a row of icons is how the wrong
+    // one gets pressed, and the gap between them is deliberate: a slip lands
+    // on the column, not on the other one.
+    controlColumn->addSpacing(20);
+    controlColumn->addWidget(makeDeliveryButton(QStringLiteral("Sonicate"), false));
+    controlColumn->addSpacing(30);
+    controlColumn->addWidget(makeDeliveryButton(QStringLiteral("Sham"), true));
     controlColumn->addSpacing(6);
     // Slack below, or the box layout spreads the controls apart.
     // No trailing stretch: the column is as tall as its controls now, and the
@@ -2600,7 +2621,10 @@ void WorkflowWindow::setSonicateEnabled(bool enabled) {
     }
     if (!inRowStopButton_.isNull()) {
         inRowStopButton_->setEnabled(running);
-        inRowStopButton_->setIcon(makeStopIcon(18, running ? kInkOnRed : kInkOnDead));
+        // Red whether or not anything is running: the control that interrupts
+        // a delivery is found by its colour, and a greyed one is found by
+        // hunting.
+        inRowStopButton_->setIcon(makeStopIcon(22, kInkOnRed));
         inRowStopButton_->setToolTip(running ? QStringLiteral("Stop the sonication in progress")
                                              : QStringLiteral("Nothing is running"));
     }
@@ -2626,8 +2650,7 @@ void WorkflowWindow::setSonicateEnabled(bool enabled) {
         if (button != nullptr)
             button->setAttribute(Qt::WA_TransparentForMouseEvents, !button->isEnabled());
     };
-    passThroughWhileDisabled(inRowSonicateButton_);
-    passThroughWhileDisabled(inRowShamButton_);
+    // Only the ones that sit on top of a table row.
     passThroughWhileDisabled(inRowStopButton_);
     if (running) {
         paintRunningButton();
@@ -2644,8 +2667,10 @@ void WorkflowWindow::placeSonicateButton(int oneBased) {
     for (int row = 0; row < rows; ++row) {
         const QModelIndex cell =
             protocolModel_->index(row, beam::gui_qt::TreatmentProtocolTableModel::kAction);
-        const bool wanted = row == oneBased - 1 &&
-                            !protocolModel_->rows()[static_cast<std::size_t>(row)].delivered;
+        const bool goingOut = openLogSequence_ > 0 && oneBased == openLogSequence_;
+        const bool wanted =
+            row == oneBased - 1 &&
+            (goingOut || !protocolModel_->rows()[static_cast<std::size_t>(row)].delivered);
         if (!wanted) {
             if (protocolView_->indexWidget(cell) != nullptr) {
                 // The pair widget owns both buttons, so dropping it takes them.
@@ -2654,49 +2679,35 @@ void WorkflowWindow::placeSonicateButton(int oneBased) {
             continue;
         }
         if (protocolView_->indexWidget(cell) != nullptr) continue;
-        // Both ways of running this sonication, side by side on the row that is
-        // about to run: ultrasound, or the mask alone.
+        // What belongs to the row is what says this row is the one running:
+        // stop, and the lamp. The two deliveries are words in the Serial Port
+        // column, where neither can be hit by a slip meant for the other.
         auto* pair = new QWidget(protocolView_);
         auto* row_layout = new QHBoxLayout(pair);
         row_layout->setContentsMargins(1, 0, 1, 0);
-        row_layout->setSpacing(2);
-        const auto makeRowButton = [this, pair](const char* style) {
-            auto* button = new QPushButton(pair);
-            button->setIconSize(QSize(18, 18));
-            button->setFixedSize(32, 22);
-            button->setCursor(Qt::PointingHandCursor);
-            button->setStyleSheet(QString::fromLatin1(style));
-            return button;
-        };
-        // Three buttons, each with one job it never swaps: send ultrasound,
-        // play the mask alone, stop whichever is running. A button that
-        // changes what it does is a button that gets pressed by mistake.
-        auto* fire = makeRowButton(kSonicateStyle);
-        auto* mask = makeRowButton(kShamStyle);
-        auto* halt = makeRowButton(kStopStyle);
-        fire->setIcon(makeSonicateIcon(18, kInkOnBlue));
-        mask->setIcon(makeShamIcon(18, kInkOnYellow));
-        halt->setIcon(makeStopIcon(18, kInkOnRed));
-        connect(fire, &QPushButton::clicked, this, [this] { runSonication(/*sham=*/false); });
-        connect(mask, &QPushButton::clicked, this, [this] { runSonication(/*sham=*/true); });
+        row_layout->setSpacing(4);
+        auto* halt = new QPushButton(pair);
+        halt->setIconSize(QSize(22, 22));
+        halt->setFixedSize(44, 26);
+        halt->setCursor(Qt::PointingHandCursor);
+        halt->setStyleSheet(QString::fromLatin1(kStopStyle));
+        halt->setIcon(makeStopIcon(22, kInkOnRed));
         connect(halt, &QPushButton::clicked, this, [this] { abortSonication(); });
         auto* lamp = new QLabel(pair);
         lamp->setTextFormat(Qt::RichText);
         lamp->setText(lampText(QStringLiteral("#27343a"), QStringLiteral("#27343a")));
         lamp->setAlignment(Qt::AlignCenter);
-        lamp->setFixedSize(40, 22);
+        lamp->setFixedSize(56, 26);
         lamp->setStyleSheet(QString::fromLatin1(kLampOffStyle));
         // Nothing to click: it reports, so clicks belong to the row behind it.
         lamp->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-        row_layout->addWidget(fire);
-        row_layout->addWidget(mask);
         row_layout->addWidget(halt);
         row_layout->addWidget(lamp);
+        row_layout->addStretch(1);
         // These sit on top of the row's first cell, so without this a
         // right-click on them is swallowed by the button and the row that is
         // about to run is the one row with no menu.
-        for (QWidget* over : {static_cast<QWidget*>(pair), static_cast<QWidget*>(fire),
-                              static_cast<QWidget*>(mask), static_cast<QWidget*>(halt),
+        for (QWidget* over : {static_cast<QWidget*>(pair), static_cast<QWidget*>(halt),
                               static_cast<QWidget*>(lamp)}) {
             over->setContextMenuPolicy(Qt::CustomContextMenu);
             connect(over, &QWidget::customContextMenuRequested, this,
@@ -2706,9 +2717,7 @@ void WorkflowWindow::placeSonicateButton(int oneBased) {
                     });
         }
         protocolView_->setIndexWidget(cell, pair);
-        protocolView_->setRowHeight(row, 27);
-        inRowSonicateButton_ = fire;
-        inRowShamButton_ = mask;
+        protocolView_->setRowHeight(row, 30);
         inRowStopButton_ = halt;
         inRowOnLamp_ = lamp;
         setSonicateEnabled(sonicateEnabled_);  // paints them into whichever state applies
@@ -3086,7 +3095,25 @@ void WorkflowWindow::runSonication(bool sham) {
     if (!selectScheduledTarget()) return;
     const int shown = std::clamp(stimParamModel_->currentShownRow(), 1,
                                  static_cast<int>(stimParamModel_->rows().size()));
-    const beam::gui_qt::StimParamRow& r = stimParamModel_->rows()[static_cast<std::size_t>(shown - 1)];
+    beam::gui_qt::StimParamRow r = stimParamModel_->rows()[static_cast<std::size_t>(shown - 1)];
+    // updateSonicateSettingsForCurrentSonication.m pushes the schedule's own
+    // Duration onto the target's row before anything is sent: a protocol that
+    // asks for 180 s gets 180 s from a target whose own default is 30. BeamV0
+    // writes that into the target; here it is applied to what goes out and to
+    // what is logged, leaving the Target List's default where the operator put
+    // it.
+    if (protocolModel_ != nullptr) {
+        const std::vector<beam::gui_qt::TreatmentProtocolRow>& planned = protocolModel_->rows();
+        if (currentSonication_ >= 1 &&
+            currentSonication_ <= static_cast<int>(planned.size())) {
+            const double scheduled =
+                planned[static_cast<std::size_t>(currentSonication_) - 1].duration;
+            if (scheduled > 0.0) {
+                r.startTime = 0.0;
+                r.endTime = scheduled;
+            }
+        }
+    }
     const beam::safety::SonicationSafetyParams params =
         beam::gui::stimParamsFromTableRow(r.pd, r.pi, r.bd, r.bi, r.amplitude, r.startTime, r.endTime);
 
