@@ -1070,7 +1070,20 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     connect(manageTargetsButton_, &QPushButton::clicked, this,
             [this] { openTreatmentLibrary(TreatmentLibraryDialog::Page::Targets); });
     connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
-            [this] { saveTreatmentTargetStore(); });
+            [this](const QModelIndex& topLeft, const QModelIndex& bottomRight) {
+                saveTreatmentTargetStore();
+                // The plan row hands its Duration to the grid when the
+                // sonication becomes current. Editing that Duration while it
+                // already is current has to do the same, or the number the
+                // operator just set sits in one table while the other -- the
+                // one that fires -- keeps the old one.
+                using Plan = beam::gui_qt::TreatmentProtocolTableModel;
+                const bool touchedDuration = topLeft.column() <= Plan::kDuration &&
+                                             bottomRight.column() >= Plan::kDuration;
+                const int row = currentSonication_ - 1;
+                if (touchedDuration && row >= topLeft.row() && row <= bottomRight.row())
+                    applyScheduledDurationToGrid();
+            });
     // The last item of the visit list makes a visit; every other item is one.
     connect(visitNumberCombo_, &QComboBox::activated, this, [this](int index) {
         const int chosen = visitNumberCombo_->itemData(index).toInt();
@@ -1723,11 +1736,22 @@ void WorkflowWindow::switchToSelectedTarget() {
         // The protocol contributes the duration and nothing else:
         // updateSonicateSettingsForCurrentSonication.m sets startTime and
         // endTime down the whole column and leaves Amplitude to the target.
+        // The current sonication first: one target can be screened for 30 s
+        // and treated for 180 s in the same visit, and taking whichever row
+        // merely names it first would run the screening duration for both.
         std::optional<double> scheduledDuration;
-        for (const beam::gui_qt::TreatmentProtocolRow& protocolRow : protocolModel_->rows()) {
-            if (protocolRow.target == name) {
-                scheduledDuration = protocolRow.duration;
-                break;
+        const std::vector<beam::gui_qt::TreatmentProtocolRow>& planned = protocolModel_->rows();
+        if (currentSonication_ >= 1 && currentSonication_ <= static_cast<int>(planned.size())) {
+            const beam::gui_qt::TreatmentProtocolRow& current =
+                planned[static_cast<std::size_t>(currentSonication_) - 1];
+            if (current.target == name) scheduledDuration = current.duration;
+        }
+        if (!scheduledDuration.has_value()) {
+            for (const beam::gui_qt::TreatmentProtocolRow& protocolRow : planned) {
+                if (protocolRow.target == name) {
+                    scheduledDuration = protocolRow.duration;
+                    break;
+                }
             }
         }
 
@@ -1838,14 +1862,6 @@ void WorkflowWindow::saveCurrentTargetSonications() {
     }
 }
 
-// Port of checkSonicationSafety.m. The pure half -- ISPPA, the PD/PI/BD/BI
-// relations, ISPTA and the mechanical index -- is beam::safety; the two
-// preconditions the source reads off its own session (registration, through
-// transmit) are added here, as that header says the caller must.
-//
-// It runs on every edit rather than only at fire time: a number typed out of
-// range should say so while the operator is still looking at it, not when
-// they press Sonicate.
 void WorkflowWindow::updateSonicationSafety() {
     if (sonicationSafetyLabel_ == nullptr || stimParamModel_ == nullptr) return;
     if (checkingSonicationSafety_) return;
@@ -3078,6 +3094,41 @@ void WorkflowWindow::placeSonicateButton(int oneBased) {
     }
 }
 
+// Port of what updateSonicateSettingsForCurrentSonication.m does to the grid:
+//
+//   stimParamTableData.startTime = 0;
+//   stimParamTableData.endTime   = treatmentProtocolTable.Duration(currSonicationI);
+//
+// The plan row owns how long the sonication runs; the target owns everything
+// else. Target ranking replaces the row's name and leaves its Duration alone,
+// so a 180 s slot repointed at SCC1 runs for 180 s, not for the 30 s SCC1
+// defines. From here the grid is what fires, so an edit made afterwards is
+// the one that goes out -- until the current sonication changes again and
+// this puts the schedule's own number back, as the source does.
+void WorkflowWindow::applyScheduledDurationToGrid() {
+    if (stimParamModel_ == nullptr || protocolModel_ == nullptr) return;
+    const std::vector<beam::gui_qt::TreatmentProtocolRow>& planned = protocolModel_->rows();
+    const int position = currentSonication_;
+    if (position < 1 || position > static_cast<int>(planned.size())) return;
+    const beam::gui_qt::TreatmentProtocolRow& planRow =
+        planned[static_cast<std::size_t>(position) - 1];
+    if (planRow.duration <= 0.0) return;
+    // Only when the grid is showing the target this sonication runs.
+    if (planRow.target != stimParamModel_->targetName()) return;
+
+    std::vector<beam::gui_qt::StimParamRow> rows = stimParamModel_->rows();
+    if (rows.empty()) return;
+    bool changed = false;
+    for (beam::gui_qt::StimParamRow& row : rows) {
+        if (row.startTime != 0.0 || std::abs(row.endTime - planRow.duration) > 1e-12)
+            changed = true;
+        row.startTime = 0.0;
+        row.endTime = planRow.duration;
+    }
+    if (!changed) return;
+    stimParamModel_->setRows(std::move(rows));
+}
+
 void WorkflowWindow::selectScheduledSonication(int oneBased) {
     if (!protocolModel_) return;
     const int scheduled = static_cast<int>(protocolModel_->rows().size());
@@ -3121,6 +3172,13 @@ void WorkflowWindow::selectScheduledSonication(int oneBased) {
     visitSonication_.insert(visitKey(currentProtocolName(), currentVisitNumber()), position);
     saveVisitState();
     const QString target = protocolModel_->rows()[static_cast<std::size_t>(position) - 1].target;
+    // Here rather than in loadTreatmentProtocol: that calls
+    // switchToSelectedTarget before this function has said which sonication
+    // is current, so the grid was filled from whichever row merely named the
+    // target first -- a 180 s slot repointed at SCC1 by ranking showed SCC1's
+    // own 30 s. And selecting the target below refills the grid only when the
+    // selection actually changes, which it usually has not.
+    applyScheduledDurationToGrid();
     if (!targetListWidget_) return;
     int found = -1;
     for (int i = 0; i < targetListWidget_->count(); ++i) {
@@ -3459,24 +3517,12 @@ void WorkflowWindow::runSonication(bool sham) {
     const int shown = std::clamp(stimParamModel_->currentShownRow(), 1,
                                  static_cast<int>(stimParamModel_->rows().size()));
     beam::gui_qt::StimParamRow r = stimParamModel_->rows()[static_cast<std::size_t>(shown - 1)];
-    // updateSonicateSettingsForCurrentSonication.m pushes the schedule's own
-    // Duration onto the target's row before anything is sent: a protocol that
-    // asks for 180 s gets 180 s from a target whose own default is 30. BeamV0
-    // writes that into the target; here it is applied to what goes out and to
-    // what is logged, leaving the Target List's default where the operator put
-    // it.
-    if (protocolModel_ != nullptr) {
-        const std::vector<beam::gui_qt::TreatmentProtocolRow>& planned = protocolModel_->rows();
-        if (currentSonication_ >= 1 &&
-            currentSonication_ <= static_cast<int>(planned.size())) {
-            const double scheduled =
-                planned[static_cast<std::size_t>(currentSonication_) - 1].duration;
-            if (scheduled > 0.0) {
-                r.startTime = 0.0;
-                r.endTime = scheduled;
-            }
-        }
-    }
+    // No duration override here. The schedule's Duration reaches the grid
+    // when the sonication becomes current -- switchToSelectedTarget applies
+    // it, as updateSonicateSettingsForCurrentSonication.m does -- and
+    // SonicateButtonPushed then builds the sonication from the grid. An edit
+    // the operator makes after that is the one that goes out, which is what
+    // makes those cells worth having.
     const beam::safety::SonicationSafetyParams params =
         beam::gui::stimParamsFromTableRow(r.pd, r.pi, r.bd, r.bi, r.amplitude, r.startTime, r.endTime);
 

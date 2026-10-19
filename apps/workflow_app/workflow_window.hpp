@@ -147,6 +147,9 @@ private:
     // checkSonicationSafety.m: re-run every time a parameter is typed, and
     // the gate on whether anything may be sent.
     void updateSonicationSafety();
+    // updateSonicateSettingsForCurrentSonication.m: the schedule's Duration
+    // goes onto the grid when a sonication becomes the current one.
+    void applyScheduledDurationToGrid();
     // The shipped Target List, as installed. Never written to, so it is what
     // "the original value" means: a parameter edited past recognition has
     // somewhere to come back from.
