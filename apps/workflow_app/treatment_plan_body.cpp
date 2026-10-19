@@ -45,7 +45,6 @@
 #include <QCoreApplication>
 #include <QDataStream>
 #include <QFileInfo>
-#include <map>
 #include <vector>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
@@ -1847,47 +1846,6 @@ void WorkflowWindow::saveCurrentTargetSonications() {
 // It runs on every edit rather than only at fire time: a number typed out of
 // range should say so while the operator is still looking at it, not when
 // they press Sonicate.
-namespace {
-
-// ISPTA and ISPPA are each driven by several columns at once, so naming the
-// rule that broke does not tell the operator which number to change. This
-// finds, for one column, the value that would clear the report -- by asking
-// the checker rather than rearranging its formulas, so the answer cannot
-// drift from the rule it is about, and so a value that would break a
-// different rule on the way is rejected too.
-//
-// `wantLargest` for a column that makes things worse as it grows (amplitude,
-// the durations); the smallest acceptable value otherwise (burst interval).
-// Returns nothing when no value in range works.
-std::optional<double> solveSafeValue(beam::safety::SonicationSafetyParams row,
-                                     double beam::safety::SonicationSafetyParams::* field,
-                                     double low, double high, bool wantLargest) {
-    const auto accepts = [&row, field](double value) {
-        beam::safety::SonicationSafetyParams trial = row;
-        trial.*field = value;
-        return beam::safety::checkSonicationParameters({trial}).pass;
-    };
-    // The end that ought to pass. If even that fails, this column is not a
-    // way out on its own.
-    if (!accepts(wantLargest ? low : high)) return std::nullopt;
-    double good = wantLargest ? low : high;
-    double bad = wantLargest ? high : low;
-    for (int step = 0; step < 60; ++step) {
-        const double middle = 0.5 * (good + bad);
-        (accepts(middle) ? good : bad) = middle;
-    }
-    // Reported to three decimals, so round the way that stays acceptable and
-    // confirm the rounded number really does.
-    double rounded = wantLargest ? std::floor(good * 1000.0) / 1000.0
-                                 : std::ceil(good * 1000.0) / 1000.0;
-    for (int step = 0; step < 5 && !accepts(rounded); ++step)
-        rounded += wantLargest ? -0.001 : 0.001;
-    if (!accepts(rounded)) return std::nullopt;
-    return rounded;
-}
-
-}  // namespace
-
 void WorkflowWindow::updateSonicationSafety() {
     if (sonicationSafetyLabel_ == nullptr || stimParamModel_ == nullptr) return;
     if (checkingSonicationSafety_) return;
@@ -1907,135 +1865,45 @@ void WorkflowWindow::updateSonicationSafety() {
     sonicationSafetyPass_ = report.pass;
 
     // Which cells each broken rule is about. The grid marks them, because a
-    // message naming a rule does not say which of eleven columns to go and
-    // change -- and the cell the operator just edited is rarely the one.
+    // message naming a rule does not say which of eleven columns it is about,
+    // and the cell the operator just edited is rarely the only one involved.
+    // Which of them to change is a clinical decision; the application marks
+    // what the rule reads and leaves the decision alone.
     using Model = beam::gui_qt::StimParamTableModel;
     using Kind = beam::safety::ViolationKind;
-    using Mark = Model::CellMark;
-    std::map<std::pair<int, int>, Mark> unsafe;
+    std::set<std::pair<int, int>> unsafe;
     for (const beam::safety::Violation& violation : report.violations) {
         const int row = violation.sonicationIndex;
         const auto blame = [&unsafe, row](std::initializer_list<int> columns) {
-            // An invalid cell outranks an over-limit one: a schedule that
-            // cannot run is the first thing to fix.
-            for (const int column : columns) unsafe[{row, column}] = Mark::kInvalid;
-        };
-        const auto adjustable = [&unsafe, row](std::initializer_list<int> columns) {
-            for (const int column : columns)
-                unsafe.emplace(std::make_pair(row, column), Mark::kOverLimit);
+            for (const int column : columns) unsafe.insert({row, column});
         };
         switch (violation.kind) {
             case Kind::kIsppa:
             case Kind::kMechanicalIndex:
-                // Both are functions of amplitude alone, and an amplitude
-                // over a limit is a number to bring down rather than a
-                // contradiction to resolve.
-                adjustable({Model::kAmplitude});
+                // Both are functions of amplitude alone.
+                blame({Model::kAmplitude});
                 break;
-            // Only the value that is out of place is called out. What it is
-            // measured against is a way out, not a fault, and the suggestion
-            // loop below marks it amber -- but only if raising it actually
-            // works, so an amber cell always comes with a number.
             case Kind::kPulseDurationOverInterval:
-                blame({Model::kPulseDuration});
+                blame({Model::kPulseDuration, Model::kPulseInterval});
                 break;
             case Kind::kBurstDurationOverInterval:
-                blame({Model::kBurstDuration});
+                blame({Model::kBurstDuration, Model::kBurstInterval});
                 break;
             case Kind::kPulseIntervalOverBurst:
-                blame({Model::kPulseInterval});
+                blame({Model::kPulseInterval, Model::kBurstDuration});
                 break;
             case Kind::kBurstIntervalOverDuration:
-                blame({Model::kBurstInterval});
+                // "Duration" is not a column; Start and End are what make it.
+                blame({Model::kBurstInterval, Model::kStartTime, Model::kEndTime});
                 break;
             case Kind::kIsptaAll:
             case Kind::kIsptaBurstInterval:
-                // Handled below, where each lever is marked only if a value
-                // for it can actually be offered.
+                // Time-averaged intensity reads the amplitude and every term
+                // of the duty cycle.
+                blame({Model::kAmplitude, Model::kBurstDuration, Model::kBurstInterval,
+                       Model::kPulseDuration, Model::kPulseInterval});
                 break;
         }
-    }
-
-    // For the limits several columns feed at once, say what each of them
-    // would have to be. Any one of them clears the report; which to use is a
-    // clinical choice, and this is the part the application can answer.
-    using Params = beam::safety::SonicationSafetyParams;
-    struct Lever {
-        const char* name;
-        int column;
-        double Params::* field;
-        double low;
-        double high;
-        bool wantLargest;
-    };
-    for (const beam::safety::Violation& violation : report.violations) {
-        const std::size_t at = static_cast<std::size_t>(violation.sonicationIndex);
-        if (at >= sonications.size()) continue;
-        const Params& row = sonications[at];
-        const double duration = row.endTime - row.startTime;
-        // Each rule has its own ways out, and only those. Offering a column
-        // the rule does not depend on would be an instruction that does not
-        // work.
-        std::vector<Lever> levers;
-        switch (violation.kind) {
-            case Kind::kIsppa:
-            case Kind::kMechanicalIndex:
-            case Kind::kIsptaAll:
-            case Kind::kIsptaBurstInterval:
-                levers = {
-                    {"Amplitude", Model::kAmplitude, &Params::amplitudeMPa, 0.0,
-                     row.amplitudeMPa, true},
-                    {"Pulse Duration", Model::kPulseDuration, &Params::pd, 0.0, row.pd, true},
-                    {"Burst Duration", Model::kBurstDuration, &Params::bd, row.pi, row.bd, true},
-                    {"Burst Interval", Model::kBurstInterval, &Params::bi, row.bi, duration,
-                     false}};
-                break;
-            case Kind::kPulseDurationOverInterval:
-                levers = {{"Pulse Duration", Model::kPulseDuration, &Params::pd, 0.0, row.pd,
-                           true},
-                          {"Pulse Interval", Model::kPulseInterval, &Params::pi, row.pi, row.bd,
-                           false}};
-                break;
-            case Kind::kBurstDurationOverInterval:
-                levers = {{"Burst Duration", Model::kBurstDuration, &Params::bd, row.pi, row.bd,
-                           true},
-                          {"Burst Interval", Model::kBurstInterval, &Params::bi, row.bi,
-                           duration, false}};
-                break;
-            case Kind::kPulseIntervalOverBurst:
-                levers = {{"Pulse Interval", Model::kPulseInterval, &Params::pi, row.pd, row.pi,
-                           true},
-                          {"Burst Duration", Model::kBurstDuration, &Params::bd, row.bd, row.bi,
-                           false}};
-                break;
-            case Kind::kBurstIntervalOverDuration:
-                levers = {{"Burst Interval", Model::kBurstInterval, &Params::bi, row.bd, row.bi,
-                           true},
-                          {"End Time", Model::kEndTime, &Params::endTime, row.endTime,
-                           row.startTime + 3600.0, false}};
-                break;
-        }
-        QStringList offers;
-        for (const Lever& lever : levers) {
-            const std::optional<double> value =
-                solveSafeValue(row, lever.field, lever.low, lever.high, lever.wantLargest);
-            if (!value.has_value()) continue;
-            // emplace, not assignment: a cell already called out as the
-            // offender stays red.
-            unsafe.emplace(std::make_pair(violation.sonicationIndex, lever.column),
-                           Mark::kOverLimit);
-            offers << QStringLiteral("%1 %2 %3")
-                          .arg(QString::fromLatin1(lever.name),
-                               lever.wantLargest ? QStringLiteral("down to")
-                                                 : QStringLiteral("up to"))
-                          .arg(*value, 0, 'g', 4);
-        }
-        if (!offers.isEmpty()) {
-            sonicationSafetyMessages_
-                << QStringLiteral("Any one of these clears it: %1")
-                       .arg(offers.join(QStringLiteral("; ")));
-        }
-        break;  // one set of suggestions is enough; they all point at the same row
     }
 
     // The source's own two preconditions, in its own words. They are about

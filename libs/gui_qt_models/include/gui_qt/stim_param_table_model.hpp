@@ -1,6 +1,6 @@
 #pragma once
 
-#include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -76,16 +76,11 @@ public:
     void setRows(std::vector<StimParamRow> rows);
     const std::vector<StimParamRow>& rows() const { return rows_; }
 
-    // Why a cell is marked. The two are different problems and want
-    // different answers, so they are not the same colour: an invalid cell is
-    // wrong on its own and must change, while the over-limit ones are each
-    // legal and only exceed a limit together -- any one of them will do.
-    enum class CellMark { kInvalid, kOverLimit };
-
-    // The cells a safety check blamed. A message naming a rule is no help if
-    // the eye lands on whichever cell was edited last rather than the one at
-    // fault.
-    void setUnsafeCells(const std::map<std::pair<int, int>, CellMark>& cells);
+    // The cells the failed rule is computed from. A message naming a rule is
+    // no help if the eye lands on whichever cell was edited last rather than
+    // the ones the rule is about. Which of them to change is the operator's
+    // call, and the application does not have an opinion.
+    void setUnsafeCells(const std::set<std::pair<int, int>>& cells);
 
     // Reorders rows via beam::gui::sortSonicationTableOrder (sortSonicationTable.m)
     // over the current "#"/order column.
@@ -119,7 +114,7 @@ signals:
 
 private:
     std::vector<StimParamRow> rows_;
-    std::map<std::pair<int, int>, CellMark> unsafeCells_;
+    std::set<std::pair<int, int>> unsafeCells_;
     QString targetName_;
 };
 
