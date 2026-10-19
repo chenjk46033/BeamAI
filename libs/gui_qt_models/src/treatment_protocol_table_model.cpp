@@ -92,12 +92,24 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         if (role == Qt::DecorationRole && r.delivered) return deliveredTick(r.sham, r.aborted);
         if (role == Qt::TextAlignmentRole) return QVariant(Qt::AlignCenter);
         if (role == Qt::ToolTipRole) {
-            if (!r.delivered) return QVariant();
+            if (!r.delivered)
+                return r.blockedBy.isEmpty()
+                           ? QVariant()
+                           : QVariant(QStringLiteral("This sonication would be blocked:\n%1")
+                                          .arg(r.blockedBy.join(QLatin1Char('\n'))));
             const QString what =
                 r.sham ? QStringLiteral("Sham -- masking audio only, no ultrasound sent")
                        : QStringLiteral("Delivered");
             return r.aborted ? what + QStringLiteral(", stopped before it finished") : what;
         }
+    }
+    // A row the rules would refuse, marked where the tick goes so the column
+    // reads the same way down the page: what has happened, and what cannot.
+    if (!r.delivered && !r.blockedBy.isEmpty()) {
+        if (role == Qt::ForegroundRole) return QColor(0xff, 0xd9, 0xd6);
+        if (role == Qt::BackgroundRole && !current) return QColor(0x4a, 0x1c, 0x1c);
+        if (role == Qt::DisplayRole && index.column() == kAction)
+            return QStringLiteral("!");
     }
     if (role == Qt::ToolTipRole) {
         // Every line of it, not the latest one the cell has room for.

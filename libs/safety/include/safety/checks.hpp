@@ -15,7 +15,8 @@ namespace beam::safety {
 // the log, so they are fixed: a rule keeps its number for good, a retired
 // one leaves a hole rather than being reused, and a new one takes the next
 // free number in its band. The bands group them -- 1xx the acoustic limits,
-// 2xx the schedule relations, 3xx the session preconditions -- and are
+// 2xx the schedule relations, 3xx the session preconditions, 4xx the
+// coupling measurement -- and are
 // spaced so a rule can be added beside the ones it belongs with.
 enum class ViolationKind {
     kIsppa = 110,                      // ISPPA over its limit
@@ -26,6 +27,7 @@ enum class ViolationKind {
     kBurstDurationOverInterval = 220,  // BD > BI
     kPulseIntervalOverBurst = 230,     // PI > BD
     kBurstIntervalOverDuration = 240,  // BI > Duration
+    kCouplingTooLow = 410,             // through-transmit below 0.1
 };
 
 // The number as written, e.g. 110. Preconditions the caller adds have their

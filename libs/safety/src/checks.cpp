@@ -110,9 +110,10 @@ SafetyReport checkSonicationParameters(const std::vector<SonicationSafetyParams>
 SafetyReport checkCouplingSafety(double throughTransmitAtt) {
     SafetyReport report;
     if (throughTransmitAtt < 0.1) {
-        report.pass = false;
-        report.messages.push_back("WARNING: Coupling transmission is abnormally low");
-        // No sonication row to blame: this one is about the measurement.
+        // Index 0 and not a row of anything: this one is about the
+        // measurement, not about a sonication.
+        fail(report, 0, ViolationKind::kCouplingTooLow,
+             "WARNING: Coupling transmission is abnormally low");
     }
     return report;
 }

@@ -176,3 +176,15 @@ TEST(CheckCouplingSafety, LowAttenuationWarns) {
     EXPECT_TRUE(checkCouplingSafety(0.5).pass);
     EXPECT_TRUE(checkCouplingSafety(0.5).messages.empty());
 }
+
+// The coupling warning is numbered like the rest, in its own band: it is
+// about the measurement rather than about a sonication.
+TEST(CheckCouplingSafety, CarriesItsRuleNumber) {
+    EXPECT_EQ(ruleNumber(ViolationKind::kCouplingTooLow), 410);
+    const SafetyReport r = checkCouplingSafety(0.05);
+    EXPECT_FALSE(r.pass);
+    ASSERT_EQ(r.messages.size(), 1u);
+    EXPECT_EQ(r.messages[0], "[Rule 410] WARNING: Coupling transmission is abnormally low");
+    ASSERT_EQ(r.violations.size(), 1u);
+    EXPECT_EQ(r.violations[0].kind, ViolationKind::kCouplingTooLow);
+}

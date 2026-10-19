@@ -150,6 +150,14 @@ private:
     // updateSonicateSettingsForCurrentSonication.m: the schedule's Duration
     // goes onto the grid when a sonication becomes the current one.
     void applyScheduledDurationToGrid();
+    // The same rules over every sonication still to run, so one that cannot
+    // be delivered is visible before the visit reaches it. Advisory: what
+    // stops a delivery is still the check against the grid at fire time.
+    void precheckPendingSonications();
+    // It rewrites the rows it read, so it must not answer its own change.
+    bool prechecking_ = false;
+    // Writes a refused attempt into the row's notes.
+    void recordRefusedSonication(bool sham);
     // The shipped Target List, as installed. Never written to, so it is what
     // "the original value" means: a parameter edited past recognition has
     // somewhere to come back from.
@@ -450,6 +458,7 @@ private:
     bool checkingSonicationSafety_ = false;
     QStringList sonicationSafetyMessages_;
     QLabel* sonicationSafetyLabel_ = nullptr;
+    QLabel* sonicationPrecheckLabel_ = nullptr;
     // How many measurements this session has taken, so a repeat says so.
     int correctionRunCount_ = 0;
     // A stand-in through-transmit pair, so the page can be read and the

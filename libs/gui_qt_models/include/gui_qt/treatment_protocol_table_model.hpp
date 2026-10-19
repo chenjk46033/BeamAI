@@ -4,6 +4,7 @@
 
 #include <QAbstractTableModel>
 #include <QString>
+#include <QStringList>
 
 #include "gui/top_targets.hpp"
 
@@ -38,6 +39,11 @@ struct TreatmentProtocolRow {
     // Set once the sonication has been sent. A record of what happened is not
     // edited afterwards -- only what the operator observed about it.
     bool delivered = false;
+    // What the safety rules say about this row as the plan stands -- empty
+    // when it has nothing to say. Advisory only: the rules that actually
+    // stop a delivery run against the sonication about to go out, and a row
+    // further down can still change before it is reached.
+    QStringList blockedBy;
     // A sham ran the countdown and the masking audio but sent no ultrasound,
     // which the log has to show as plainly as a real delivery.
     bool sham = false;

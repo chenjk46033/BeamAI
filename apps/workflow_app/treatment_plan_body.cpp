@@ -730,6 +730,16 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
                                                    Qt::TextSelectableByKeyboard);
     sonicationSafetyLabel_->setCursor(Qt::IBeamCursor);
     rightColumn->addWidget(sonicationSafetyLabel_);
+    // Separate from the banner above it: that one is about the sonication
+    // being fired now, this one about the rest of the visit.
+    sonicationPrecheckLabel_ = new QLabel(bodyContent);
+    sonicationPrecheckLabel_->setWordWrap(true);
+    sonicationPrecheckLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    sonicationPrecheckLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: #ffd9a8; background: #3a2a12; border: 1px solid #8a5a10; "
+        "border-radius: 4px; padding: 4px 10px; }"));
+    sonicationPrecheckLabel_->hide();
+    rightColumn->addWidget(sonicationPrecheckLabel_);
 
     // ---- TabGroup3 ------------------------------------------------------
     treatmentTabs_ = new QTabWidget(bodyContent);
@@ -1083,6 +1093,11 @@ void WorkflowWindow::wireTreatmentPlanBody() {
                 const int row = currentSonication_ - 1;
                 if (touchedDuration && row >= topLeft.row() && row <= bottomRight.row())
                     applyScheduledDurationToGrid();
+                // Queued: this rewrites the rows it was handed, and resetting
+                // a model from inside its own signal is how a view ends up
+                // reading an index that no longer exists.
+                QMetaObject::invokeMethod(
+                    this, [this] { precheckPendingSonications(); }, Qt::QueuedConnection);
             });
     // The last item of the visit list makes a visit; every other item is one.
     connect(visitNumberCombo_, &QComboBox::activated, this, [this](int index) {
@@ -1664,6 +1679,8 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
     }
     lastLoadedProtocol_ = protocolName;
     lastLoadedVisit_ = visit;
+    QMetaObject::invokeMethod(
+        this, [this] { precheckPendingSonications(); }, Qt::QueuedConnection);
     selectScheduledSonication(keep);
     updateBestTargets();
 }
@@ -1862,6 +1879,91 @@ void WorkflowWindow::saveCurrentTargetSonications() {
     }
 }
 
+// BeamV0 checks only the sonication about to go out, so a plan can carry a
+// row that cannot be delivered and say nothing until the visit reaches it --
+// after the ones before it have already been given. This runs the same rules
+// over every row still to run and marks the ones that would be refused.
+//
+// Advisory, deliberately. It blocks nothing: rows that are fine must not be
+// held up by one further down, and a row can still change before it is
+// reached -- ranking repoints targets, and a target's parameters can be
+// edited. What actually stops a delivery is the check against the grid at
+// fire time, which is unchanged.
+void WorkflowWindow::precheckPendingSonications() {
+    if (protocolModel_ == nullptr || prechecking_) return;
+    prechecking_ = true;
+    const auto done = qScopeGuard([this] { prechecking_ = false; });
+    std::vector<beam::gui_qt::TreatmentProtocolRow> rows = protocolModel_->rows();
+    QStringList blockedRows;
+    bool changed = false;
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        beam::gui_qt::TreatmentProtocolRow& row = rows[i];
+        QStringList found;
+        // Delivered rows are a record, not a plan; the current one already
+        // has the banner above the grid saying this in full.
+        const bool isCurrent = static_cast<int>(i) + 1 == currentSonication_;
+        if (!row.delivered && !isCurrent) {
+            // Composed the way the grid would be: the duration from this row,
+            // everything else from the target it runs.
+            const beam::gui::TreatmentLogRow planned =
+                rowForTarget(row.target.toStdString(), row.duration);
+            const beam::safety::SonicationSafetyParams params =
+                beam::gui::stimParamsFromTableRow(planned.pulseDurationSeconds,
+                                                  planned.pulseIntervalSeconds,
+                                                  planned.burstDurationSeconds,
+                                                  planned.burstIntervalSeconds, planned.amplitude,
+                                                  planned.startTimeSeconds,
+                                                  planned.endTimeSeconds);
+            const beam::safety::SafetyReport report =
+                beam::safety::checkSonicationParameters({params});
+            for (const std::string& message : report.messages)
+                found << QString::fromStdString(message);
+            if (!found.isEmpty()) blockedRows << QString::number(i + 1);
+        }
+        if (row.blockedBy != found) {
+            row.blockedBy = found;
+            changed = true;
+        }
+    }
+    if (changed) protocolModel_->setRows(std::move(rows));
+
+    if (sonicationPrecheckLabel_ == nullptr) return;
+    if (blockedRows.isEmpty()) {
+        sonicationPrecheckLabel_->hide();
+        return;
+    }
+    sonicationPrecheckLabel_->setText(
+        QStringLiteral("%1 later sonication(s) would be blocked as the plan stands: row %2. "
+                       "Hover the row for the rule.")
+            .arg(blockedRows.size())
+            .arg(blockedRows.join(QStringLiteral(", "))));
+    sonicationPrecheckLabel_->show();
+}
+
+// Filed as a note on the row it was aimed at, stamped and worded like every
+// other note, so a visit read back later shows the attempt as well as the
+// deliveries. Nothing else changes: no row is created, no status is set, and
+// the sonication is still refused.
+void WorkflowWindow::recordRefusedSonication(bool sham) {
+    const QString protocolName = currentProtocolName();
+    const std::string protocol = protocolName.toStdString();
+    const int visit = currentVisitNumber();
+    const beam::gui::TreatmentLogRow* row =
+        treatmentLog_.find(protocol, visit, currentSonication_);
+    if (row == nullptr) return;
+    const QString entry =
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) +
+        QStringLiteral("  %1 refused: %2")
+            .arg(sham ? QStringLiteral("Sham") : QStringLiteral("Sonicate"),
+                 sonicationSafetyMessages_.join(QStringLiteral("; ")));
+    QString notes = QString::fromStdString(row->notes);
+    if (!notes.isEmpty()) notes += QLatin1Char('\n');
+    notes += entry;
+    treatmentLog_.setNotes(protocol, visit, currentSonication_, notes.toStdString());
+    loadTreatmentProtocol(protocolName);
+    saveTreatmentTargetStore();
+}
+
 void WorkflowWindow::updateSonicationSafety() {
     if (sonicationSafetyLabel_ == nullptr || stimParamModel_ == nullptr) return;
     if (checkingSonicationSafety_) return;
@@ -1956,6 +2058,7 @@ void WorkflowWindow::updateSonicationSafety() {
             "border-radius: 4px; padding: 5px 10px; }"));
     }
     stimParamModel_->setUnsafeCells(unsafe);
+    precheckPendingSonications();
     // Re-applies the gate above to whatever buttons are on the current row.
     setSonicateEnabled(sonicateEnabled_);
 }
@@ -3509,6 +3612,11 @@ void WorkflowWindow::runSonication(bool sham) {
     // backstop for anything that reaches here another way.
     updateSonicationSafety();
     if (!sonicationSafetyPass_) {
+        // A refusal is part of what happened to this visit. Without this the
+        // record shows only deliveries, and an attempt that was stopped by a
+        // rule leaves nothing at all behind -- the operator remembers it, the
+        // log does not.
+        recordRefusedSonication(sham);
         setExecutionStatus(QStringLiteral("Nothing was sent. %1")
                                .arg(sonicationSafetyMessages_.join(QStringLiteral("; "))),
                            true);
