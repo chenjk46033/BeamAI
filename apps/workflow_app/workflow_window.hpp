@@ -137,6 +137,30 @@ private:
     void refresh();
     void setMriPathDisplay(const QString& path);
     void updateCouplingCharts(double transmissionAmp);
+    // Throws the measurement away -- the plots, the numbers and the reading
+    // treatment would have used -- so the next Run starts from nothing.
+    void clearCouplingMeasurement();
+    // The top-bar ABORT follows one thing only: whether something is being
+    // delivered right now. It is on every page, so it is the one control that
+    // has to mean the same thing everywhere.
+    void updateAbortButton();
+    // checkSonicationSafety.m: re-run every time a parameter is typed, and
+    // the gate on whether anything may be sent.
+    void updateSonicationSafety();
+    // The shipped Target List, as installed. Never written to, so it is what
+    // "the original value" means: a parameter edited past recognition has
+    // somewhere to come back from.
+    beam::gui::TreatmentTargetStore shippedTargets_;
+    void loadShippedTargetStore();
+    // Puts the selected target's parameters back to the shipped ones.
+    void restoreShippedParameters();
+    // The shipped value of one grid cell, or nothing when there is no
+    // shipped target behind it.
+    std::optional<double> shippedValueFor(int column) const;
+    // "Shipped value: 0.03 (now 0.5)", or nothing for a cell the install has
+    // no value for.
+    QString shippedTooltip(const QModelIndex& cell) const;
+    bool deliveryRunning() const;
     void setExecutionStatus(const QString& text, bool isError = false);
     void showMessage(const QString& text, bool error);
     void syncMriViewerHeights();
@@ -330,6 +354,7 @@ private:
     QProgressBar* couplingProgressBar_ = nullptr;
     QProgressBar* correctionProgressBar_ = nullptr;
     QPushButton* runCouplingCheckButton_ = nullptr;
+    QPushButton* clearCouplingButton_ = nullptr;
     QPushButton* acceptCouplingButton_ = nullptr;
     QPushButton* runCorrectionButton_ = nullptr;
     QPushButton* acceptCorrectionButton_ = nullptr;
@@ -414,6 +439,16 @@ private:
     QLabel* couplingNumbersLabel_ = nullptr;
     // Whether what is on the plots came off a device or was stood in for.
     bool couplingSimulated_ = false;
+    // What checkSonicationSafety.m concluded about the parameters now in the
+    // grid, and why. Sonicate and Sham are off while this is false.
+    bool sonicationSafetyPass_ = true;
+    // Marking the unsafe cells changes the grid, which is what calls this in
+    // the first place.
+    bool checkingSonicationSafety_ = false;
+    QStringList sonicationSafetyMessages_;
+    QLabel* sonicationSafetyLabel_ = nullptr;
+    // How many measurements this session has taken, so a repeat says so.
+    int correctionRunCount_ = 0;
     // A stand-in through-transmit pair, so the page can be read and the
     // workflow walked without a Beam device on the bench.
     void fillSimulatedCouplingWaveforms();

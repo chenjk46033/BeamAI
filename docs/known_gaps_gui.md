@@ -51,10 +51,21 @@ on top of the already-ported `libs/safety` per-sonication checks: it
 appends the registration-incomplete and through-transmit-too-low
 precondition messages (from `app.sys.frame.*Complete` /
 `app.sys.RTT(1).att` vs `app.attenuationThreshold`, passed in as a plain
-struct) and builds the `app.SystemStatusTextArea` status string. The
-`set(app.SonicateButton,'Enable',...)` side effects and the deferred
-IsptaAll-over-all-events check (needs `setBurstEventsFromStimParams`) are
-not carried.
+struct) and builds the `app.SystemStatusTextArea` status string.
+
+DONE 2026-10-19 in `workflow_app` rather than as a `libs/gui` presenter:
+`WorkflowWindow::updateSonicationSafety()` runs the `libs/safety` checks
+on every stim-grid edit, appends the same two preconditions in the
+source's own words, draws the status banner under the grid, and carries
+the `set(app.SonicateButton,'Enable',...)` side effect that the note
+above excluded -- Sonicate and Sham are disabled while the report fails,
+with a backstop in `runSonication`. The IsptaAll-over-all-events check is
+no longer deferred either: `beam::safety::isptaAll` builds the event
+timeline with the already-ported
+`beam::stimulation::computeSonicationEventTimeline` (the port of
+`setBurstEventsFromStimParams.m` that did not exist when this note was
+written) and sums the burst on-times exactly as
+`getISPTAFromStimParams.m` does.
 
 `libs/gui_qt/safety_report_view` — `SafetyReportView` (`QWidget`): status
 line + blocking-message list, green on pass / orange on fail (matching the

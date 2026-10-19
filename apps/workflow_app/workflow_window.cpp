@@ -984,6 +984,17 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     runCouplingCheckButton_ = new QPushButton(QStringLiteral("Run correction / coupling measurement"), ui_->placeholderPage);
     runCouplingCheckButton_->setMinimumHeight(38);
     runCouplingCheckButton_->setStyleSheet(acceptButtonStyle);
+    clearCouplingButton_ = new QPushButton(QStringLiteral("Clear"), ui_->placeholderPage);
+    clearCouplingButton_->setMinimumHeight(38);
+    clearCouplingButton_->setMaximumWidth(160);
+    clearCouplingButton_->setToolTip(
+        QStringLiteral("Throw this measurement away and start from nothing"));
+    clearCouplingButton_->setStyleSheet(QStringLiteral(
+        "QPushButton { padding: 9px 16px; background: #2b4c57; color: #dcebef; "
+        "border: 1px solid #416b78; border-radius: 5px; font-weight: 600; } "
+        "QPushButton:hover { background: #356070; } "
+        "QPushButton:disabled { background: #233038; color: #6d7f87; border-color: #2b3b43; }"));
+    clearCouplingButton_->setEnabled(false);
     acceptCouplingButton_ = new QPushButton(QStringLiteral("Accept correction && coupling and continue →"), ui_->placeholderPage);
     acceptCouplingButton_->setMinimumHeight(40);
     acceptCouplingButton_->setEnabled(false);
@@ -1037,7 +1048,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     couplingChartsLayout->addWidget(couplingChartsPlaceholder_, 5);
     couplingChartsRow_->hide();
     ui_->placeholderLayout->addWidget(couplingChartsRow_);
-    ui_->placeholderLayout->addWidget(runCouplingCheckButton_);
+    // Side by side: Run is the action, Clear is its undo, and Clear earns no
+    // more width than its own word.
+    auto* couplingActionRow = new QHBoxLayout;
+    couplingActionRow->setContentsMargins(0, 0, 0, 0);
+    couplingActionRow->setSpacing(8);
+    couplingActionRow->addWidget(runCouplingCheckButton_, 1);
+    couplingActionRow->addWidget(clearCouplingButton_, 0);
+    ui_->placeholderLayout->addLayout(couplingActionRow);
     ui_->placeholderLayout->addWidget(acceptCouplingButton_);
 
     correctionTitleLabel_ = new QLabel(QStringLiteral("Correction"), ui_->placeholderPage);
@@ -1233,8 +1251,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         couplingProgressBar_->setValue(correctionProgressBar_->value());
         couplingStatusLabel_->setText(correctionStatusLabel_->text());
         acceptCouplingButton_->setEnabled(couplingCheckPassed_);
+        clearCouplingButton_->setEnabled(true);
         refresh();
     });
+    connect(clearCouplingButton_, &QPushButton::clicked, this,
+            [this] { clearCouplingMeasurement(); });
     connect(acceptCouplingButton_, &QPushButton::clicked, this, [this] {
         if (!couplingCheckPassed_) {
             showMessage(QStringLiteral("Run and pass the coupling check before accepting it."), true);
@@ -1251,8 +1272,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             showMessage(QString::fromStdString(reason), true);
             return;
         }
-        acceptCouplingButton_->setEnabled(false);
-        runCouplingCheckButton_->setEnabled(false);
+        // Both stay live: the stage is accepted, not closed. Coming back to
+        // this page and measuring again is the normal thing to do when the
+        // coupling is disturbed, and the accept that follows re-completes the
+        // stage.
         refresh();
         ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
     });
@@ -1311,7 +1334,14 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         // checkCouplingSafety.m's own wording, including the line it appends
         // when the report is not empty.
         QStringList lines;
-        lines << QStringLiteral("Through-transmit %1: transmission %2%.")
+        ++correctionRunCount_;
+        // Which run this is, and when: the numbers can come out identical two
+        // runs running, and without this the second press looks like a button
+        // that did nothing.
+        lines << QStringLiteral("Run %1 at %2 -- through-transmit %3: transmission %4%.")
+                     .arg(correctionRunCount_)
+                     .arg(QDateTime::currentDateTime().toString(
+                         QStringLiteral("HH:mm:ss.zzz")))
                      .arg(simulated ? QStringLiteral("(simulated, no device connected)")
                                     : QStringLiteral("measured"))
                      .arg(percent);
@@ -1324,6 +1354,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         }
         correctionStatusLabel_->setText(lines.join(QChar('\n')));
         updateCouplingCharts(transmission);
+        // The through-transmit precondition just changed.
+        updateSonicationSafety();
         workflow_.change(beam::gui::WorkflowStage::Correction,
                          "Correction measured; awaiting operator acceptance.");
         acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
@@ -1342,8 +1374,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             showMessage(QString::fromStdString(reason), true);
             return;
         }
-        acceptCorrectionButton_->setEnabled(false);
-        runCorrectionButton_->setEnabled(false);
         refresh();
         ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
     });
@@ -1760,8 +1790,18 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // Treatment page, and a second place to enter one could only disagree.
     ui_->visitHeader->setText(QStringLiteral("Visit: —"));
     connect(ui_->abortButton, &QPushButton::clicked, this, [this] {
-        showMessage(QStringLiteral("No treatment is active; no device command was sent."), true);
+        // Nothing running means nothing to stop, and sending the device a
+        // command it did not ask for is not a safer answer than saying so.
+        if (!deliveryRunning()) {
+            showMessage(QStringLiteral("Nothing is being delivered; no device command was sent."),
+                        true);
+            return;
+        }
+        abortSonication();
     });
+    ui_->abortButton->setToolTip(
+        QStringLiteral("Stops a sonication or sham while it is going out. Dark when nothing "
+                       "is being delivered."));
 
     ui_->stageList->setCurrentRow(0);
     ui_->acceptCaseButton->setEnabled(true);
@@ -1853,6 +1893,20 @@ double WorkflowWindow::sliceCoordinateMm(const QString& axis, int index) const {
 }
 
 bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
+    // What a stim parameter shipped as. The model holds the operator's value
+    // and knows nothing about the installed file, so the tooltip is answered
+    // here rather than by a data role.
+    if (stimParamView_ != nullptr && watched == stimParamView_->viewport() &&
+        event->type() == QEvent::ToolTip) {
+        auto* help = static_cast<QHelpEvent*>(event);
+        const QModelIndex cell = stimParamView_->indexAt(help->pos());
+        const QString text = shippedTooltip(cell);
+        if (text.isEmpty())
+            QToolTip::hideText();
+        else
+            QToolTip::showText(help->globalPos(), text, stimParamView_);
+        return true;
+    }
     // The registration message is one line now, so a long one is elided.
     // Hovering gives back whatever did not fit, and nothing at all when the
     // whole message is already on screen.
@@ -3844,6 +3898,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                             static_cast<QWidget*>(couplingStatusLabel_),
                             static_cast<QWidget*>(couplingProgressBar_),
                             static_cast<QWidget*>(runCouplingCheckButton_),
+                            static_cast<QWidget*>(clearCouplingButton_),
                             static_cast<QWidget*>(acceptCouplingButton_),
                             static_cast<QWidget*>(couplingChartsRow_),
                             static_cast<QWidget*>(couplingNumbersLabel_),
@@ -3907,6 +3962,9 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         const bool ready =
             workflow_.state(beam::gui::WorkflowStage::SafetyReview).status == beam::gui::WorkflowStatus::Complete;
         setSonicateEnabled(ready && !sonicationCountdownTimer_->isActive());
+        // Registration and through-transmit are two of its inputs, and both
+        // can have changed since this page was last up.
+        updateSonicationSafety();
         // The disabled Sonicate button already says the plan is not accepted;
         // a panel repeating it occupied the page for the whole session.
     }
@@ -4022,8 +4080,7 @@ void WorkflowWindow::refresh() {
     }
     std::string reason;
     const bool ready = workflow_.canStartTreatment(&reason);
-    ui_->abortButton->setEnabled(workflow_.state(beam::gui::WorkflowStage::Treatment).status ==
-                                  beam::gui::WorkflowStatus::InProgress);
+    updateAbortButton();
     if (selectedStage_ == beam::gui::WorkflowStage::Treatment && !ready) showMessage(QString::fromStdString(reason), true);
 }
 
@@ -4054,15 +4111,78 @@ void WorkflowWindow::fillSimulatedCouplingWaveforms() {
                  beam::correction::txRxSignalAmplitude(couplingCh1Filtered_).peak2peak);
 }
 
+// Clearing a measurement is discarding it, not hiding it: the reading the
+// Treatment stage would have fed to prepareSonication goes too, or the page
+// would say nothing has been measured while a sonication still ran on the old
+// number. An accepted stage goes back to in-progress for the same reason.
+void WorkflowWindow::clearCouplingMeasurement() {
+    couplingCh0Raw_.resize(0);
+    couplingCh1Raw_.resize(0);
+    couplingCh0Filtered_.resize(0);
+    couplingCh1Filtered_.resize(0);
+    couplingPeakToPeak_ = 0.0;
+    couplingSimulated_ = false;
+    correctionRunCount_ = 0;
+    transmissionAmplitude_ = 0.0;
+    couplingCheckPassed_ = false;
+    correctionCheckPassed_ = false;
+    couplingProgressBar_->setValue(0);
+    correctionProgressBar_->setValue(0);
+    couplingStatusLabel_->setText(QStringLiteral("No coupling measurement has been run."));
+    correctionStatusLabel_->setText(QStringLiteral("No correction measurement has been run."));
+    acceptCouplingButton_->setEnabled(false);
+    acceptCorrectionButton_->setEnabled(false);
+    clearCouplingButton_->setEnabled(false);
+    updateCouplingCharts(0.0);
+    // Clearing the measurement puts the through-transmit precondition back
+    // into failure, which is the honest state and blocks Sonicate again.
+    updateSonicationSafety();
+
+    const bool wasAccepted =
+        workflow_.state(beam::gui::WorkflowStage::Coupling).status ==
+            beam::gui::WorkflowStatus::Complete ||
+        workflow_.state(beam::gui::WorkflowStage::Correction).status ==
+            beam::gui::WorkflowStatus::Complete;
+    if (wasAccepted) {
+        workflow_.change(beam::gui::WorkflowStage::Coupling,
+                         "Coupling measurement cleared; measure and accept again.");
+    }
+    refresh();
+    showMessage(wasAccepted
+                    ? QStringLiteral("Measurement cleared. The accepted coupling went with it, "
+                                     "so measure and accept again before treatment.")
+                    : QStringLiteral("Measurement cleared. Press Run to measure again."),
+                false);
+}
+
+bool WorkflowWindow::deliveryRunning() const {
+    return sonicationCountdownTimer_ != nullptr && sonicationCountdownTimer_->isActive();
+}
+
+void WorkflowWindow::updateAbortButton() {
+    const bool running = deliveryRunning();
+    ui_->abortButton->setEnabled(running);
+    // Red only while it can do something. A permanently red button on every
+    // page is a button nobody reads.
+    ui_->abortButton->setStyleSheet(
+        running ? QStringLiteral("QPushButton { background: #bc3340; color: white; "
+                                 "border: 1px solid #ff8290; border-radius: 5px; "
+                                 "padding: 10px 22px; font-weight: 700; } "
+                                 "QPushButton:hover { background: #d8414f; }")
+                : QStringLiteral("QPushButton { background: #3a2b2e; color: #8d7074; "
+                                 "border: 1px solid #55393e; border-radius: 5px; "
+                                 "padding: 10px 22px; font-weight: 700; }"));
+}
+
 void WorkflowWindow::updateCouplingCharts(double transmissionAmp) {
     if (!couplingChartsRow_) return;
     const bool haveWaveforms = couplingCh0Raw_.size() > 0 && couplingCh1Raw_.size() > 0;
-    if (couplingNumbersLabel_ != nullptr) {
+    if (couplingNumbersLabel_ != nullptr && !haveWaveforms) {
+        couplingNumbersLabel_->setText(QStringLiteral("Nothing measured yet."));
+    } else if (couplingNumbersLabel_ != nullptr) {
         const bool pass = couplingPeakToPeak_ > kCouplingThreshold;
         const QString verdict =
-            !haveWaveforms
-                ? QStringLiteral("<span style='color:#9fb3ba'>&#9679; NOT MEASURED</span>")
-            : couplingSimulated_
+            couplingSimulated_
                 ? QStringLiteral("<span style='color:#e0a32e'>&#9679; SIMULATED, NO DEVICE</span>")
             : pass ? QStringLiteral("<span style='color:#5ec46a'>&#9679; COUPLED</span>")
                    : QStringLiteral("<span style='color:#ff554a'>&#9679; NOT COUPLED</span>");

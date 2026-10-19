@@ -1,5 +1,7 @@
 #include "gui_qt/stim_param_table_model.hpp"
 
+#include <QColor>
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -55,6 +57,16 @@ QVariant StimParamTableModel::data(const QModelIndex& index, int role) const {
         return QVariant();
     }
     const StimParamRow& r = rows_[static_cast<std::size_t>(index.row())];
+
+    const auto marked = unsafeCells_.find({index.row(), index.column()});
+    if (marked != unsafeCells_.end()) {
+        // Red: this value is wrong by itself. Amber: it is one of several
+        // that together pass a limit, and changing any one of them clears it.
+        if (role == Qt::BackgroundRole)
+            return marked->second == CellMark::kInvalid ? QColor(0x7d, 0x1f, 0x1f)
+                                                        : QColor(0x8a, 0x5a, 0x10);
+        if (role == Qt::ForegroundRole) return QColor(0xff, 0xff, 0xff);
+    }
 
     if (role == Qt::CheckStateRole && index.column() == kShow) {
         return r.show ? Qt::Checked : Qt::Unchecked;
@@ -148,6 +160,14 @@ Qt::ItemFlags StimParamTableModel::flags(const QModelIndex& index) const {
         f |= Qt::ItemIsEditable;
     }
     return f;
+}
+
+void StimParamTableModel::setUnsafeCells(const std::map<std::pair<int, int>, CellMark>& cells) {
+    if (unsafeCells_ == cells) return;
+    unsafeCells_ = cells;
+    if (rows_.empty()) return;
+    emit dataChanged(index(0, 0), index(static_cast<int>(rows_.size()) - 1, kColumnCount - 1),
+                     {Qt::BackgroundRole, Qt::ForegroundRole});
 }
 
 void StimParamTableModel::setRows(std::vector<StimParamRow> rows) {

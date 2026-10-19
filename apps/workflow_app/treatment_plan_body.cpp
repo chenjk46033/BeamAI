@@ -35,6 +35,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -43,7 +45,8 @@
 #include <QCoreApplication>
 #include <QDataStream>
 #include <QFileInfo>
-#include <set>
+#include <map>
+#include <vector>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
 #include <QGraphicsView>
@@ -73,7 +76,12 @@
 #include <QRadioButton>
 #include <QScrollArea>
 #include <QSpacerItem>
+#include <QDoubleSpinBox>
+#include <QScopeGuard>
 #include <QSpinBox>
+#include <algorithm>
+#include <set>
+#include <utility>
 #include <QIcon>
 #include <QPainter>
 #include <QStyledItemDelegate>
@@ -87,6 +95,8 @@
 #include "gui/countdown_presenter.hpp"
 #include "gui/sham_orchestrator.hpp"
 #include "gui/sonicate_orchestrator.hpp"
+#include "safety/checks.hpp"
+#include "safety/limits.hpp"
 #include "gui/top_targets.hpp"
 #include "gui/sonication_tab_presenter.hpp"
 #include "serialcom/command.hpp"
@@ -368,6 +378,81 @@ protected:
     }
 };
 
+class StimParamDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+protected:
+    void initStyleOption(QStyleOptionViewItem* option, const QModelIndex& index) const override {
+        QStyledItemDelegate::initStyleOption(option, index);
+        const QVariant background = index.data(Qt::BackgroundRole);
+        if (!background.canConvert<QColor>()) return;
+        option->state &= ~QStyle::State_Selected;
+        option->backgroundBrush = QBrush(background.value<QColor>());
+        const QVariant foreground = index.data(Qt::ForegroundRole);
+        if (foreground.canConvert<QColor>()) {
+            option->palette.setColor(QPalette::Text, foreground.value<QColor>());
+            option->palette.setColor(QPalette::HighlightedText, foreground.value<QColor>());
+        }
+    }
+
+public:
+    QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option,
+                          const QModelIndex& index) const override {
+        auto* spin = qobject_cast<QDoubleSpinBox*>(
+            QStyledItemDelegate::createEditor(parent, option, index));
+        if (spin == nullptr)
+            return QStyledItemDelegate::createEditor(parent, option, index);
+        using Model = beam::gui_qt::StimParamTableModel;
+        switch (index.column()) {
+            case Model::kX:
+            case Model::kY:
+            case Model::kZ:
+                // Millimetres from the array centre, and they go both ways.
+                spin->setDecimals(3);
+                spin->setRange(-500.0, 500.0);
+                spin->setSingleStep(1.0);
+                break;
+            case Model::kAmplitude:
+                // Deliberately wider than the 3 MPa BeamV0 names as its
+                // maximum: an amplitude over the limit is for the safety
+                // check to report, not for the editor to silently refuse.
+                spin->setDecimals(3);
+                spin->setRange(0.0, 20.0);
+                spin->setSingleStep(0.1);
+                break;
+            case Model::kStartTime:
+            case Model::kEndTime:
+                spin->setDecimals(3);
+                spin->setRange(0.0, 3600.0);
+                spin->setSingleStep(1.0);
+                break;
+            case Model::kBurstDuration:
+            case Model::kBurstInterval:
+                spin->setDecimals(4);
+                spin->setRange(0.0, 3600.0);
+                spin->setSingleStep(0.01);
+                break;
+            case Model::kPulseDuration:
+            case Model::kPulseInterval:
+                // 0.005 and 0.01 are the shipped defaults; five decimals
+                // leaves room below them.
+                spin->setDecimals(5);
+                spin->setRange(0.0, 3600.0);
+                spin->setSingleStep(0.001);
+                break;
+            default:
+                spin->setDecimals(4);
+                spin->setRange(-1.0e6, 1.0e6);
+                break;
+        }
+        // Opens with the value selected, so typing replaces it rather than
+        // landing in the middle of the digits already there.
+        spin->selectAll();
+        return spin;
+    }
+};
+
 // The Target List row the current sonication fires at, in the same dark blue
 // as that row in the log, so the two read as one statement about where the
 // visit is. The selection highlight is dropped for it the same way.
@@ -575,8 +660,13 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // rows per target is DiademV0's behaviour, which is a separate application.
     stimParamModel_ = new beam::gui_qt::StimParamTableModel(this);
     stimParamView_ = new QTableView(bodyContent);
+    stimParamView_->setObjectName(QStringLiteral("stimParamView"));
+    // configureModelTable fits the log table's own editor; these columns are
+    // seconds and millimetres, not responses.
+    stimParamView_->setItemDelegate(new StimParamDelegate(stimParamView_));
     stimParamView_->setModel(stimParamModel_);
     configureModelTable(stimParamView_);
+    stimParamView_->setItemDelegate(new StimParamDelegate(stimParamView_));
     // Show is how getCurrentShownSonication.m picks the row to fire, so the
     // flag stays and only the column goes: with one row per target there is
     // nothing to choose between, and a checkbox implying otherwise misleads.
@@ -603,13 +693,44 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         plain.setColor(QPalette::HighlightedText, QColor(0x10, 0x23, 0x2b));
         stimParamView_->setPalette(plain);
     }
+    // Right-click to put the parameters back to what the install shipped.
+    stimParamView_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(stimParamView_, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint& where) {
+                QMenu menu(this);
+                QAction* const restore =
+                    menu.addAction(QStringLiteral("Restore Default Parameters"));
+                if (menu.exec(stimParamView_->viewport()->mapToGlobal(where)) == restore)
+                    restoreShippedParameters();
+            });
+    // Hovering a parameter says what it shipped as, so an edited one can be
+    // recognised without opening a file. Answered in eventFilter: the model
+    // holds the operator's value and knows nothing about the installed one.
+    stimParamView_->viewport()->installEventFilter(this);
     // The grid is exactly as tall as the rows it holds -- normally one -- so
     // the sub-tabs below start right under it instead of after a band of
     // empty white. updateStimGridHeight keeps that true as rows come and go.
-    connect(stimParamModel_, &QAbstractItemModel::modelReset, this, [this] { updateStimGridHeight(); });
+    connect(stimParamModel_, &QAbstractItemModel::modelReset, this, [this] {
+        updateStimGridHeight();
+        // Switching target refills the grid wholesale: these are different
+        // numbers, and they get the same checks as typed ones.
+        updateSonicationSafety();
+    });
     connect(stimParamModel_, &QAbstractItemModel::rowsInserted, this, [this] { updateStimGridHeight(); });
     connect(stimParamModel_, &QAbstractItemModel::rowsRemoved, this, [this] { updateStimGridHeight(); });
     rightColumn->addWidget(stimParamView_);
+    // Under the grid, because that is where the numbers that fail it are
+    // typed. BeamV0 puts the same text in SystemStatusTextArea, a panel on
+    // the far side of its window from the table it is about.
+    sonicationSafetyLabel_ = new QLabel(bodyContent);
+    sonicationSafetyLabel_->setWordWrap(true);
+    sonicationSafetyLabel_->setTextFormat(Qt::RichText);
+    // Worth copying: the numbers in it are what an operator quotes when they
+    // ask someone about a refused sonication.
+    sonicationSafetyLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
+                                                   Qt::TextSelectableByKeyboard);
+    sonicationSafetyLabel_->setCursor(Qt::IBeamCursor);
+    rightColumn->addWidget(sonicationSafetyLabel_);
 
     // ---- TabGroup3 ------------------------------------------------------
     treatmentTabs_ = new QTabWidget(bodyContent);
@@ -884,11 +1005,25 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     // ---- the sonication grid -------------------------------------------
     connect(stimParamModel_, &beam::gui_qt::StimParamTableModel::showFlagsChanged, this,
             [this] { updateSonicationPlots(); });
-    connect(stimParamModel_, &QAbstractItemModel::dataChanged, this, [this] {
-        saveCurrentTargetSonications();
-        saveTreatmentTargetStore();
-        updateSonicationPlots();
-    });
+    connect(stimParamModel_, &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
+                // Colour only: the safety check marks the cells it blamed,
+                // and that must not read as the operator having typed
+                // something -- it would save the file and re-enter the check
+                // that just ran.
+                const bool presentationOnly =
+                    !roles.isEmpty() &&
+                    std::all_of(roles.begin(), roles.end(), [](int role) {
+                        return role == Qt::BackgroundRole || role == Qt::ForegroundRole;
+                    });
+                if (presentationOnly) return;
+                saveCurrentTargetSonications();
+                saveTreatmentTargetStore();
+                updateSonicationPlots();
+                // The value just typed is the one most likely to be out of
+                // range.
+                updateSonicationSafety();
+            });
     connect(stimParamView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
             [this](const QModelIndex& current) {
                 if (current.isValid()) updateSonicationPlots();
@@ -1011,6 +1146,114 @@ QString WorkflowWindow::treatmentDataDirectory() const {
     return home;
 }
 
+// The install's own copy, read straight from data/ and never from the
+// operator's runtime directory: loadTreatmentTargetStore prefers the runtime
+// file, which is exactly the file this one exists to undo.
+void WorkflowWindow::loadShippedTargetStore() {
+    const QString executableDir = QCoreApplication::applicationDirPath();
+    const QStringList seeds = {
+        QDir(executableDir).filePath(QStringLiteral("../../../data/treatment_targets.csv")),
+        QDir(executableDir).filePath(QStringLiteral("../../data/treatment_targets.csv")),
+        QDir(executableDir).filePath(QStringLiteral("data/treatment_targets.csv")),
+        QDir::current().filePath(QStringLiteral("data/treatment_targets.csv"))};
+    for (const QString& seed : seeds) {
+        if (!QFileInfo::exists(seed)) continue;
+        try {
+            shippedTargets_.loadTargets(seed.toStdString());
+            return;
+        } catch (const std::exception&) {
+            // An unreadable seed costs the tooltips and the restore action,
+            // not the application.
+        }
+    }
+}
+
+QString WorkflowWindow::shippedTooltip(const QModelIndex& cell) const {
+    if (!cell.isValid()) return QString();
+    const std::optional<double> original = shippedValueFor(cell.column());
+    if (!original.has_value()) return QString();
+    const double now = cell.data(Qt::EditRole).toDouble();
+    if (std::abs(now - *original) < 1e-12)
+        return QStringLiteral("Shipped value %1, unchanged").arg(*original, 0, 'g', 6);
+    return QStringLiteral("Shipped value %1 -- now %2.\nRight-click to restore the shipped "
+                          "parameters.")
+        .arg(*original, 0, 'g', 6)
+        .arg(now, 0, 'g', 6);
+}
+
+std::optional<double> WorkflowWindow::shippedValueFor(int column) const {
+    if (targetListWidget_ == nullptr || targetListWidget_->currentItem() == nullptr)
+        return std::nullopt;
+    const beam::gui::TreatmentTarget* shipped =
+        shippedTargets_.findTarget(targetListName(targetListWidget_->currentItem()).toStdString());
+    if (shipped == nullptr || shipped->points.empty()) return std::nullopt;
+    const beam::gui::TreatmentTargetPoint& point = shipped->points.front();
+    using Model = beam::gui_qt::StimParamTableModel;
+    switch (column) {
+        case Model::kAmplitude: return point.amplitude;
+        case Model::kStartTime: return point.startTimeSeconds;
+        case Model::kEndTime: return point.endTimeSeconds;
+        case Model::kBurstDuration: return point.burstDurationSeconds;
+        case Model::kBurstInterval: return point.burstIntervalSeconds;
+        case Model::kPulseDuration: return point.pulseDurationSeconds;
+        case Model::kPulseInterval: return point.pulseIntervalSeconds;
+        // X/Y/Z are where this subject's target was placed, not something
+        // the install ships a value for.
+        default: return std::nullopt;
+    }
+}
+
+// Parameters only. The placement stays: it belongs to this subject's
+// registration, and the install has nothing to say about it.
+void WorkflowWindow::restoreShippedParameters() {
+    if (stimParamModel_ == nullptr || targetListWidget_ == nullptr) return;
+    QListWidgetItem* item = targetListWidget_->currentItem();
+    if (item == nullptr) return;
+    const QString name = targetListName(item);
+    const beam::gui::TreatmentTarget* shipped =
+        shippedTargets_.findTarget(name.toStdString());
+    if (shipped == nullptr || shipped->points.empty()) {
+        showMessage(QStringLiteral("\"%1\" is not in the shipped Target List, so it has no "
+                                   "original parameters to restore.")
+                        .arg(name),
+                    true);
+        return;
+    }
+    const beam::gui::TreatmentTargetPoint& point = shipped->points.front();
+    std::vector<beam::gui_qt::StimParamRow> rows = stimParamModel_->rows();
+    if (rows.empty()) return;
+    QStringList changed;
+    const auto put = [&changed](double& field, double shippedValue, const char* label) {
+        if (std::abs(field - shippedValue) < 1e-12) return;
+        changed << QStringLiteral("%1 %2 to %3")
+                       .arg(QString::fromLatin1(label))
+                       .arg(field, 0, 'g', 4)
+                       .arg(shippedValue, 0, 'g', 4);
+        field = shippedValue;
+    };
+    for (beam::gui_qt::StimParamRow& row : rows) {
+        put(row.amplitude, point.amplitude, "Amplitude");
+        put(row.startTime, point.startTimeSeconds, "Start Time");
+        put(row.endTime, point.endTimeSeconds, "End Time");
+        put(row.bd, point.burstDurationSeconds, "Burst Duration");
+        put(row.bi, point.burstIntervalSeconds, "Burst Interval");
+        put(row.pd, point.pulseDurationSeconds, "Pulse Duration");
+        put(row.pi, point.pulseIntervalSeconds, "Pulse Interval");
+    }
+    if (changed.isEmpty()) {
+        showMessage(QStringLiteral("\"%1\" already has its shipped parameters.").arg(name),
+                    false);
+        return;
+    }
+    stimParamModel_->setRows(std::move(rows));
+    saveCurrentTargetSonications();
+    saveTreatmentTargetStore();
+    updateSonicationPlots();
+    updateSonicationSafety();
+    showMessage(QStringLiteral("%1 restored: %2.").arg(name, changed.join(QStringLiteral(", "))),
+                false);
+}
+
 void WorkflowWindow::loadTreatmentTargetStore() {
     const auto locate = [this](const QString& fileName) {
         const QString user = QDir(treatmentDataDirectory()).filePath(fileName);
@@ -1026,6 +1269,7 @@ void WorkflowWindow::loadTreatmentTargetStore() {
         return QString();
     };
 
+    loadShippedTargetStore();
     const QString targetsPath = locate(QStringLiteral("treatment_targets.csv"));
     const QString protocolsPath = locate(QStringLiteral("treatment_protocols.csv"));
     if (targetsPath.isEmpty() || protocolsPath.isEmpty()) {
@@ -1593,6 +1837,243 @@ void WorkflowWindow::saveCurrentTargetSonications() {
         !stimParamModel_->rows().empty()) {
         targetSonications_.insert(currentTargetId_, stimParamModel_->rows());
     }
+}
+
+// Port of checkSonicationSafety.m. The pure half -- ISPPA, the PD/PI/BD/BI
+// relations, ISPTA and the mechanical index -- is beam::safety; the two
+// preconditions the source reads off its own session (registration, through
+// transmit) are added here, as that header says the caller must.
+//
+// It runs on every edit rather than only at fire time: a number typed out of
+// range should say so while the operator is still looking at it, not when
+// they press Sonicate.
+namespace {
+
+// ISPTA and ISPPA are each driven by several columns at once, so naming the
+// rule that broke does not tell the operator which number to change. This
+// finds, for one column, the value that would clear the report -- by asking
+// the checker rather than rearranging its formulas, so the answer cannot
+// drift from the rule it is about, and so a value that would break a
+// different rule on the way is rejected too.
+//
+// `wantLargest` for a column that makes things worse as it grows (amplitude,
+// the durations); the smallest acceptable value otherwise (burst interval).
+// Returns nothing when no value in range works.
+std::optional<double> solveSafeValue(beam::safety::SonicationSafetyParams row,
+                                     double beam::safety::SonicationSafetyParams::* field,
+                                     double low, double high, bool wantLargest) {
+    const auto accepts = [&row, field](double value) {
+        beam::safety::SonicationSafetyParams trial = row;
+        trial.*field = value;
+        return beam::safety::checkSonicationParameters({trial}).pass;
+    };
+    // The end that ought to pass. If even that fails, this column is not a
+    // way out on its own.
+    if (!accepts(wantLargest ? low : high)) return std::nullopt;
+    double good = wantLargest ? low : high;
+    double bad = wantLargest ? high : low;
+    for (int step = 0; step < 60; ++step) {
+        const double middle = 0.5 * (good + bad);
+        (accepts(middle) ? good : bad) = middle;
+    }
+    // Reported to three decimals, so round the way that stays acceptable and
+    // confirm the rounded number really does.
+    double rounded = wantLargest ? std::floor(good * 1000.0) / 1000.0
+                                 : std::ceil(good * 1000.0) / 1000.0;
+    for (int step = 0; step < 5 && !accepts(rounded); ++step)
+        rounded += wantLargest ? -0.001 : 0.001;
+    if (!accepts(rounded)) return std::nullopt;
+    return rounded;
+}
+
+}  // namespace
+
+void WorkflowWindow::updateSonicationSafety() {
+    if (sonicationSafetyLabel_ == nullptr || stimParamModel_ == nullptr) return;
+    if (checkingSonicationSafety_) return;
+    checkingSonicationSafety_ = true;
+    const auto done = qScopeGuard([this] { checkingSonicationSafety_ = false; });
+    std::vector<beam::safety::SonicationSafetyParams> sonications;
+    for (const beam::gui_qt::StimParamRow& row : stimParamModel_->rows()) {
+        sonications.push_back(beam::gui::stimParamsFromTableRow(row.pd, row.pi, row.bd, row.bi,
+                                                                row.amplitude, row.startTime,
+                                                                row.endTime));
+    }
+    const beam::safety::SafetyReport report =
+        beam::safety::checkSonicationParameters(sonications);
+    sonicationSafetyMessages_.clear();
+    for (const std::string& message : report.messages)
+        sonicationSafetyMessages_ << QString::fromStdString(message);
+    sonicationSafetyPass_ = report.pass;
+
+    // Which cells each broken rule is about. The grid marks them, because a
+    // message naming a rule does not say which of eleven columns to go and
+    // change -- and the cell the operator just edited is rarely the one.
+    using Model = beam::gui_qt::StimParamTableModel;
+    using Kind = beam::safety::ViolationKind;
+    using Mark = Model::CellMark;
+    std::map<std::pair<int, int>, Mark> unsafe;
+    for (const beam::safety::Violation& violation : report.violations) {
+        const int row = violation.sonicationIndex;
+        const auto blame = [&unsafe, row](std::initializer_list<int> columns) {
+            // An invalid cell outranks an over-limit one: a schedule that
+            // cannot run is the first thing to fix.
+            for (const int column : columns) unsafe[{row, column}] = Mark::kInvalid;
+        };
+        const auto adjustable = [&unsafe, row](std::initializer_list<int> columns) {
+            for (const int column : columns)
+                unsafe.emplace(std::make_pair(row, column), Mark::kOverLimit);
+        };
+        switch (violation.kind) {
+            case Kind::kIsppa:
+            case Kind::kMechanicalIndex:
+                // Both are functions of amplitude alone, and an amplitude
+                // over a limit is a number to bring down rather than a
+                // contradiction to resolve.
+                adjustable({Model::kAmplitude});
+                break;
+            // Only the value that is out of place is called out. What it is
+            // measured against is a way out, not a fault, and the suggestion
+            // loop below marks it amber -- but only if raising it actually
+            // works, so an amber cell always comes with a number.
+            case Kind::kPulseDurationOverInterval:
+                blame({Model::kPulseDuration});
+                break;
+            case Kind::kBurstDurationOverInterval:
+                blame({Model::kBurstDuration});
+                break;
+            case Kind::kPulseIntervalOverBurst:
+                blame({Model::kPulseInterval});
+                break;
+            case Kind::kBurstIntervalOverDuration:
+                blame({Model::kBurstInterval});
+                break;
+            case Kind::kIsptaAll:
+            case Kind::kIsptaBurstInterval:
+                // Handled below, where each lever is marked only if a value
+                // for it can actually be offered.
+                break;
+        }
+    }
+
+    // For the limits several columns feed at once, say what each of them
+    // would have to be. Any one of them clears the report; which to use is a
+    // clinical choice, and this is the part the application can answer.
+    using Params = beam::safety::SonicationSafetyParams;
+    struct Lever {
+        const char* name;
+        int column;
+        double Params::* field;
+        double low;
+        double high;
+        bool wantLargest;
+    };
+    for (const beam::safety::Violation& violation : report.violations) {
+        const std::size_t at = static_cast<std::size_t>(violation.sonicationIndex);
+        if (at >= sonications.size()) continue;
+        const Params& row = sonications[at];
+        const double duration = row.endTime - row.startTime;
+        // Each rule has its own ways out, and only those. Offering a column
+        // the rule does not depend on would be an instruction that does not
+        // work.
+        std::vector<Lever> levers;
+        switch (violation.kind) {
+            case Kind::kIsppa:
+            case Kind::kMechanicalIndex:
+            case Kind::kIsptaAll:
+            case Kind::kIsptaBurstInterval:
+                levers = {
+                    {"Amplitude", Model::kAmplitude, &Params::amplitudeMPa, 0.0,
+                     row.amplitudeMPa, true},
+                    {"Pulse Duration", Model::kPulseDuration, &Params::pd, 0.0, row.pd, true},
+                    {"Burst Duration", Model::kBurstDuration, &Params::bd, row.pi, row.bd, true},
+                    {"Burst Interval", Model::kBurstInterval, &Params::bi, row.bi, duration,
+                     false}};
+                break;
+            case Kind::kPulseDurationOverInterval:
+                levers = {{"Pulse Duration", Model::kPulseDuration, &Params::pd, 0.0, row.pd,
+                           true},
+                          {"Pulse Interval", Model::kPulseInterval, &Params::pi, row.pi, row.bd,
+                           false}};
+                break;
+            case Kind::kBurstDurationOverInterval:
+                levers = {{"Burst Duration", Model::kBurstDuration, &Params::bd, row.pi, row.bd,
+                           true},
+                          {"Burst Interval", Model::kBurstInterval, &Params::bi, row.bi,
+                           duration, false}};
+                break;
+            case Kind::kPulseIntervalOverBurst:
+                levers = {{"Pulse Interval", Model::kPulseInterval, &Params::pi, row.pd, row.pi,
+                           true},
+                          {"Burst Duration", Model::kBurstDuration, &Params::bd, row.bd, row.bi,
+                           false}};
+                break;
+            case Kind::kBurstIntervalOverDuration:
+                levers = {{"Burst Interval", Model::kBurstInterval, &Params::bi, row.bd, row.bi,
+                           true},
+                          {"End Time", Model::kEndTime, &Params::endTime, row.endTime,
+                           row.startTime + 3600.0, false}};
+                break;
+        }
+        QStringList offers;
+        for (const Lever& lever : levers) {
+            const std::optional<double> value =
+                solveSafeValue(row, lever.field, lever.low, lever.high, lever.wantLargest);
+            if (!value.has_value()) continue;
+            // emplace, not assignment: a cell already called out as the
+            // offender stays red.
+            unsafe.emplace(std::make_pair(violation.sonicationIndex, lever.column),
+                           Mark::kOverLimit);
+            offers << QStringLiteral("%1 %2 %3")
+                          .arg(QString::fromLatin1(lever.name),
+                               lever.wantLargest ? QStringLiteral("down to")
+                                                 : QStringLiteral("up to"))
+                          .arg(*value, 0, 'g', 4);
+        }
+        if (!offers.isEmpty()) {
+            sonicationSafetyMessages_
+                << QStringLiteral("Any one of these clears it: %1")
+                       .arg(offers.join(QStringLiteral("; ")));
+        }
+        break;  // one set of suggestions is enough; they all point at the same row
+    }
+
+    // The source's own two preconditions, in its own words. They are about
+    // the session rather than the numbers in the grid, which is why they are
+    // added here and numbered in the 3xx band.
+    if (workflow_.state(beam::gui::WorkflowStage::Registration).status !=
+        beam::gui::WorkflowStatus::Complete) {
+        sonicationSafetyMessages_ << QStringLiteral(
+            "[Rule 310] Registration incomplete, please complete registration tab");
+        sonicationSafetyPass_ = false;
+    }
+    if (transmissionAmplitude_ < kCouplingThreshold) {
+        sonicationSafetyMessages_ << QStringLiteral(
+            "[Rule 320] Through transmit too low, please complete correction tab");
+        sonicationSafetyPass_ = false;
+    }
+
+    if (sonicationSafetyPass_) {
+        // The source's own word for a clean report.
+        sonicationSafetyLabel_->setText(
+            QStringLiteral("<b style='color:#5ec46a'>&#9679; Sonication Online</b>"));
+        sonicationSafetyLabel_->setStyleSheet(QStringLiteral(
+            "QLabel { color: #dcebef; background: #12301c; border: 1px solid #2f6b3f; "
+            "border-radius: 4px; padding: 5px 10px; }"));
+    } else {
+        QStringList shown;
+        for (const QString& message : sonicationSafetyMessages_)
+            shown << message.toHtmlEscaped();
+        sonicationSafetyLabel_->setText(
+            QStringLiteral("<b style='color:#ff554a'>&#9679; Sonication blocked</b> &nbsp; %1")
+                .arg(shown.join(QStringLiteral("<br>"))));
+        sonicationSafetyLabel_->setStyleSheet(QStringLiteral(
+            "QLabel { color: #ffd9d6; background: #351a19; border: 1px solid #8e1b1b; "
+            "border-radius: 4px; padding: 5px 10px; }"));
+    }
+    stimParamModel_->setUnsafeCells(unsafe);
+    // Re-applies the gate above to whatever buttons are on the current row.
+    setSonicateEnabled(sonicateEnabled_);
 }
 
 void WorkflowWindow::updateSonicationPlots() {
@@ -2600,10 +3081,15 @@ void WorkflowWindow::paintRunningButton() {
 // thing that can be pressed.
 void WorkflowWindow::setSonicateEnabled(bool enabled) {
     sonicateEnabled_ = enabled;
+    // Before the early return: the top-bar ABORT is on every page and must
+    // follow the delivery even when this row has no buttons on it.
+    updateAbortButton();
     if (inRowSonicateButton_.isNull()) return;
     const bool running =
         sonicationCountdownTimer_ != nullptr && sonicationCountdownTimer_->isActive();
-    const bool live = !running && enabled;
+    // checkSonicationSafety.m ends by enabling or disabling SonicateButton on
+    // exactly this flag. Nothing goes out while the parameters are unsafe.
+    const bool live = !running && enabled && sonicationSafetyPass_;
     inRowSonicateButton_->setEnabled(live);
     if (!running)
         inRowSonicateButton_->setIcon(makeSonicateIcon(18, live ? kInkOnBlue : kInkOnDead));
@@ -3093,6 +3579,15 @@ void WorkflowWindow::runSonication(bool sham) {
     }
     // The treatment table decides what runs, not whatever is selected.
     if (!selectScheduledTarget()) return;
+    // The button is already disabled while this is false; this is the
+    // backstop for anything that reaches here another way.
+    updateSonicationSafety();
+    if (!sonicationSafetyPass_) {
+        setExecutionStatus(QStringLiteral("Nothing was sent. %1")
+                               .arg(sonicationSafetyMessages_.join(QStringLiteral("; "))),
+                           true);
+        return;
+    }
     const int shown = std::clamp(stimParamModel_->currentShownRow(), 1,
                                  static_cast<int>(stimParamModel_->rows().size()));
     beam::gui_qt::StimParamRow r = stimParamModel_->rows()[static_cast<std::size_t>(shown - 1)];
