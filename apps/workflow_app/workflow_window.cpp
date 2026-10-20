@@ -1283,9 +1283,18 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         double transmission = 0.0;
         bool simulated = true;
         const auto ports = beam::serialcom::listAvailableComPorts();
-        if (!ports.empty()) {
+        if (serialLink_ != nullptr || !ports.empty()) {
             try {
-                beam::serialcom::SerialPort link(ports.front());
+                // The connected link if there is one: a port opens once, and
+                // during treatment this one is already open. Opening it again
+                // throws, and the catch below would report that as a
+                // simulated measurement -- a made-up transmission feeding a
+                // safety gate.
+                std::unique_ptr<beam::serialcom::SerialPort> opened;
+                if (serialLink_ == nullptr)
+                    opened = std::make_unique<beam::serialcom::SerialPort>(ports.front());
+                beam::serialcom::SerialPort& link =
+                    serialLink_ != nullptr ? *serialLink_ : *opened;
                 beam::serialcom::sendSerialCommand(link, "Correction");
                 std::vector<double> raw;
                 for (int lineCount = 0; lineCount < 100000 && link.bytesAvailable() > 0; ++lineCount) {
@@ -1356,12 +1365,27 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         updateCouplingCharts(transmission);
         // The through-transmit precondition just changed.
         updateSonicationSafety();
-        workflow_.change(beam::gui::WorkflowStage::Correction,
-                         "Correction measured; awaiting operator acceptance.");
-        acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
-        showMessage(correctionCheckPassed_ ? QStringLiteral("Correction measurement passed. Accept correction to continue.")
-                                           : QStringLiteral("Correction measurement failed the transmission threshold."),
-                    !correctionCheckPassed_);
+        // change() puts Correction back to in-progress and invalidates every
+        // stage after it -- which is right when the operator re-measures
+        // deliberately, and wrong for the check the treatment runs every
+        // fourth sonication: that invalidated Treatment itself, and the next
+        // press was refused with "Correction must be complete first".
+        //
+        // A failed re-check is different. Coupling has actually been lost, so
+        // the stage does re-open and has to be accepted again.
+        if (!autoCouplingRecheck_ || !correctionCheckPassed_) {
+            workflow_.change(beam::gui::WorkflowStage::Correction,
+                             "Correction measured; awaiting operator acceptance.");
+            acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
+        }
+        if (!autoCouplingRecheck_) {
+            showMessage(correctionCheckPassed_
+                            ? QStringLiteral("Correction measurement passed. Accept correction "
+                                             "to continue.")
+                            : QStringLiteral("Correction measurement failed the transmission "
+                                             "threshold."),
+                        !correctionCheckPassed_);
+        }
         refresh();
     });
     connect(acceptCorrectionButton_, &QPushButton::clicked, this, [this] {
@@ -4194,10 +4218,18 @@ void WorkflowWindow::updateCouplingCharts(double transmissionAmp) {
                 .arg(kCouplingThreshold, 0, 'f', 2)
                 .arg(verdict));
     }
+    // What the row holds is set here whatever page is up, so it is right the
+    // next time the Coupling page is opened.
     couplingChartsPlaceholder_->setVisible(!haveWaveforms);
     for (QChartView* view : {couplingCh0ChartView_, couplingCh1ChartView_, couplingBarChartView_})
         view->setVisible(haveWaveforms);
-    couplingChartsRow_->show();
+    // Whether the row itself is on screen is not. The coupling widgets and
+    // the treatment ones share a page, so showing it from here drew the
+    // Correction charts in the middle of the Treatment page and pushed the
+    // treatment log off the bottom.
+    const bool onCouplingPage = selectedStage_ == beam::gui::WorkflowStage::Coupling ||
+                                selectedStage_ == beam::gui::WorkflowStage::Correction;
+    couplingChartsRow_->setVisible(onCouplingPage);
     if (!haveWaveforms) return;
     // The builders are shared with beam_app's light tab, so the dark theme is
     // applied here rather than in them.
@@ -4230,7 +4262,6 @@ void WorkflowWindow::updateCouplingCharts(double transmissionAmp) {
     show(couplingBarChartView_, beam::gui_qt::buildTransmissionBarChart(
         beam::gui::computeAvgTransmissionBars(transmissionAmp, couplingPeakToPeak_, kCouplingThreshold)),
          false);
-    couplingChartsRow_->show();
 }
 
 void WorkflowWindow::setMriPathDisplay(const QString& path) {

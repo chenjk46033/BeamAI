@@ -158,6 +158,17 @@ private:
     bool prechecking_ = false;
     // Writes a refused attempt into the row's notes.
     void recordRefusedSonication(bool sham);
+    // SonicateButtonPushed ends with `if mod(i,4)==0 RunCorrectionButtonPushed`:
+    // coupling is re-measured every fourth delivery, because gel dries and
+    // the subject moves and the figure taken at the start of the visit goes
+    // stale. `delivered` is the sonication number that just ran.
+    void remeasureCouplingIfDue(int delivered);
+    static constexpr int kCouplingRecheckEvery = 4;
+    // Set while the periodic re-measurement is running. A measurement the
+    // operator asked for re-opens the Correction stage for acceptance; one
+    // the treatment takes on its own must not, or every fourth sonication
+    // would tear down the workflow it is part of.
+    bool autoCouplingRecheck_ = false;
     // The shipped Target List, as installed. Never written to, so it is what
     // "the original value" means: a parameter edited past recognition has
     // somewhere to come back from.

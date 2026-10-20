@@ -1139,3 +1139,31 @@ TEST(RankTreatmentRows, NothingIsReportedWhenThePlanAlreadyMatches) {
     std::vector<beam::gui::PlanRow> plan = {pr(1, "SCC1", 30, 4, true), pr(2, "SCC1", 180)};
     EXPECT_TRUE(beam::gui::rankTreatmentRows(plan).empty());
 }
+
+// A periodic coupling re-measurement happens in the middle of treatment. If
+// it re-opened the Correction stage the way a deliberate re-measurement does,
+// it would invalidate Treatment itself and the next sonication would be
+// refused with "Correction must be complete first" -- which is what the
+// workflow model does to every stage after the one that changed.
+TEST(TreatmentWorkflow, ReopeningCorrectionInvalidatesTreatment) {
+    beam::gui::TreatmentWorkflow workflow;
+    for (const auto stage : {beam::gui::WorkflowStage::CaseSetup,
+                             beam::gui::WorkflowStage::SystemCheck,
+                             beam::gui::WorkflowStage::Imaging,
+                             beam::gui::WorkflowStage::Registration,
+                             beam::gui::WorkflowStage::Coupling,
+                             beam::gui::WorkflowStage::Correction,
+                             beam::gui::WorkflowStage::TreatmentPlan,
+                             beam::gui::WorkflowStage::SafetyReview}) {
+        ASSERT_TRUE(workflow.begin(stage));
+        ASSERT_TRUE(workflow.complete(stage));
+    }
+    ASSERT_TRUE(workflow.begin(beam::gui::WorkflowStage::Treatment));
+
+    workflow.change(beam::gui::WorkflowStage::Correction, "re-measured");
+    EXPECT_EQ(workflow.state(beam::gui::WorkflowStage::Treatment).status,
+              beam::gui::WorkflowStatus::Invalidated);
+    std::string reason;
+    EXPECT_FALSE(workflow.begin(beam::gui::WorkflowStage::Treatment, &reason));
+    EXPECT_NE(reason.find("must be complete first"), std::string::npos);
+}

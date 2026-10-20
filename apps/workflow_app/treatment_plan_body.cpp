@@ -1964,6 +1964,69 @@ void WorkflowWindow::recordRefusedSonication(bool sham) {
     saveTreatmentTargetStore();
 }
 
+// Port of SonicateButtonPushed.m's last act:
+//
+//   if mod(i,4)==0
+//       RunCorrectionButtonPushed(app, event);
+//   end
+//
+// Coupling is not a property of the visit, it is a property of this moment:
+// gel dries, the subject settles, the array shifts. Measuring once at the
+// Correction stage and trusting that figure for twenty-four sonications is
+// how a later one gets delivered against a transmission nobody has checked
+// since the start. The source re-measures every fourth delivery; so does
+// this.
+//
+// It runs the same path the Run button runs, so the plots, the numbers, the
+// coupling verdict and the sonication safety report are all brought up to
+// date together -- including Rule 320, which is what refuses the next
+// sonication if the coupling has gone.
+void WorkflowWindow::remeasureCouplingIfDue(int delivered) {
+    if (delivered <= 0 || delivered % kCouplingRecheckEvery != 0) return;
+    if (runCorrectionButton_ == nullptr) return;
+    showMessage(QStringLiteral("Sonication %1 delivered. Re-measuring coupling, as every %2 "
+                               "sonications.")
+                    .arg(delivered)
+                    .arg(kCouplingRecheckEvery),
+                false);
+    // Queued: this is reached from the countdown timer finishing a delivery,
+    // and the measurement reads the serial port and rebuilds three charts.
+    // Letting the delivery finish closing first keeps the two apart.
+    QMetaObject::invokeMethod(
+        this,
+        [this, delivered] {
+            autoCouplingRecheck_ = true;
+            const auto done = qScopeGuard([this] { autoCouplingRecheck_ = false; });
+            runCorrectionButton_->click();
+            // The Coupling page owns the verdict; mirror it the way the page
+            // does, so the operator sees the same conclusion from here.
+            couplingCheckPassed_ = correctionCheckPassed_;
+            if (!correctionCheckPassed_) {
+                showMessage(
+                    QStringLiteral("Coupling has fallen below the threshold after sonication "
+                                   "%1. Readjust coupling or add coupling gel over uncoupled "
+                                   "elements, then run the measurement again on the Coupling "
+                                   "page.")
+                        .arg(delivered),
+                    true);
+            }
+            // Rule 320 reads the new transmission.
+            updateSonicationSafety();
+            refresh();
+            if (correctionCheckPassed_) {
+                showMessage(
+                    QStringLiteral("Coupling re-measured after sonication %1: transmission %2%. "
+                                   "Treatment continues.")
+                        .arg(delivered)
+                        .arg(std::clamp(
+                            static_cast<int>(std::lround(transmissionAmplitude_ * 100.0)), 0,
+                            100)),
+                    false);
+            }
+        },
+        Qt::QueuedConnection);
+}
+
 void WorkflowWindow::updateSonicationSafety() {
     if (sonicationSafetyLabel_ == nullptr || stimParamModel_ == nullptr) return;
     if (checkingSonicationSafety_) return;
@@ -3001,6 +3064,9 @@ void WorkflowWindow::closeOpenLogRow(bool aborted) {
     if (openLogSequence_ <= 0) return;
     treatmentLog_.close(protocol, visit, openLogSequence_,
                         QDateTime::currentDateTime().toString(Qt::ISODateWithMs).toStdString());
+    // Read before the visit moves on, and only for one that ran to the end:
+    // a stopped sonication is not a measurement interval.
+    const int justDelivered = aborted ? 0 : openLogSequence_;
     openLogSequence_ = 0;
     // Reload before saving, not after. saveTreatmentTargetStore writes the
     // table's cells back into the log, so saving first pushed the table's empty
@@ -3009,6 +3075,7 @@ void WorkflowWindow::closeOpenLogRow(bool aborted) {
     loadTreatmentProtocol(currentProtocolName());
     saveTreatmentTargetStore();
     advanceToNextScheduledSonication();
+    remeasureCouplingIfDue(justDelivered);
 }
 
 // Where the visit has got to: one past the last delivery, which is BeamV0's
