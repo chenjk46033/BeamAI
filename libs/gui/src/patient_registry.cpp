@@ -209,17 +209,17 @@ Patient PatientRegistry::add(const Patient& details) {
     if (trimmed(details.externalId).empty())
         throw std::runtime_error("a patient needs an identifier");
 
-    for (Patient& already : patients_) {
+    for (const Patient& already : patients_) {
         if (already.externalId != details.externalId) continue;
-        // Returning the existing record rather than adding a second is what
-        // makes "add the patient I am about to treat" safe to call on every
-        // visit. Only what was actually given overwrites: accepting the Case
-        // page with the name fields blank must not erase a name already on
-        // file, but filling one in on a later visit must reach the record.
-        if (!details.site.empty()) already.site = details.site;
-        if (!details.lastName.empty()) already.lastName = details.lastName;
-        if (!details.firstName.empty()) already.firstName = details.firstName;
-        if (!details.dateOfBirth.empty()) already.dateOfBirth = details.dateOfBirth;
+        // Returning the existing record UNCHANGED is what makes "open the
+        // patient I am about to treat" safe to call on every visit.
+        //
+        // It once took whatever was filled in, so details could be added on a
+        // later visit. That let a half-finished form rewrite somebody else:
+        // type a new patient's name, correct the Participant ID to one
+        // already on file, accept, and the person who owned that ID silently
+        // became the name left in the boxes. Changing who somebody is must be
+        // something the operator asks for, which is what update() is.
         return already;
     }
 

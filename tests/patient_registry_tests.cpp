@@ -105,15 +105,17 @@ TEST(PatientRegistry, AddingAKnownExternalIdReturnsThatPatient) {
     EXPECT_EQ(registry.patients().size(), 1u);
 }
 
-TEST(PatientRegistry, AddingAKnownExternalIdUpdatesTheSite) {
+// add() opens, it does not edit. It runs on every case acceptance, from a
+// form that may still hold the last person typed into it.
+TEST(PatientRegistry, AddingAKnownExternalIdChangesNothing) {
     beam::gui::PatientRegistry registry;
     registry.add("F040", "Site 1");
     const beam::gui::Patient moved = registry.add("F040", "Site 2");
 
     EXPECT_EQ(moved.id, 1);
-    EXPECT_EQ(moved.site, "Site 2");
+    EXPECT_EQ(moved.site, "Site 1");
     ASSERT_EQ(registry.patients().size(), 1u);
-    EXPECT_EQ(registry.patients().front().site, "Site 2");
+    EXPECT_EQ(registry.patients().front().site, "Site 1");
 }
 
 TEST(PatientRegistry, AddingWithNoIdentifierIsRefused) {
@@ -321,9 +323,10 @@ TEST(PatientRegistry, AFileWrittenBeforeDemographicsStillLoads) {
     EXPECT_EQ(registry.add("p003", "s001").id, 3);
 }
 
-// Accepting the Case page with the name fields blank must not erase a name
-// already recorded; filling one in later must reach the record.
-TEST(PatientRegistry, AddNeverErasesWhatIsAlreadyRecorded) {
+// A stale Case form must not rewrite whoever owns the identifier typed into
+// it. This is the bug that turned "Doe, John" into the name left in the boxes
+// from the patient before him.
+TEST(PatientRegistry, AddNeverRewritesAnExistingPatient) {
     beam::gui::PatientRegistry registry;
     beam::gui::Patient details;
     details.externalId = "F040";
@@ -341,12 +344,18 @@ TEST(PatientRegistry, AddNeverErasesWhatIsAlreadyRecorded) {
     EXPECT_EQ(after.firstName, "Ada");
     EXPECT_EQ(after.dateOfBirth, "1970-01-05");
 
-    beam::gui::Patient later;
-    later.externalId = "F040";
-    later.lastName = "Kowalska";
-    const beam::gui::Patient corrected = registry.add(later);
-    EXPECT_EQ(corrected.lastName, "Kowalska");
-    EXPECT_EQ(corrected.firstName, "Ada");  // untouched
+    // Nor does a form holding somebody else's name reach the record.
+    beam::gui::Patient stale;
+    stale.externalId = "F040";
+    stale.site = "Site 9";
+    stale.lastName = "Testerson";
+    stale.firstName = "Pat";
+    stale.dateOfBirth = "2001-02-03";
+    const beam::gui::Patient untouched = registry.add(stale);
+    EXPECT_EQ(untouched.lastName, "Kowalski");
+    EXPECT_EQ(untouched.firstName, "Ada");
+    EXPECT_EQ(untouched.dateOfBirth, "1970-01-05");
+    EXPECT_EQ(untouched.site, "Site 1");
     EXPECT_EQ(registry.patients().size(), 1u);
 }
 

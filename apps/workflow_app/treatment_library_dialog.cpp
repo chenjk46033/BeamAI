@@ -75,6 +75,14 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
     resize(targetsPage ? 900 : 1180, 620);
 
     auto* layout = new QVBoxLayout(this);
+    // Whose list this is, above everything it edits. Hidden until the owner
+    // says -- the Protocols page has no such distinction to make.
+    scopeBanner_ = new QLabel(this);
+    scopeBanner_->setWordWrap(true);
+    scopeBanner_->setVisible(false);
+    scopeBanner_->setStyleSheet(QStringLiteral(
+        "QLabel { padding: 7px 10px; background: #17313f; color: #dcebef; border-radius: 4px; }"));
+    layout->addWidget(scopeBanner_);
     auto* body = new QWidget(this);
     if (targetsPage) {
         buildTargetsTab(body);
@@ -84,6 +92,7 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
     layout->addWidget(body, 1);
 
     auto* footer = new QHBoxLayout;
+    footerLayout_ = footer;
     savedNotice_ = new QLabel(this);
     savedNotice_->setStyleSheet(QStringLiteral("QLabel { color: #5fcb96; }"));
     footer->addWidget(savedNotice_);
@@ -133,6 +142,73 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
 void TreatmentLibraryDialog::setSaveHandler(
     std::function<void(const beam::gui::TreatmentTargetStore&)> handler) {
     saveHandler_ = std::move(handler);
+}
+
+void TreatmentLibraryDialog::setTargetScope(const QString& whose,
+                                            const QString& deviceDefaultsPath) {
+    if (page_ != Page::Targets || scopeBanner_ == nullptr) return;
+    deviceDefaultsPath_ = deviceDefaultsPath;
+
+    if (whose.isEmpty()) {
+        setWindowTitle(QStringLiteral("Target List — device defaults"));
+        scopeBanner_->setText(
+            QStringLiteral("Editing the DEVICE DEFAULTS. These are what a patient with no "
+                           "Target List of their own starts from. No patient is open, so "
+                           "nobody's prescription is being changed here."));
+        scopeBanner_->setVisible(true);
+        return;
+    }
+
+    setWindowTitle(QStringLiteral("Target List — %1").arg(whose));
+    scopeBanner_->setText(
+        QStringLiteral("Editing the Target List for %1. These parameters are theirs alone; "
+                       "no other patient is affected.")
+            .arg(whose));
+    scopeBanner_->setVisible(true);
+    if (deviceDefaultsPath_.isEmpty() || footerLayout_ == nullptr) return;
+
+    // The two directions between this patient's list and the device's. Here
+    // rather than on the Treatment page because this is where the operator is
+    // already looking at the list they want to move.
+    auto* useDefaults = new QPushButton(QStringLiteral("Use device defaults"), this);
+    useDefaults->setToolTip(
+        QStringLiteral("Replaces this patient's Target List with the device defaults. Their "
+                       "own parameters are lost; what has already been delivered is not."));
+    auto* makeDefaults = new QPushButton(QStringLiteral("Save as device defaults"), this);
+    makeDefaults->setToolTip(
+        QStringLiteral("Makes this Target List what every future patient starts from. "
+                       "Patients already on the device keep their own."));
+    footerLayout_->insertWidget(1, useDefaults);
+    footerLayout_->insertWidget(2, makeDefaults);
+
+    connect(useDefaults, &QPushButton::clicked, this, [this] {
+        try {
+            // loadTargets replaces the targets and leaves the protocols, which
+            // are the site's library and belong to nobody.
+            store_.loadTargets(deviceDefaultsPath_.toStdString());
+        } catch (const std::exception& error) {
+            QMessageBox::warning(this, QStringLiteral("Device defaults"),
+                                 QStringLiteral("The device defaults could not be read: %1")
+                                     .arg(QString::fromUtf8(error.what())));
+            return;
+        }
+        reloadTargets();
+        if (saveHandler_) saveHandler_(store_);
+        if (savedNotice_ != nullptr)
+            savedNotice_->setText(QStringLiteral("Device defaults applied and saved."));
+    });
+    connect(makeDefaults, &QPushButton::clicked, this, [this] {
+        try {
+            store_.saveTargets(deviceDefaultsPath_.toStdString());
+        } catch (const std::exception& error) {
+            QMessageBox::warning(this, QStringLiteral("Device defaults"),
+                                 QStringLiteral("The device defaults could not be written: %1")
+                                     .arg(QString::fromUtf8(error.what())));
+            return;
+        }
+        if (savedNotice_ != nullptr)
+            savedNotice_->setText(QStringLiteral("Saved as the device defaults."));
+    });
 }
 
 void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {

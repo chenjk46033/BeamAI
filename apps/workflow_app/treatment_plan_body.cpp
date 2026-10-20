@@ -1237,6 +1237,53 @@ void WorkflowWindow::buildCaseDemographics() {
     };
     connect(lastNameEdit_, &QLineEdit::textChanged, this, follow);
     connect(firstNameEdit_, &QLineEdit::textChanged, this, follow);
+
+    // Two steps, because they are two decisions. Creating a record and
+    // leaving the page used to be one press, which gave the operator no
+    // moment to check that the person they just entered is the person now in
+    // the list -- and made the Case page appear to jump on its own.
+    createPatientButton_ = new QPushButton(QStringLiteral("Create patient"), ui_->caseGroup);
+    createPatientButton_->setStyleSheet(
+        QStringLiteral("QPushButton { padding: 9px 16px; background: #2b4a58; color: #dcebef; "
+                       "border: 1px solid #39758e; border-radius: 5px; font-weight: 600; } "
+                       "QPushButton:hover { background: #35596a; }"));
+    createPatientButton_->setToolTip(
+        QStringLiteral("Opens this patient's record and adds them to the list below, without "
+                       "leaving this page."));
+    connect(createPatientButton_, &QPushButton::clicked, this, [this] {
+        if (!caseFieldsUsable()) return;
+        selectPatient(caseDemographics(), /*advancing=*/false);
+    });
+
+    // The Accept button moves out of the form's own column and alongside it.
+    const int acceptRow = ui_->caseForm->rowCount() - 1;
+    ui_->caseForm->takeRow(acceptRow);
+    auto* buttons = new QHBoxLayout;
+    buttons->setSpacing(8);
+    buttons->addWidget(createPatientButton_, 1);
+    buttons->addWidget(ui_->acceptCaseButton, 2);
+    ui_->caseForm->addRow(buttons);
+}
+
+// The two required fields, and a date of birth that is blank or a date.
+// Shared by both buttons so they cannot disagree about what is acceptable.
+bool WorkflowWindow::caseFieldsUsable() {
+    if (ui_->participantEdit->text().trimmed().isEmpty() ||
+        ui_->siteEdit->text().trimmed().isEmpty()) {
+        showMessage(QStringLiteral("Participant ID and Site ID are required."), true);
+        return false;
+    }
+    std::string born;
+    if (dateOfBirthEdit_ != nullptr && !readDateOfBirth(dateOfBirthEdit_->text(), &born)) {
+        showMessage(QStringLiteral("\"%1\" is not a date. Use YYYY-MM-DD, or leave the date of "
+                                   "birth blank.")
+                        .arg(dateOfBirthEdit_->text().trimmed()),
+                    true);
+        dateOfBirthEdit_->setFocus(Qt::OtherFocusReason);
+        dateOfBirthEdit_->selectAll();
+        return false;
+    }
+    return true;
 }
 
 void WorkflowWindow::showCaseDemographics(const beam::gui::Patient& patient) {
@@ -1285,6 +1332,24 @@ void WorkflowWindow::buildPatientChooser() {
     layout->setContentsMargins(8, 6, 8, 8);
     layout->setSpacing(6);
 
+    // A device that has treated two hundred people cannot be read down. The
+    // filter is the only way to find somebody without scrolling, and the
+    // count says whether what is on screen is all of them.
+    auto* search = new QHBoxLayout;
+    search->setSpacing(8);
+    patientFilterEdit_ = new QLineEdit(patientChooserGroup_);
+    patientFilterEdit_->setPlaceholderText(
+        QStringLiteral("Find by Participant ID, name or site"));
+    patientFilterEdit_->setClearButtonEnabled(true);
+    styleInputField(patientFilterEdit_);
+    connect(patientFilterEdit_, &QLineEdit::textChanged, this,
+            [this] { refreshPatientChooser(); });
+    search->addWidget(patientFilterEdit_, 1);
+    patientCountLabel_ = new QLabel(patientChooserGroup_);
+    patientCountLabel_->setStyleSheet(QStringLiteral("color: #7e8c93;"));
+    search->addWidget(patientCountLabel_, 0);
+    layout->addLayout(search);
+
     patientChooserHint_ = new QLabel(patientChooserGroup_);
     patientChooserHint_->setWordWrap(true);
     patientChooserHint_->setStyleSheet(QStringLiteral("color: #7e8c93;"));
@@ -1306,6 +1371,12 @@ void WorkflowWindow::buildPatientChooser() {
     patientTable_->verticalHeader()->setVisible(false);
     patientTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     patientTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Click a header to sort; the list opens in registry order, which is the
+    // order patients were first seen.
+    patientTable_->setSortingEnabled(true);
+    patientTable_->horizontalHeader()->setSortIndicatorShown(true);
+    // A deliberate opening order rather than whatever Qt last had.
+    patientTable_->sortByColumn(0, Qt::AscendingOrder);
     patientTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     patientTable_->setAlternatingRowColors(true);
     patientTable_->setShowGrid(false);
@@ -1335,9 +1406,12 @@ void WorkflowWindow::buildPatientChooser() {
 
     // Selecting fills the fields rather than accepting outright: the operator
     // still presses Accept, and still sees what they are about to open.
+    // By the id carried on the row, never by the row number: the list can be
+    // filtered and sorted, so position stopped meaning registry order.
     const auto take = [this](int row) {
-        if (row < 0 || row >= static_cast<int>(patients_.patients().size())) return;
-        showCaseDemographics(patients_.patients()[static_cast<std::size_t>(row)]);
+        beam::gui::Patient chosen;
+        if (!patients_.find(patientIdAtRow(row), &chosen)) return;
+        showCaseDemographics(chosen);
     };
     connect(patientTable_, &QTableWidget::currentCellChanged, this,
             [take](int row, int, int, int) { take(row); });
@@ -1363,6 +1437,15 @@ void WorkflowWindow::buildPatientChooser() {
     ui_->casePageLayout->insertWidget(1, patientChooserGroup_, 0);
 }
 
+// The registry id carried on a row, or 0. Rows are filtered and sorted, so
+// their position says nothing about which patient they are; looking one up by
+// row number would open whoever happened to be in that seat.
+int WorkflowWindow::patientIdAtRow(int row) const {
+    if (patientTable_ == nullptr || row < 0 || row >= patientTable_->rowCount()) return 0;
+    const QTableWidgetItem* item = patientTable_->item(row, 0);
+    return item == nullptr ? 0 : item->data(Qt::UserRole).toInt();
+}
+
 void WorkflowWindow::refreshPatientChooser() {
     if (patientTable_ == nullptr) return;
     const std::vector<beam::gui::Patient>& people = patients_.patients();
@@ -1374,10 +1457,32 @@ void WorkflowWindow::refreshPatientChooser() {
                              "above to start a record. Each patient's visits are kept "
                              "separately."));
 
+    // Whoever the filter admits. Matched against the Participant ID, the
+    // name and the site, because those are the three things an operator has
+    // in front of them when they are looking somebody up.
+    const QString needle =
+        patientFilterEdit_ == nullptr ? QString() : patientFilterEdit_->text().trimmed();
+    std::vector<const beam::gui::Patient*> shown;
+    for (const beam::gui::Patient& patient : people) {
+        if (!needle.isEmpty()) {
+            const QString haystack =
+                QStringLiteral("%1 %2 %3 %4")
+                    .arg(QString::fromStdString(patient.externalId),
+                         QString::fromStdString(patient.lastName),
+                         QString::fromStdString(patient.firstName),
+                         QString::fromStdString(patient.site));
+            if (!haystack.contains(needle, Qt::CaseInsensitive)) continue;
+        }
+        shown.push_back(&patient);
+    }
+
     const QSignalBlocker blocker(patientTable_);
-    patientTable_->setRowCount(static_cast<int>(people.size()));
-    for (std::size_t index = 0; index < people.size(); ++index) {
-        const beam::gui::Patient& patient = people[index];
+    // Sorting is off while the rows are written: with it on, each setItem can
+    // move the row being filled out from under the next one.
+    patientTable_->setSortingEnabled(false);
+    patientTable_->setRowCount(static_cast<int>(shown.size()));
+    for (std::size_t index = 0; index < shown.size(); ++index) {
+        const beam::gui::Patient& patient = *shown[index];
         // Their own log, read only to count what is in it. A log that will
         // not parse costs this row its two computed columns, not the page.
         int visits = 0;
@@ -1414,7 +1519,10 @@ void WorkflowWindow::refreshPatientChooser() {
             return shown;
         };
         const int row = static_cast<int>(index);
-        patientTable_->setItem(row, 0, cell(QString::fromStdString(patient.externalId)));
+        auto* identity = cell(QString::fromStdString(patient.externalId));
+        // What the row IS, as against where it sits.
+        identity->setData(Qt::UserRole, patient.id);
+        patientTable_->setItem(row, 0, identity);
         patientTable_->setItem(
             row, 1,
             cell(patient.lastName.empty() && patient.firstName.empty()
@@ -1425,7 +1533,10 @@ void WorkflowWindow::refreshPatientChooser() {
                                         ? QStringLiteral("—")
                                         : QString::fromStdString(patient.dateOfBirth)));
         patientTable_->setItem(row, 3, cell(QString::fromStdString(patient.site)));
-        patientTable_->setItem(row, 4, cell(QString::number(visits), true));
+        auto* visitCell = cell(QString::number(visits), true);
+        // Sorted as a number, not as text, or 10 would come before 2.
+        visitCell->setData(Qt::EditRole, visits);
+        patientTable_->setItem(row, 4, visitCell);
         patientTable_->setItem(row, 5,
                                cell(toMinute(QString::fromStdString(patient.createdAt))));
         patientTable_->setItem(row, 6,
@@ -1442,13 +1553,20 @@ void WorkflowWindow::refreshPatientChooser() {
             }
         }
     }
+    patientTable_->setSortingEnabled(true);
+    if (patientCountLabel_ != nullptr) {
+        patientCountLabel_->setText(
+            shown.size() == people.size()
+                ? QStringLiteral("%1 patient(s)").arg(people.size())
+                : QStringLiteral("%1 of %2 patient(s)").arg(shown.size()).arg(people.size()));
+    }
     // As tall as its rows, capped: a device with many patients scrolls rather
     // than pushing the Accept button off the page.
     const int rowHeight = patientTable_->verticalHeader()->defaultSectionSize();
     const int wanted = patientTable_->horizontalHeader()->height() +
-                       static_cast<int>(people.size()) * rowHeight +
+                       static_cast<int>(shown.size()) * rowHeight +
                        2 * patientTable_->frameWidth();
-    patientTable_->setFixedHeight(std::clamp(wanted, rowHeight * 2, rowHeight * 9));
+    patientTable_->setFixedHeight(std::clamp(wanted, rowHeight * 2, rowHeight * 12));
 }
 
 // How many sonications this patient has actually had. The gate on removing
@@ -1478,8 +1596,8 @@ int WorkflowWindow::patientDeliveryCount(int patientId, int* plannedRows) const 
 }
 
 void WorkflowWindow::showPatientMenu(int row, const QPoint& globalPosition) {
-    if (row < 0 || row >= static_cast<int>(patients_.patients().size())) return;
-    const beam::gui::Patient patient = patients_.patients()[static_cast<std::size_t>(row)];
+    beam::gui::Patient patient;
+    if (!patients_.find(patientIdAtRow(row), &patient)) return;
     const QString name = QString::fromStdString(patient.externalId);
 
     QMenu menu(this);
@@ -1681,17 +1799,16 @@ void WorkflowWindow::savePatientRegistry() {
 // it is where that person's record is opened. BeamV0 had no such step: the
 // subject was whoever the data directory happened to hold, and treating a
 // second person meant copying the whole directory.
-void WorkflowWindow::selectPatient(const beam::gui::Patient& details) {
+void WorkflowWindow::selectPatient(const beam::gui::Patient& details, bool advancing) {
     const std::string identifier = details.externalId;
     if (identifier.empty()) return;
 
     beam::gui::Patient known;
     const bool onFile = patients_.findByExternalId(identifier, &known);
     if (onFile && known.id == currentPatientId_) {
-        // The same person, re-accepted. Their details may have been filled in
-        // or corrected since.
-        patients_.add(details);
-        savePatientRegistry();
+        // The same person, re-accepted. Nothing to do but say so -- their
+        // details are theirs, and the form may hold anything.
+        showCaseDemographics(known);
         return;
     }
     const bool switching = currentPatientId_ > 0;
@@ -1750,14 +1867,25 @@ void WorkflowWindow::selectPatient(const beam::gui::Patient& details) {
     // Whether this device has seen them before is the thing the operator
     // wants confirmed: a new patient and a mistyped identifier look the same
     // on screen otherwise.
-    showMessage(onFile ? QStringLiteral("Now treating %1 (patient %2), who is already on this device. "
-                                        "The treatment plan shows their visits.")
-                             .arg(QString::fromStdString(patient.externalId))
-                             .arg(patient.id)
-                       : QStringLiteral("%1 is new to this device, and is patient %2.")
-                             .arg(QString::fromStdString(patient.externalId))
-                             .arg(patient.id),
-                false);
+    // Accepting the case moves straight on to Imaging, so the message says
+    // both what just happened and what the page that arrived is for. Without
+    // that, a record being created and the operator being dropped on a
+    // different page read as one unexplained jump.
+    const QString who = QStringLiteral("%1 (%2)").arg(
+        QString::fromStdString(beam::gui::patientDisplayName(patient)),
+        QString::fromStdString(patient.externalId));
+    const QString what =
+        onFile ? QStringLiteral("Opened the existing record for %1 — patient %2.")
+                     .arg(who)
+                     .arg(patient.id)
+               : QStringLiteral("Created a new record for %1 — patient %2 on this device.")
+                     .arg(who)
+                     .arg(patient.id);
+    const QString next =
+        advancing ? QStringLiteral(" Load their MRI to begin.")
+                  : QStringLiteral(" They are in the list below. Accept the case when the "
+                                   "record is right.");
+    showMessage(what + next, false);
 }
 
 // A pre-patient install kept one subject's record directly in the runtime
@@ -4613,6 +4741,20 @@ void WorkflowWindow::openTreatmentLibrary(TreatmentLibraryDialog::Page page) {
     writeProtocolGridToStore();
     writeTargetPointsToStore();
     TreatmentLibraryDialog dialog(targetStore_, page, this);
+    if (page == TreatmentLibraryDialog::Page::Targets) {
+        // Which list this edits follows where it would be saved, so the dialog
+        // cannot say one thing while saveTreatmentTargetStore does another.
+        beam::gui::Patient open;
+        const bool belongsToSomebody =
+            !patientTargetsPath().isEmpty() && patients_.find(currentPatientId_, &open);
+        dialog.setTargetScope(
+            belongsToSomebody
+                ? QStringLiteral("%1 (%2)")
+                      .arg(QString::fromStdString(beam::gui::patientDisplayName(open)),
+                           QString::fromStdString(open.externalId))
+                : QString(),
+            QDir(treatmentDataDirectory()).filePath(QStringLiteral("treatment_targets.csv")));
+    }
     // Applied on each Save rather than once at the end, so the dialog can stay
     // open for the next edit.
     dialog.setSaveHandler([this](const beam::gui::TreatmentTargetStore& edited) {
@@ -4672,6 +4814,309 @@ void WorkflowWindow::writeTargetPointsToStore() {
         // is visible from every protocol that schedules it.
         targetStore_.setTargetPoints(targetListName(item).toStdString(), std::move(points));
     }
+}
+
+
+// The Report stage. BeamV0 has setCRF*.m and setSessionCaseReportParameters.m
+// -- ported in libs/gui/case_report_form -- and nothing that shows or exports
+// what they build. This is the page that does: who was treated, what they were
+// given this visit, and a file that carries both off the device.
+//
+// It is the reason the per-patient log exists. Until a patient had an
+// identity, the SubjectID and SiteID columns were written empty and a case
+// report could not have been produced from them.
+void WorkflowWindow::buildReportBody() {
+    reportBody_ = new QWidget(ui_->placeholderPage);
+    auto* outer = new QVBoxLayout(reportBody_);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(8);
+
+    auto* identityGroup = new QGroupBox(QStringLiteral("Case report"), reportBody_);
+    auto* identityLayout = new QVBoxLayout(identityGroup);
+    identityLayout->setContentsMargins(10, 6, 10, 8);
+    identityLayout->setSpacing(6);
+
+    auto* chooser = new QHBoxLayout;
+    chooser->setSpacing(8);
+    auto* visitLabel = new QLabel(QStringLiteral("Visit"), identityGroup);
+    visitLabel->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; }"));
+    chooser->addWidget(visitLabel);
+    reportVisitCombo_ = new QComboBox(identityGroup);
+    applyItemViewPalette(reportVisitCombo_);
+    connect(reportVisitCombo_, &QComboBox::currentIndexChanged, this,
+            [this](int) { refreshReport(); });
+    chooser->addWidget(reportVisitCombo_);
+    auto* operatorLabel = new QLabel(QStringLiteral("Operator ID"), identityGroup);
+    operatorLabel->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; }"));
+    chooser->addWidget(operatorLabel);
+    reportOperatorEdit_ = new QLineEdit(identityGroup);
+    reportOperatorEdit_->setPlaceholderText(QStringLiteral("Who ran this visit"));
+    styleInputField(reportOperatorEdit_);
+    connect(reportOperatorEdit_, &QLineEdit::textChanged, this, [this] { refreshReport(); });
+    chooser->addWidget(reportOperatorEdit_, 1);
+    exportReportButton_ = new QPushButton(QStringLiteral("Export case report..."), identityGroup);
+    exportReportButton_->setStyleSheet(
+        QStringLiteral("QPushButton { padding: 7px 14px; background: #176b87; color: white; "
+                       "border: 0; border-radius: 5px; font-weight: 600; } "
+                       "QPushButton:disabled { background: #3b474e; color: #7e8c93; }"));
+    connect(exportReportButton_, &QPushButton::clicked, this, [this] { exportCaseReport(); });
+    chooser->addWidget(exportReportButton_);
+    identityLayout->addLayout(chooser);
+
+    reportIdentityLabel_ = new QLabel(identityGroup);
+    reportIdentityLabel_->setWordWrap(true);
+    reportIdentityLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    reportIdentityLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { padding: 8px 10px; background: #eef2f4; color: #17313f; border-radius: 4px; }"));
+    identityLayout->addWidget(reportIdentityLabel_);
+    outer->addWidget(identityGroup);
+
+    auto* deliveredGroup = new QGroupBox(QStringLiteral("What was delivered"), reportBody_);
+    auto* deliveredLayout = new QVBoxLayout(deliveredGroup);
+    deliveredLayout->setContentsMargins(10, 6, 10, 8);
+    reportTable_ = new QTableWidget(0, 9, deliveredGroup);
+    reportTable_->setHorizontalHeaderLabels(
+        {QStringLiteral("#"), QStringLiteral("Target"), QStringLiteral("Started"),
+         QStringLiteral("Ended"), QStringLiteral("Duration (s)"), QStringLiteral("Amplitude"),
+         QStringLiteral("Sham"), QStringLiteral("Outcome"), QStringLiteral("Notes")});
+    reportTable_->verticalHeader()->setVisible(false);
+    reportTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    reportTable_->setAlternatingRowColors(true);
+    reportTable_->setShowGrid(false);
+    if (patientTable_ != nullptr) {
+        reportTable_->setStyleSheet(patientTable_->styleSheet());
+        reportTable_->horizontalHeader()->setStyleSheet(
+            patientTable_->horizontalHeader()->styleSheet());
+    }
+    reportTable_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    for (int column = 0; column < reportTable_->columnCount() - 1; ++column)
+        reportTable_->horizontalHeader()->setSectionResizeMode(column,
+                                                               QHeaderView::ResizeToContents);
+    reportTable_->horizontalHeader()->setStretchLastSection(true);
+    deliveredLayout->addWidget(reportTable_);
+    outer->addWidget(deliveredGroup, 1);
+
+    reportBody_->setVisible(false);
+}
+
+// The CRF metadata for the visit on show, built by the ported
+// setSessionCaseReportParameters.m so the file this page writes and the
+// filename BeamV0 would have chosen agree.
+beam::gui::CaseReportForm WorkflowWindow::reportFormForVisit(int visit) const {
+    beam::gui::SessionCrfInputs inputs;
+    beam::gui::Patient open;
+    if (patients_.find(currentPatientId_, &open)) inputs.participantId = open.externalId;
+    inputs.visitNumber = visit;
+    inputs.hydrogelSize =
+        hydrogelSizeCombo_ != nullptr ? hydrogelSizeCombo_->currentText().toStdString() : "Small";
+    // The visit is dated by its first delivery, not by today: a report run a
+    // week later still describes the day the treatment happened.
+    QDateTime when = QDateTime::currentDateTime();
+    for (const beam::gui::TreatmentLogRow& row :
+         treatmentLog_.rowsFor(currentProtocolName().toStdString(), visit)) {
+        if (row.startedAt.empty()) continue;
+        const QDateTime stamp =
+            QDateTime::fromString(QString::fromStdString(row.startedAt), Qt::ISODateWithMs);
+        if (stamp.isValid()) {
+            when = stamp;
+            break;
+        }
+    }
+    inputs.year = when.date().year();
+    inputs.month = when.date().month();
+    inputs.day = when.date().day();
+    inputs.hour = when.time().hour();
+    inputs.minute = when.time().minute();
+    inputs.second = when.time().second();
+
+    beam::gui::CaseReportForm crf = beam::gui::buildSessionCaseReportForm(inputs);
+    // setSessionCaseReportParameters.m hardcodes a site; this device knows the
+    // real one, and the operator is not something BeamV0 asks for at all.
+    if (!open.site.empty()) crf.siteId = open.site;
+    if (reportOperatorEdit_ != nullptr)
+        crf.operatorId = reportOperatorEdit_->text().trimmed().toStdString();
+    return crf;
+}
+
+void WorkflowWindow::refreshReport() {
+    if (reportBody_ == nullptr || reportTable_ == nullptr) return;
+    const std::string protocol = currentProtocolName().toStdString();
+
+    // Every visit this patient has, newest first: a report is usually wanted
+    // for the one just finished.
+    std::set<int> visits;
+    for (const beam::gui::TreatmentLogRow& row : treatmentLog_.rows())
+        if (row.protocol == protocol) visits.insert(row.visit);
+    const int wanted = reportVisitCombo_->currentData().isValid()
+                           ? reportVisitCombo_->currentData().toInt()
+                           : currentVisitNumber();
+    {
+        const QSignalBlocker blocker(reportVisitCombo_);
+        reportVisitCombo_->clear();
+        for (auto visit = visits.rbegin(); visit != visits.rend(); ++visit)
+            reportVisitCombo_->addItem(QStringLiteral("Visit %1").arg(*visit), *visit);
+        const int index = reportVisitCombo_->findData(wanted);
+        if (index >= 0) reportVisitCombo_->setCurrentIndex(index);
+    }
+    const int visit = reportVisitCombo_->currentData().isValid()
+                          ? reportVisitCombo_->currentData().toInt()
+                          : 0;
+
+    beam::gui::Patient open;
+    if (!patients_.find(currentPatientId_, &open)) {
+        reportIdentityLabel_->setText(
+            QStringLiteral("No patient is open. Accept a case to produce a report."));
+        reportTable_->setRowCount(0);
+        exportReportButton_->setEnabled(false);
+        return;
+    }
+
+    const std::vector<beam::gui::TreatmentLogRow> rows = treatmentLog_.rowsFor(protocol, visit);
+    int delivered = 0;
+    int shams = 0;
+    int stopped = 0;
+    double seconds = 0.0;
+    for (const beam::gui::TreatmentLogRow& row : rows) {
+        if (!beam::gui::TreatmentLog::delivered(row)) continue;
+        ++delivered;
+        if (row.sham) ++shams;
+        if (beam::gui::TreatmentLog::stopped(row)) ++stopped;
+        seconds += row.endTimeSeconds - row.startTimeSeconds;
+    }
+
+    const beam::gui::CaseReportForm crf = reportFormForVisit(visit);
+    const QString born =
+        open.dateOfBirth.empty() ? QString::fromUtf8("\xe2\x80\x94")
+                                 : QString::fromStdString(open.dateOfBirth);
+    reportIdentityLabel_->setText(
+        QStringLiteral("<b>%1</b> &nbsp; Participant %2 &nbsp; Site %3 &nbsp; born %4"
+                       "<br>Visit %5 of \"%6\" &nbsp; %7-%8-%9 &nbsp; hydrogel %10"
+                       "<br>%11 sonication(s) delivered, %12 sham, %13 stopped early, "
+                       "%14 s total output"
+                       "<br>Export filename: <tt>%15.csv</tt>")
+            .arg(QString::fromStdString(beam::gui::patientDisplayName(open)),
+                 QString::fromStdString(open.externalId), QString::fromStdString(crf.siteId),
+                 born)
+            .arg(visit)
+            .arg(currentProtocolName())
+            .arg(crf.year, 4, 10, QLatin1Char('0'))
+            .arg(crf.month, 2, 10, QLatin1Char('0'))
+            .arg(crf.day, 2, 10, QLatin1Char('0'))
+            .arg(QString::fromStdString(crf.hydrogelSize))
+            .arg(delivered)
+            .arg(shams)
+            .arg(stopped)
+            .arg(seconds, 0, 'f', 1)
+            .arg(QString::fromStdString(beam::gui::computeCrfAutoSaveFilename(crf))));
+
+    reportTable_->setRowCount(static_cast<int>(rows.size()));
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        const beam::gui::TreatmentLogRow& row = rows[index];
+        const auto cell = [](const QString& text) { return new QTableWidgetItem(text); };
+        const auto timeOfDay = [](const std::string& stamp) {
+            const QDateTime when =
+                QDateTime::fromString(QString::fromStdString(stamp), Qt::ISODateWithMs);
+            return when.isValid() ? when.toString(QStringLiteral("HH:mm:ss"))
+                                  : QString::fromUtf8("\xe2\x80\x94");
+        };
+        const int at = static_cast<int>(index);
+        reportTable_->setItem(at, 0, cell(QString::number(row.sequence)));
+        reportTable_->setItem(at, 1, cell(QString::fromStdString(row.target)));
+        reportTable_->setItem(at, 2, cell(timeOfDay(row.startedAt)));
+        reportTable_->setItem(at, 3, cell(timeOfDay(row.endedAt)));
+        reportTable_->setItem(
+            at, 4, cell(QString::number(row.endTimeSeconds - row.startTimeSeconds, 'f', 1)));
+        reportTable_->setItem(at, 5, cell(QString::number(row.amplitude)));
+        reportTable_->setItem(at, 6, cell(row.sham ? QStringLiteral("yes") : QString()));
+        reportTable_->setItem(
+            at, 7,
+            cell(!beam::gui::TreatmentLog::delivered(row) ? QStringLiteral("not delivered")
+                 : beam::gui::TreatmentLog::stopped(row)  ? QStringLiteral("stopped early")
+                                                          : QStringLiteral("completed")));
+        QString notes = QString::fromStdString(row.notes);
+        notes.replace(QLatin1Char('\n'), QString::fromUtf8(" \xc2\xb7 "));
+        reportTable_->setItem(at, 8, cell(notes));
+    }
+    // A visit that delivered nothing has no case to report.
+    exportReportButton_->setEnabled(delivered > 0);
+}
+
+void WorkflowWindow::exportCaseReport() {
+    const int visit = reportVisitCombo_ != nullptr && reportVisitCombo_->currentData().isValid()
+                          ? reportVisitCombo_->currentData().toInt()
+                          : 0;
+    beam::gui::Patient open;
+    if (visit <= 0 || !patients_.find(currentPatientId_, &open)) return;
+
+    const beam::gui::CaseReportForm crf = reportFormForVisit(visit);
+    const QString suggested =
+        QDir(patientDataDirectory())
+            .filePath(QString::fromStdString(beam::gui::computeCrfAutoSaveFilename(crf)) +
+                      QStringLiteral(".csv"));
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export case report"),
+                                                      suggested, QStringLiteral("CSV (*.csv)"));
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        showMessage(QStringLiteral("%1 could not be written.").arg(QDir::toNativeSeparators(path)),
+                    true);
+        return;
+    }
+    QTextStream out(&file);
+    const auto quoted = [](const QString& text) {
+        QString escaped = text;
+        escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+        escaped.replace(QLatin1Char('\n'), QString::fromUtf8(" \xc2\xb7 "));
+        return QStringLiteral("\"%1\"").arg(escaped);
+    };
+    // The metadata first as name/value pairs, then the deliveries. One file
+    // that answers both "whose visit was this" and "what happened in it".
+    out << "Field,Value\n";
+    const auto pair = [&](const char* name, const QString& value) {
+        out << name << ',' << quoted(value) << '\n';
+    };
+    pair("SubjectID", QString::fromStdString(crf.subjectId));
+    pair("SubjectName", QString::fromStdString(beam::gui::patientDisplayName(open)));
+    pair("DateOfBirth", QString::fromStdString(open.dateOfBirth));
+    pair("SiteID", QString::fromStdString(crf.siteId));
+    pair("OperatorID", QString::fromStdString(crf.operatorId));
+    pair("VisitNumber", QString::number(crf.visitNumber));
+    pair("Protocol", currentProtocolName());
+    pair("HydrogelSize", QString::fromStdString(crf.hydrogelSize));
+    pair("SessionDate", QStringLiteral("%1-%2-%3")
+                            .arg(crf.year, 4, 10, QLatin1Char('0'))
+                            .arg(crf.month, 2, 10, QLatin1Char('0'))
+                            .arg(crf.day, 2, 10, QLatin1Char('0')));
+    pair("BEAMSerialNumber", QString::fromStdString(crf.snBeam));
+    pair("Transducer1SerialNumber", QString::fromStdString(crf.snTransducer1));
+    pair("Transducer2SerialNumber", QString::fromStdString(crf.snTransducer2));
+    pair("SoftwareVersion", QString::fromStdString(crf.softwareVersion));
+    pair("ExportedAt", QDateTime::currentDateTime().toString(Qt::ISODate));
+    out << '\n';
+    out << "Number,Target,Started,Ended,DurationSeconds,Amplitude,BD,BI,PD,PI,Sham,Outcome,"
+           "ResponsePain,ResponseMood,Notes\n";
+    for (const beam::gui::TreatmentLogRow& row :
+         treatmentLog_.rowsFor(currentProtocolName().toStdString(), visit)) {
+        out << row.sequence << ',' << quoted(QString::fromStdString(row.target)) << ','
+            << quoted(QString::fromStdString(row.startedAt)) << ','
+            << quoted(QString::fromStdString(row.endedAt)) << ','
+            << (row.endTimeSeconds - row.startTimeSeconds) << ',' << row.amplitude << ','
+            << row.burstDurationSeconds << ',' << row.burstIntervalSeconds << ','
+            << row.pulseDurationSeconds << ',' << row.pulseIntervalSeconds << ','
+            << (row.sham ? 1 : 0) << ','
+            << quoted(!beam::gui::TreatmentLog::delivered(row) ? QStringLiteral("not delivered")
+                      : beam::gui::TreatmentLog::stopped(row)  ? QStringLiteral("stopped early")
+                                                               : QStringLiteral("completed"))
+            << ',';
+        if (row.responsePain) out << *row.responsePain;
+        out << ',';
+        if (row.responseMood) out << *row.responseMood;
+        out << ',' << quoted(QString::fromStdString(row.notes)) << '\n';
+    }
+    file.close();
+    showMessage(QStringLiteral("Case report written to %1").arg(QDir::toNativeSeparators(path)),
+                false);
 }
 
 }  // namespace beam::app

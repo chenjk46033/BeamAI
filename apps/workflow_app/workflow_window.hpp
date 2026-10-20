@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "gui/case_report_form.hpp"
 #include "gui/patient_registry.hpp"
 #include "gui/treatment_log.hpp"
 #include "gui/treatment_target_store.hpp"
@@ -238,7 +239,16 @@ private:
     // was already on file.
     void buildPatientChooser();
     void refreshPatientChooser();
+    // The registry id on one chooser row. Rows are filtered and sorted, so
+    // their position no longer says which patient they are.
+    int patientIdAtRow(int row) const;
     // Builds the Case page demographics fields; fills them from a patient.
+    // The Report stage: the case report for one visit, and the file that
+    // carries it off the device.
+    void buildReportBody();
+    void refreshReport();
+    void exportCaseReport();
+    beam::gui::CaseReportForm reportFormForVisit(int visit) const;
     void buildCaseDemographics();
     void showCaseDemographics(const beam::gui::Patient& patient);
     // What the Case page currently says about who is being treated.
@@ -255,7 +265,12 @@ private:
     int patientDeliveryCount(int patientId, int* plannedRows) const;
     // Opens the record of whoever the Case page names, writing out whoever was
     // open before. Adds them if this device has not treated them.
-    void selectPatient(const beam::gui::Patient& details);
+    // advancing: the caller is leaving the Case page, so the message says to
+    // load an MRI next. Otherwise it points at the list, which has just
+    // changed and is the reason to have stayed.
+    void selectPatient(const beam::gui::Patient& details, bool advancing);
+    // Both Case buttons agree about what is acceptable by asking this.
+    bool caseFieldsUsable();
     // Reads this patient's log and visit state in place of whoever was there,
     // and puts the treatment plan on their visits.
     void loadPatientData();
@@ -479,12 +494,21 @@ private:
     QGroupBox* patientChooserGroup_ = nullptr;
     QTableWidget* patientTable_ = nullptr;
     QLabel* patientChooserHint_ = nullptr;
+    QLineEdit* patientFilterEdit_ = nullptr;
+    QLabel* patientCountLabel_ = nullptr;
     // Demographics, on the Case page beside the Participant and Site IDs.
     // All three may be left blank: somebody can be enrolled and treated
     // before their details are to hand.
     QLineEdit* lastNameEdit_ = nullptr;
     QLineEdit* firstNameEdit_ = nullptr;
     QLineEdit* dateOfBirthEdit_ = nullptr;
+    QPushButton* createPatientButton_ = nullptr;
+    QWidget* reportBody_ = nullptr;
+    QComboBox* reportVisitCombo_ = nullptr;
+    QLineEdit* reportOperatorEdit_ = nullptr;
+    QLabel* reportIdentityLabel_ = nullptr;
+    QTableWidget* reportTable_ = nullptr;
+    QPushButton* exportReportButton_ = nullptr;
     // Whose record is open. Zero until the Case page names somebody -- and on
     // a device that has never named anybody, that is where a pre-patient
     // install's single record still is.

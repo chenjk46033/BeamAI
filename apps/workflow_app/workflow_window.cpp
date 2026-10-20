@@ -1191,12 +1191,15 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // split across the two workflow stages it spans. See treatment_plan_body.cpp.
     buildTreatmentPlanBody(acceptButtonStyle);
     buildTreatmentExecutionBody(acceptButtonStyle);
+    // After the patient chooser: it borrows that table's styling.
+    buildReportBody();
     // The plan takes the lion's share: it holds the target list, the grid and
     // the schedule, all of which can use the height. The execution block below
     // is a status readout and a progress bar, and an even split left most of
     // its half empty while the schedule showed three rows.
     ui_->placeholderLayout->addWidget(treatmentPlanBody_, 4);
     ui_->placeholderLayout->addWidget(treatmentExecutionBody_, 1);
+    ui_->placeholderLayout->addWidget(reportBody_, 1);
 
     safetyReviewTitleLabel_ = new QLabel(QStringLiteral("Safety Review"), ui_->placeholderPage);
     safetyReviewTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
@@ -3934,6 +3937,7 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     const bool treatmentExecutionPage = stage == beam::gui::WorkflowStage::Treatment ||
                                         stage == beam::gui::WorkflowStage::TreatmentPlan;
     const bool safetyReviewPage = stage == beam::gui::WorkflowStage::SafetyReview;
+    const bool reportStage = stage == beam::gui::WorkflowStage::Report;
     // Every widget below lives on placeholderPage, and setVisible(true)
     // activates its parent's layout synchronously. Showing one stage's set
     // before the previous stage's is withdrawn therefore gets a layout pass
@@ -3948,10 +3952,18 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     // showing a stage is one call rather than a per-widget membership test.
     if (treatmentPlanBody_) treatmentPlanBody_->setVisible(treatmentPlanPage);
     if (treatmentExecutionBody_) treatmentExecutionBody_->setVisible(treatmentExecutionPage);
+    // The Report stage shares placeholderPage with Coupling and Treatment, so
+    // it is shown and hidden the same way they are.
+    if (reportBody_ != nullptr) {
+        const bool reportPage = stage == beam::gui::WorkflowStage::Report;
+        reportBody_->setVisible(reportPage);
+        if (reportPage) refreshReport();
+    }
     if (placeholderTailSpacer_) {
         placeholderTailSpacer_->changeSize(
             0, 0, QSizePolicy::Minimum,
-            (treatmentPlanPage || treatmentExecutionPage) ? QSizePolicy::Fixed : QSizePolicy::Expanding);
+            (treatmentPlanPage || treatmentExecutionPage || reportStage) ? QSizePolicy::Fixed
+                                                                        : QSizePolicy::Expanding);
         ui_->placeholderLayout->invalidate();
     }
     for (QWidget* widget : {static_cast<QWidget*>(couplingTitleLabel_),
@@ -4080,26 +4092,10 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
 }
 
 void WorkflowWindow::completeCurrentStage() {
-    if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup) {
-        if (ui_->participantEdit->text().trimmed().isEmpty() ||
-            ui_->siteEdit->text().trimmed().isEmpty()) {
-            showMessage(QStringLiteral("Participant ID and Site ID are required."), true);
-            return;
-        }
-        // A date of birth that will not parse is a typo. Saying so beats
-        // accepting the case and quietly recording no date at all.
-        std::string born;
-        if (dateOfBirthEdit_ != nullptr &&
-            !readDateOfBirth(dateOfBirthEdit_->text(), &born)) {
-            showMessage(QStringLiteral("\"%1\" is not a date. Use YYYY-MM-DD, or leave the "
-                                       "date of birth blank.")
-                            .arg(dateOfBirthEdit_->text().trimmed()),
-                        true);
-            dateOfBirthEdit_->setFocus(Qt::OtherFocusReason);
-            dateOfBirthEdit_->selectAll();
-            return;
-        }
-    }
+    // Accept also opens the record when Create patient was not pressed, so
+    // the one-press path still works for an operator who does not want to
+    // stop and check the list first.
+    if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup && !caseFieldsUsable()) return;
     std::string reason;
     if (!workflow_.complete(selectedStage_, &reason)) {
         showMessage(QString::fromStdString(reason), true);
@@ -4119,9 +4115,16 @@ void WorkflowWindow::completeCurrentStage() {
     // the Treatment stage, whose list row is hidden, so the highlight stayed
     // on Case setup while the Treatment page's Finish Treatment button and
     // "No sonication running." line appeared under it.
-    if (caseAccepted) selectPatient(caseDemographics());
+    // Accepting a case opens a record, rebuilds the Target List and the plan,
+    // and lands on another page. Each of those repaints, and the operator saw
+    // the lot as a flicker. Held off until the window is in its finished
+    // state, so it is one repaint rather than a sequence of half-built ones.
+    const bool wasUpdating = updatesEnabled();
+    if (caseAccepted) setUpdatesEnabled(false);
+    if (caseAccepted) selectPatient(caseDemographics(), /*advancing=*/true);
     goToNextStage();
     refresh();
+    if (caseAccepted) setUpdatesEnabled(wasUpdating);
 }
 
 

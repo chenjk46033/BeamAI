@@ -68,11 +68,13 @@ public:
     // supplies the identifier and whatever demographics are known; its id and
     // createdAt are ignored.
     //
-    // An external id already on file returns THAT patient rather than a second
-    // record -- two rows for one person splits their history in half, and
-    // nothing downstream would notice. Fields given non-empty update the
-    // existing row, so details can be filled in on a later visit; fields left
-    // empty never erase what is already recorded.
+    // An external id already on file returns THAT patient, unchanged, rather
+    // than a second record -- two rows for one person splits their history in
+    // half, and nothing downstream would notice.
+    //
+    // Unchanged, deliberately: this is called every time a case is accepted,
+    // from a form that may still hold the last person typed into it. Editing
+    // who somebody is goes through update(), which the operator asks for.
     Patient add(const Patient& details);
     Patient add(const std::string& externalId, const std::string& site);
 
