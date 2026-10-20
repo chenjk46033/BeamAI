@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <QHash>
 #include <QPointF>
+#include <QMarginsF>
 #include <QPointer>
 #include <QSet>
 #include <QSize>
@@ -248,6 +249,15 @@ private:
     void buildReportBody();
     void refreshReport();
     void exportCaseReport();
+    void exportCaseReportPdf();
+    QString caseReportHtml(int visit) const;
+    // What an exported report is called: BeamV0's computeCrfAutoSaveFilename,
+    // sanitised for the filesystem. One place, so the format is one edit.
+    QString caseReportFileStem(const beam::gui::Patient& patient,
+                               const beam::gui::CaseReportForm& crf, int visit) const;
+    // Where this patient's reports are kept, and what is already in there.
+    QString patientReportsDirectory() const;
+    void refreshPastReports();
     beam::gui::CaseReportForm reportFormForVisit(int visit) const;
     void buildCaseDemographics();
     void showCaseDemographics(const beam::gui::Patient& patient);
@@ -509,6 +519,8 @@ private:
     QLabel* reportIdentityLabel_ = nullptr;
     QTableWidget* reportTable_ = nullptr;
     QPushButton* exportReportButton_ = nullptr;
+    QPushButton* exportReportPdfButton_ = nullptr;
+    QListWidget* pastReportsList_ = nullptr;
     // Whose record is open. Zero until the Case page names somebody -- and on
     // a device that has never named anybody, that is where a pre-patient
     // install's single record still is.

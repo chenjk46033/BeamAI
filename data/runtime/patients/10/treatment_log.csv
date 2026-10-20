@@ -10,3 +10,8 @@
 # Blank CRF columns are fields BeamAI does not collect yet. They are written
 # so the column set matches rather than silently differing.
 Number,Name,Duration,Amplitude,Parameters,ResponsePain,ResponseMood,ResponseTotal,Notes,X,Y,Z,BD,BI,PD,PI,VisitNumber,SubjectID,SubjectName,SiteID,SessionDate,BEAMSerialNumber,Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,Protocol,FromPlan,StatusCode
+1,SCC1,5,0.5,"X:19.3099,Y:56.0679,Z:-1.37124,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,19.3099,56.0679,-1.37124,0.03,0.7,0.005,0.01,1,p104,"Doe, James",site_100,2026-10-20,,,,,SCC1,,0.302296,0.506427,2026-10-20T15:40:27.292,2026-10-20T15:40:32.326,0,Default,0,200
+2,SCC3,5,0.5,"X:19.3099,Y:56.0679,Z:-1.37124,BD:0.09,BI:1.4,PD:0.001,PI:0.005",,,0,,19.3099,56.0679,-1.37124,0.09,1.4,0.001,0.005,1,p104,"Doe, James",site_100,2026-10-20,,,,,SCC3,,,,2026-10-20T15:40:33.639,2026-10-20T15:40:38.689,1,Default,0,200
+3,aMCC1,3,0.5,"X:19.3099,Y:56.0679,Z:-1.37124,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,19.3099,56.0679,-1.37124,0.03,0.7,0.005,0.01,1,p104,"Doe, James",site_100,2026-10-20,,,,,aMCC1,,,,2026-10-20T15:40:49.633,2026-10-20T15:40:52.650,1,Default,0,200
+4,aMCC3,5,0.5,"X:19.3099,Y:56.0679,Z:-1.37124,BD:0.09,BI:1.4,PD:0.005,PI:0.01",,,0,,19.3099,56.0679,-1.37124,0.09,1.4,0.005,0.01,1,p104,"Doe, James",site_100,2026-10-20,,,,,aMCC3,,0.302296,0.506427,2026-10-20T15:41:13.631,2026-10-20T15:41:18.714,0,Default,0,200
+1,SCC1,15,0.5,"X:-18.0281,Y:57.3976,Z:-5.30318,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,-18.0281,57.3976,-5.30318,0.03,0.7,0.005,0.01,2,p104,"Doe, James",site_100,2026-10-20,,,,,SCC1,,,,2026-10-20T16:00:02.353,2026-10-20T16:00:17.368,1,Default,0,200

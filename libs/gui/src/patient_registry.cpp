@@ -211,15 +211,8 @@ Patient PatientRegistry::add(const Patient& details) {
 
     for (const Patient& already : patients_) {
         if (already.externalId != details.externalId) continue;
-        // Returning the existing record UNCHANGED is what makes "open the
-        // patient I am about to treat" safe to call on every visit.
-        //
-        // It once took whatever was filled in, so details could be added on a
-        // later visit. That let a half-finished form rewrite somebody else:
-        // type a new patient's name, correct the Participant ID to one
-        // already on file, accept, and the person who owned that ID silently
-        // became the name left in the boxes. Changing who somebody is must be
-        // something the operator asks for, which is what update() is.
+        // Unchanged: a half-finished Case form must not rewrite whoever owns
+        // the identifier typed into it. Editing goes through update().
         return already;
     }
 

@@ -72,26 +72,15 @@ struct TreatmentLogRow {
 
 class TreatmentLog {
 public:
-    // CSV with a header row; '#' starts a comment. A missing file is not an
-    // error -- a patient with no deliveries yet simply has no log.
+    // A missing file is not an error: a patient with no deliveries has no log.
     void load(const std::string& path);
     void save(const std::string& path) const;
 
     const std::vector<TreatmentLogRow>& rows() const { return rows_; }
 
-    // Whose treatment this is: the Participant ID and Site ID from the Case
-    // page. A property of the log rather than of each row -- one log holds one
-    // patient's deliveries, so two rows of the same file cannot name different
-    // people -- but written into every row, because setLogInfoToCSV.m's column
-    // shape has a SubjectID and a SiteID per row and that is what a CRF reads.
-    //
-    // Until BeamAI knew who the patient was, both columns were written empty.
-    // A log that names nobody is identified only by the directory it sits in,
-    // which does not survive the file being copied out of it.
-    // name is written to a SubjectName column of its own, beside the two
-    // setLogInfoToCSV.m already has. It is identifying information in the file
-    // most likely to leave the device, so it is here because an operator asked
-    // for it, not because the column shape wanted it.
+    // Whose treatment this is. A property of the log, not of each row, but
+    // written into every row because setLogInfoToCSV.m's column shape has
+    // SubjectID/SiteID per row. name goes to a SubjectName column of its own.
     void setPatient(std::string subjectId, std::string siteId, std::string name = {});
     const std::string& subjectId() const { return subjectId_; }
     const std::string& siteId() const { return siteId_; }

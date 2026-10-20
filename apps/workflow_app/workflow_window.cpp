@@ -3999,8 +3999,12 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         widget->setVisible(isSafetyWidget ? safetyReviewPage
                                           : (isCorrectionWidget ? correctionPage : couplingPage));
     }
-    if (ui_->placeholderText) ui_->placeholderText->setVisible(!couplingPage && !correctionPage && !treatmentPlanPage &&
-                                                               !treatmentExecutionPage && !safetyReviewPage);
+    // Report has a page of its own now, so it stops being "awaiting its
+    // BeamV0 behavioral audit and native Qt implementation".
+    if (ui_->placeholderText)
+        ui_->placeholderText->setVisible(!couplingPage && !correctionPage && !treatmentPlanPage &&
+                                         !treatmentExecutionPage && !safetyReviewPage &&
+                                         !reportStage);
     if (ui_->placeholderLayout) {
         ui_->placeholderLayout->setEnabled(true);
         ui_->placeholderLayout->activate();

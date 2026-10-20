@@ -159,7 +159,7 @@ void TreatmentLibraryDialog::setTargetScope(const QString& whose,
         return;
     }
 
-    setWindowTitle(QStringLiteral("Target List — %1").arg(whose));
+    setWindowTitle(QStringLiteral("Target List - %1").arg(whose));
     scopeBanner_->setText(
         QStringLiteral("Editing the Target List for %1. These parameters are theirs alone; "
                        "no other patient is affected.")

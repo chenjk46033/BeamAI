@@ -52,7 +52,12 @@
 #include <QScreen>
 #include <QWheelEvent>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QFileDialog>
+#include <QPageSize>
+#include <QPdfWriter>
+#include <QTextDocument>
+#include <QUrl>
 #include <QDialogButtonBox>
 #include <QInputDialog>
 #include <QMenu>
@@ -1220,11 +1225,8 @@ void WorkflowWindow::buildCaseDemographics() {
     // gone the moment anything is typed, which is exactly when it is needed.
     dateOfBirthEdit_ =
         add(QStringLiteral("Date of birth (YYYY-MM-DD)"), QStringLiteral("Optional"));
-    // Typed plainly. An input mask here returned "--" for an empty field --
-    // neither a date nor blank -- which the validation below then rejected,
-    // throwing away everything else the operator had typed. And a date
-    // picker has to start somewhere, and starting on today reads as an
-    // entered answer when nothing has been entered.
+    // Typed plainly. An input mask returned "--" for an empty field, which
+    // the validation rejected, discarding everything else typed.
 
     // The header carries the name once there is one -- it is what the
     // operator recognises, where the Participant ID is what a CRF carries.
@@ -1283,6 +1285,10 @@ bool WorkflowWindow::caseFieldsUsable() {
         dateOfBirthEdit_->selectAll();
         return false;
     }
+    // Show what was stored rather than what was typed: "1999-1-1" becomes
+    // "1999-01-01", so the operator can see the date was understood.
+    if (dateOfBirthEdit_ != nullptr && !born.empty())
+        dateOfBirthEdit_->setText(QString::fromStdString(born));
     return true;
 }
 
@@ -1304,9 +1310,16 @@ bool WorkflowWindow::readDateOfBirth(const QString& text, std::string* out) {
         out->clear();
         return true;
     }
-    if (!QDate::fromString(trimmed, QStringLiteral("yyyy-MM-dd")).isValid()) return false;
-    *out = trimmed.toStdString();
-    return true;
+    // Leading zeros are not information, and slashes are accepted too. What
+    // is STORED is always yyyy-MM-dd, so the column sorts.
+    for (const QString& format : {QStringLiteral("yyyy-M-d"), QStringLiteral("yyyy/M/d"),
+                                  QStringLiteral("yyyyMMdd")}) {
+        const QDate parsed = QDate::fromString(trimmed, format);
+        if (!parsed.isValid()) continue;
+        *out = parsed.toString(QStringLiteral("yyyy-MM-dd")).toStdString();
+        return true;
+    }
+    return false;
 }
 
 beam::gui::Patient WorkflowWindow::caseDemographics() const {
@@ -1321,10 +1334,8 @@ beam::gui::Patient WorkflowWindow::caseDemographics() const {
 }
 
 // Who this device has treated, on the page where the operator says which of
-// them is in front of them. Before this, the Participant ID had to be typed
-// from memory and exactly: a near miss did not fail, it quietly opened a new
-// record, which is how one person's history ends up in two files that nothing
-// afterwards can tell apart.
+// them is in front of them. Typing the exact Participant ID was the only way
+// in, and a near miss quietly opened a second record for the same person.
 void WorkflowWindow::buildPatientChooser() {
     patientChooserGroup_ = new QGroupBox(QStringLiteral("Patients on this device"),
                                          ui_->casePage);
@@ -1683,6 +1694,8 @@ void WorkflowWindow::editPatient(int patientId) {
             born->selectAll();
             continue;
         }
+        // Normalised, so the dialog shows what the record will hold.
+        born->setText(QString::fromStdString(edited.dateOfBirth));
         if (!patients_.update(patientId, edited)) {
             QMessageBox::warning(
                 &dialog, QStringLiteral("Participant ID"),
@@ -1851,10 +1864,8 @@ void WorkflowWindow::selectPatient(const beam::gui::Patient& details, bool advan
     // last patient's X/Y/Z in the row that was just built.
     if (switching) {
         // Everything from the MRI down belongs to the person it was measured
-        // on, so it goes: the stages are invalidated, which is what stops the
-        // new patient being sonicated on the last one's registration, AND the
-        // data behind them is dropped, which is what stops the last one's
-        // head being drawn on this patient's pages.
+        // on. The stages are invalidated AND the data behind them dropped, or
+        // the last patient's head stays on screen.
         workflow_.change(beam::gui::WorkflowStage::Imaging,
                          "A different patient is being treated; this patient's imaging, "
                          "registration and coupling have not been done.");
@@ -1864,13 +1875,8 @@ void WorkflowWindow::selectPatient(const beam::gui::Patient& details, bool advan
     loadPatientData();
     if (switching) refresh();
 
-    // Whether this device has seen them before is the thing the operator
-    // wants confirmed: a new patient and a mistyped identifier look the same
-    // on screen otherwise.
-    // Accepting the case moves straight on to Imaging, so the message says
-    // both what just happened and what the page that arrived is for. Without
-    // that, a record being created and the operator being dropped on a
-    // different page read as one unexplained jump.
+    // Says what just happened and what the page it lands on is for; otherwise
+    // the jump to Imaging reads as unexplained.
     const QString who = QStringLiteral("%1 (%2)").arg(
         QString::fromStdString(beam::gui::patientDisplayName(patient)),
         QString::fromStdString(patient.externalId));
@@ -1888,11 +1894,9 @@ void WorkflowWindow::selectPatient(const beam::gui::Patient& details, bool advan
     showMessage(what + next, false);
 }
 
-// A pre-patient install kept one subject's record directly in the runtime
-// directory. The first patient named on it is that subject, so the record
-// moves under them rather than waiting there for the next person. Nothing is
-// overwritten, and a file that cannot be moved is left where it is and said
-// so -- losing a treatment record to a tidy-up is not a trade worth making.
+// A pre-patient install kept one subject's record in the runtime directory;
+// the first patient named on it is that subject. A file that cannot be moved
+// is left where it is and said so rather than lost to a tidy-up.
 void WorkflowWindow::adoptLegacyPatientData(int patientId) {
     if (patientId <= 0) return;
     const QDir runtime(treatmentDataDirectory());
@@ -1915,11 +1919,9 @@ void WorkflowWindow::adoptLegacyPatientData(int patientId) {
 }
 
 void WorkflowWindow::loadPatientData() {
-    // The Treatment page keeps its own copy of the last message, because
-    // showMessage only mirrors onto it while that page is the one showing --
-    // and a patient is changed from the Case page. Left alone, the new
-    // patient arrived at a page still saying the LAST one's visit was
-    // complete and offering to finish their treatment.
+    // The Treatment page keeps its own copy of the last message, and
+    // showMessage only mirrors onto it while that page is showing -- so a
+    // switch made from the Case page leaves the last patient's text there.
     if (sonicationCountdownLabel_ != nullptr) {
         sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
         sonicationCountdownLabel_->setStyleSheet(
@@ -1960,31 +1962,29 @@ void WorkflowWindow::loadPatientData() {
 
     // Their Target List, which carries the parameters prescribed for them.
     // Read before the plan: loadTreatmentProtocol fills the grid from it.
-    const QString own = patientTargetsPath();
-    const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
-                                    ? own
-                                    : locateDataFile(QStringLiteral("treatment_targets.csv"));
-    if (!targetsPath.isEmpty()) {
-        try {
-            beam::gui::TreatmentTargetStore loaded = targetStore_;
-            loaded.loadTargets(targetsPath.toStdString());
-            targetStore_ = std::move(loaded);
-        } catch (const std::exception& error) {
-            showMessage(QStringLiteral("This patient's Target List could not be read (%1); the "
-                                       "one on screen is the previous patient's.")
-                            .arg(error.what()),
-                        true);
+    {
+        const QString own = patientTargetsPath();
+        const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
+                                        ? own
+                                        : locateDataFile(QStringLiteral("treatment_targets.csv"));
+        if (!targetsPath.isEmpty()) {
+            try {
+                // loadTargets replaces the targets and leaves the protocols,
+                // which are the site's library and belong to nobody.
+                beam::gui::TreatmentTargetStore loaded = targetStore_;
+                loaded.loadTargets(targetsPath.toStdString());
+                targetStore_ = std::move(loaded);
+            } catch (const std::exception& error) {
+                showMessage(QStringLiteral("This patient's Target List could not be read (%1); "
+                                           "the one on screen is the previous patient's.")
+                                .arg(error.what()),
+                            true);
+            }
         }
     }
-    // The list widget and the per-target grids are built from the store, so
-    // they are rebuilt with it. Nothing survives into the next patient.
-    //
-    // Disown the grid BEFORE emptying the list. Emptying it changes the
-    // selection, which runs switchToSelectedTarget, which saves the grid
-    // against whichever target it still thinks is showing -- the last
-    // patient's -- and that save writes the store back out. The new patient's
-    // Target List was being read correctly and then overwritten, in their own
-    // file, by the parameters just read off the previous patient's screen.
+    // Disown the grid BEFORE emptying the list: emptying it changes the
+    // selection, which saves the grid against the target it still thinks is
+    // showing and writes the store back out.
     targetSonications_.clear();
     currentTargetId_ = -1;
     gridTargetId_ = -1;
@@ -2115,7 +2115,15 @@ void WorkflowWindow::restoreShippedParameters() {
                 false);
 }
 
-// The operator's device-wide copy if they have one, else the shipped seed.
+// Target parameters are prescribed per person, so the Target List lives with
+// the patient. Protocols stay shared. Empty when no patient is open, and the
+// device-wide copy is then the seed.
+QString WorkflowWindow::patientTargetsPath() const {
+    const QString patientDirectory = patientDataDirectory();
+    if (patientDirectory.isEmpty()) return QString();
+    return QDir(patientDirectory).filePath(QStringLiteral("treatment_targets.csv"));
+}
+
 QString WorkflowWindow::locateDataFile(const QString& fileName) const {
     const QString user = QDir(treatmentDataDirectory()).filePath(fileName);
     if (QFileInfo::exists(user)) return user;
@@ -2130,32 +2138,12 @@ QString WorkflowWindow::locateDataFile(const QString& fileName) const {
     return QString();
 }
 
-// Where this patient's Target List is read from.
-//
-// A target's parameters -- amplitude, the burst and pulse schedule -- are
-// prescribed for a person, not for the device. Keeping one copy meant tuning
-// SCC1 for the patient in the room also tuned it for everybody treated after
-// them, silently, with nothing on screen to say it had happened. BeamV0 had no
-// such leak only because a new subject there meant a new copy of the whole
-// data directory.
-//
-// A patient with no list of their own starts from the device-wide copy, which
-// is what the operator has already set up; that copy is never written again
-// once a patient is open, so it stays the starting point rather than drifting
-// into whoever was treated last.
-//
-// Protocols are not here. A protocol is a schedule of which targets to visit
-// in what order -- a library the site writes once -- so it stays shared.
-QString WorkflowWindow::patientTargetsPath() const {
-    const QString patientDirectory = patientDataDirectory();
-    if (patientDirectory.isEmpty()) return QString();
-    return QDir(patientDirectory).filePath(QStringLiteral("treatment_targets.csv"));
-}
-
 void WorkflowWindow::loadTreatmentTargetStore() {
     const auto locate = [this](const QString& fileName) { return locateDataFile(fileName); };
 
     loadShippedTargetStore();
+    // This patient's Target List if they have one, else the device's, which
+    // is what a new patient is seeded from. See patientTargetsPath.
     const QString own = patientTargetsPath();
     const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
                                     ? own
@@ -2249,14 +2237,13 @@ void WorkflowWindow::saveTreatmentTargetStore(bool announce) {
     const QString directory = treatmentDataDirectory();
     try {
         // The Target List goes under the patient once there is one: its
-        // parameters were prescribed for them. Before any patient is named it
-        // goes where a pre-patient install put it, which is also where the
-        // next new patient will be seeded from.
+        // parameters are prescribed for them. Before any patient is named it
+        // goes where a pre-patient install put it, which is also what the
+        // next new patient is seeded from.
         const QString own = patientTargetsPath();
         targetStore_.saveTargets(
-            (own.isEmpty()
-                 ? QDir(directory).filePath(QStringLiteral("treatment_targets.csv"))
-                 : own)
+            (own.isEmpty() ? QDir(directory).filePath(QStringLiteral("treatment_targets.csv"))
+                           : own)
                 .toStdString());
         // Protocols are the site's library and stay shared.
         targetStore_.saveProtocols(
@@ -4730,9 +4717,17 @@ void WorkflowWindow::finishTreatmentStage() {
         showMessage(QString::fromStdString(reason), true);
         return;
     }
-    showMessage(QStringLiteral("Sonication complete. Continuing to Report."), false);
+    // Said in a form that is still true after the jump it announces. "
+    // Continuing to Report" read as something pending to an operator who was
+    // already standing on the Report page looking at it.
+    showMessage(QStringLiteral("Visit %1 finished. Its case report is below — export it as a "
+                               "PDF or CSV to keep.")
+                    .arg(currentVisitNumber()),
+                false);
     refresh();
-    ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+    // Report's own row, by a row the list shows. nextStage() can name a
+    // hidden one, which moves the page without moving the highlight.
+    goToNextStage();
 }
 
 void WorkflowWindow::openTreatmentLibrary(TreatmentLibraryDialog::Page page) {
@@ -4817,14 +4812,9 @@ void WorkflowWindow::writeTargetPointsToStore() {
 }
 
 
-// The Report stage. BeamV0 has setCRF*.m and setSessionCaseReportParameters.m
-// -- ported in libs/gui/case_report_form -- and nothing that shows or exports
-// what they build. This is the page that does: who was treated, what they were
-// given this visit, and a file that carries both off the device.
-//
-// It is the reason the per-patient log exists. Until a patient had an
-// identity, the SubjectID and SiteID columns were written empty and a case
-// report could not have been produced from them.
+// The Report stage: who was treated, what they were given this visit, and a
+// file that carries both off the device. BeamV0 ports the CRF metadata
+// (libs/gui/case_report_form) but has nothing that shows or exports it.
 void WorkflowWindow::buildReportBody() {
     reportBody_ = new QWidget(ui_->placeholderPage);
     auto* outer = new QVBoxLayout(reportBody_);
@@ -4851,16 +4841,25 @@ void WorkflowWindow::buildReportBody() {
     chooser->addWidget(operatorLabel);
     reportOperatorEdit_ = new QLineEdit(identityGroup);
     reportOperatorEdit_->setPlaceholderText(QStringLiteral("Who ran this visit"));
+    // Wide enough to type an initial-and-number into, not wide enough to
+    // push the export buttons off the edge of a narrower screen.
+    reportOperatorEdit_->setMaximumWidth(220);
     styleInputField(reportOperatorEdit_);
     connect(reportOperatorEdit_, &QLineEdit::textChanged, this, [this] { refreshReport(); });
-    chooser->addWidget(reportOperatorEdit_, 1);
-    exportReportButton_ = new QPushButton(QStringLiteral("Export case report..."), identityGroup);
+    chooser->addWidget(reportOperatorEdit_);
+    chooser->addStretch(1);
+    exportReportButton_ = new QPushButton(QStringLiteral("Export CSV..."), identityGroup);
     exportReportButton_->setStyleSheet(
         QStringLiteral("QPushButton { padding: 7px 14px; background: #176b87; color: white; "
                        "border: 0; border-radius: 5px; font-weight: 600; } "
                        "QPushButton:disabled { background: #3b474e; color: #7e8c93; }"));
     connect(exportReportButton_, &QPushButton::clicked, this, [this] { exportCaseReport(); });
     chooser->addWidget(exportReportButton_);
+    exportReportPdfButton_ = new QPushButton(QStringLiteral("Export PDF..."), identityGroup);
+    exportReportPdfButton_->setStyleSheet(exportReportButton_->styleSheet());
+    connect(exportReportPdfButton_, &QPushButton::clicked, this,
+            [this] { exportCaseReportPdf(); });
+    chooser->addWidget(exportReportPdfButton_);
     identityLayout->addLayout(chooser);
 
     reportIdentityLabel_ = new QLabel(identityGroup);
@@ -4895,6 +4894,35 @@ void WorkflowWindow::buildReportBody() {
     reportTable_->horizontalHeader()->setStretchLastSection(true);
     deliveredLayout->addWidget(reportTable_);
     outer->addWidget(deliveredGroup, 1);
+
+    auto* pastGroup = new QGroupBox(QStringLiteral("Reports already produced"), reportBody_);
+    auto* pastLayout = new QVBoxLayout(pastGroup);
+    pastLayout->setContentsMargins(10, 6, 10, 8);
+    pastLayout->setSpacing(6);
+    auto* pastHint = new QLabel(
+        QStringLiteral("Kept with this patient's record. Double-click to open one."), pastGroup);
+    pastHint->setStyleSheet(QStringLiteral("color: #7e8c93;"));
+    pastLayout->addWidget(pastHint);
+    pastReportsList_ = new QListWidget(pastGroup);
+    pastReportsList_->setMaximumHeight(120);
+    pastReportsList_->setStyleSheet(QStringLiteral(
+        "QListWidget { background: #ffffff; color: #17313f; border: 1px solid #39758e; } "
+        "QListWidget::item:selected { background: #58c7e5; color: #083d4d; }"));
+    // Handed to whatever the machine opens PDFs with. BeamAI has no viewer of
+    // its own and building one to look at a file it just wrote would be odd.
+    connect(pastReportsList_, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem* item) {
+                if (item == nullptr) return;
+                const QString path = item->data(Qt::UserRole).toString();
+                if (path.isEmpty()) return;
+                if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
+                    showMessage(QStringLiteral("%1 could not be opened.")
+                                    .arg(QDir::toNativeSeparators(path)),
+                                true);
+                }
+            });
+    pastLayout->addWidget(pastReportsList_);
+    outer->addWidget(pastGroup);
 
     reportBody_->setVisible(false);
 }
@@ -4968,6 +4996,8 @@ void WorkflowWindow::refreshReport() {
             QStringLiteral("No patient is open. Accept a case to produce a report."));
         reportTable_->setRowCount(0);
         exportReportButton_->setEnabled(false);
+        exportReportPdfButton_->setEnabled(false);
+        refreshPastReports();
         return;
     }
 
@@ -5007,7 +5037,7 @@ void WorkflowWindow::refreshReport() {
             .arg(shams)
             .arg(stopped)
             .arg(seconds, 0, 'f', 1)
-            .arg(QString::fromStdString(beam::gui::computeCrfAutoSaveFilename(crf))));
+            .arg(caseReportFileStem(open, crf, visit)));
 
     reportTable_->setRowCount(static_cast<int>(rows.size()));
     for (std::size_t index = 0; index < rows.size(); ++index) {
@@ -5039,6 +5069,8 @@ void WorkflowWindow::refreshReport() {
     }
     // A visit that delivered nothing has no case to report.
     exportReportButton_->setEnabled(delivered > 0);
+    exportReportPdfButton_->setEnabled(delivered > 0);
+    refreshPastReports();
 }
 
 void WorkflowWindow::exportCaseReport() {
@@ -5049,10 +5081,10 @@ void WorkflowWindow::exportCaseReport() {
     if (visit <= 0 || !patients_.find(currentPatientId_, &open)) return;
 
     const beam::gui::CaseReportForm crf = reportFormForVisit(visit);
+    const QString reports = patientReportsDirectory();
     const QString suggested =
-        QDir(patientDataDirectory())
-            .filePath(QString::fromStdString(beam::gui::computeCrfAutoSaveFilename(crf)) +
-                      QStringLiteral(".csv"));
+        QDir(reports.isEmpty() ? patientDataDirectory() : reports)
+            .filePath(caseReportFileStem(open, crf, visit) + QStringLiteral(".csv"));
     const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export case report"),
                                                       suggested, QStringLiteral("CSV (*.csv)"));
     if (path.isEmpty()) return;
@@ -5115,8 +5147,359 @@ void WorkflowWindow::exportCaseReport() {
         out << ',' << quoted(QString::fromStdString(row.notes)) << '\n';
     }
     file.close();
+    refreshPastReports();
     showMessage(QStringLiteral("Case report written to %1").arg(QDir::toNativeSeparators(path)),
                 false);
+}
+
+// BeamV0's own computeCrfAutoSaveFilename, sanitised for the filesystem.
+// Hard to scan down a folder listing, but a filename is something a data
+// management plan can specify. One place, so the format is one edit.
+QString WorkflowWindow::caseReportFileStem(const beam::gui::Patient& patient,
+                                           const beam::gui::CaseReportForm& crf,
+                                           int visit) const {
+    Q_UNUSED(patient);
+    Q_UNUSED(visit);
+    QString stem = QString::fromStdString(beam::gui::computeCrfAutoSaveFilename(crf));
+    stem.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]+")), QStringLiteral("_"));
+    return stem.isEmpty() ? QStringLiteral("case-report") : stem;
+}
+
+// Where a patient's case reports are kept. Under the patient, like everything
+// else of theirs, so moving their directory moves their reports with it.
+QString WorkflowWindow::patientReportsDirectory() const {
+    const QString patientDirectory = patientDataDirectory();
+    if (patientDirectory.isEmpty()) return QString();
+    const QString reports = QDir(patientDirectory).filePath(QStringLiteral("reports"));
+    QDir().mkpath(reports);
+    return reports;
+}
+
+// A CSV is what a monitor loads; this is what gets printed and filed. Built
+// with the subset of HTML/CSS QTextDocument renders -- no nth-child, so the
+// zebra striping is written per row.
+QString WorkflowWindow::caseReportHtml(int visit) const {
+    beam::gui::Patient open;
+    if (!patients_.find(currentPatientId_, &open)) return QString();
+    const beam::gui::CaseReportForm crf = reportFormForVisit(visit);
+    const std::vector<beam::gui::TreatmentLogRow> rows =
+        treatmentLog_.rowsFor(currentProtocolName().toStdString(), visit);
+
+    int delivered = 0;
+    int shams = 0;
+    int stopped = 0;
+    double seconds = 0.0;
+    for (const beam::gui::TreatmentLogRow& row : rows) {
+        if (!beam::gui::TreatmentLog::delivered(row)) continue;
+        ++delivered;
+        if (row.sham) ++shams;
+        if (beam::gui::TreatmentLog::stopped(row)) ++stopped;
+        seconds += row.endTimeSeconds - row.startTimeSeconds;
+    }
+
+    // One ink, one accent, two greys. A case report is read, not admired, and
+    // anything with more colour than this stops surviving a photocopier.
+    const QString kInk = QStringLiteral("#1b2a33");
+    const QString kMuted = QStringLiteral("#62757e");
+    const QString kRule = QStringLiteral("#ccd8dd");
+    const QString kAccent = QStringLiteral("#176b87");
+    const QString kBand = QStringLiteral("#eef3f5");
+    const QString kZebra = QStringLiteral("#f6f9fa");
+    const QString kDash = QString::fromUtf8("\xe2\x80\x94");
+
+    const auto esc = [](const QString& text) { return text.toHtmlEscaped(); };
+    const auto orDash = [&](const QString& text) { return text.isEmpty() ? kDash : esc(text); };
+    const auto str = [](const std::string& text) { return QString::fromStdString(text); };
+    const auto timeOfDay = [&](const std::string& stamp) {
+        const QDateTime when = QDateTime::fromString(str(stamp), Qt::ISODateWithMs);
+        return when.isValid() ? when.toString(QStringLiteral("HH:mm:ss")) : kDash;
+    };
+    const QString sessionDate = QStringLiteral("%1-%2-%3")
+                                    .arg(crf.year, 4, 10, QLatin1Char('0'))
+                                    .arg(crf.month, 2, 10, QLatin1Char('0'))
+                                    .arg(crf.day, 2, 10, QLatin1Char('0'));
+
+    // A full-width band of solid colour, which is how a rule is drawn here:
+    // border on an empty block is not reliably rendered.
+    const auto rule = [&](const QString& colour, int points) {
+        return QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\">"
+                              "<tr><td style=\"background-color:%1; font-size:%2pt\">&nbsp;</td>"
+                              "</tr></table>")
+            .arg(colour)
+            .arg(points);
+    };
+    const auto sectionTitle = [&](const QString& text) {
+        return QStringLiteral("<p style=\"margin-top:16pt; margin-bottom:3pt; color:%1; "
+                              "font-size:8pt; font-weight:bold\">%2</p>")
+                   .arg(kAccent, esc(text)) +
+               rule(kRule, 1);
+    };
+    // Key on the left in grey, value on the right in ink.
+    const auto field = [&](const QString& name, const QString& value) {
+        return QStringLiteral("<tr>"
+                              "<td width=\"42%\" style=\"padding:3pt 6pt 3pt 0; color:%1\">%2</td>"
+                              "<td style=\"padding:3pt 0; color:%3\">%4</td>"
+                              "</tr>")
+            .arg(kMuted, esc(name), kInk, orDash(value));
+    };
+
+    QString html = QStringLiteral(
+                       "<html><body style=\"font-family:'Helvetica','Arial',sans-serif; "
+                       "font-size:9pt; color:%1\">")
+                       .arg(kInk);
+
+    // Masthead: what this is on the left, who it is about on the right.
+    html += QStringLiteral(
+                "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
+                "<td valign=\"bottom\" style=\"color:%1; font-size:17pt; font-weight:bold\">"
+                "CASE REPORT</td>"
+                "<td valign=\"bottom\" align=\"right\" style=\"font-size:9pt; color:%2\">"
+                "<b style=\"color:%3; font-size:11pt\">%4</b><br>%5 &nbsp;&middot;&nbsp; %6"
+                "</td></tr></table>")
+                .arg(kAccent, kMuted, kInk,
+                     esc(str(beam::gui::patientDisplayName(open))),
+                     esc(str(crf.subjectId)), esc(str(crf.siteId)));
+    html += rule(kAccent, 3);
+
+    // The two things a reader checks first, side by side.
+    html += QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
+                           "<td width=\"48%\" valign=\"top\">");
+    html += sectionTitle(QStringLiteral("PARTICIPANT"));
+    html += QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\">");
+    html += field(QStringLiteral("Participant ID"), str(crf.subjectId));
+    html += field(QStringLiteral("Name"), str(beam::gui::patientDisplayName(open)));
+    html += field(QStringLiteral("Date of birth"), str(open.dateOfBirth));
+    html += field(QStringLiteral("Site ID"), str(crf.siteId));
+    html += QStringLiteral("</table></td><td width=\"4%\"></td>"
+                           "<td width=\"48%\" valign=\"top\">");
+    html += sectionTitle(QStringLiteral("SESSION"));
+    html += QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\">");
+    html += field(QStringLiteral("Visit number"), QString::number(crf.visitNumber));
+    html += field(QStringLiteral("Date"), sessionDate);
+    html += field(QStringLiteral("Protocol"), currentProtocolName());
+    html += field(QStringLiteral("Operator"), str(crf.operatorId));
+    html += field(QStringLiteral("Hydrogel size"), str(crf.hydrogelSize));
+    html += QStringLiteral("</table></td></tr></table>");
+
+    // The four numbers somebody skims for, given room to be skimmed.
+    const auto figure = [&](const QString& value, const QString& label, bool last) {
+        return QStringLiteral("<td width=\"25%\" align=\"center\" "
+                              "style=\"background-color:%1; padding:7pt 4pt; %2\">"
+                              "<span style=\"font-size:15pt; font-weight:bold; color:%3\">%4"
+                              "</span><br>"
+                              "<span style=\"font-size:7.5pt; color:%5\">%6</span></td>")
+            .arg(kBand,
+                 last ? QString()
+                      : QStringLiteral("border-right:2px solid #ffffff"),
+                 kAccent, esc(value), kMuted, esc(label));
+    };
+    html += QStringLiteral("<p style=\"margin-top:14pt; margin-bottom:0\"></p>");
+    html += QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>");
+    html += figure(QString::number(delivered), QStringLiteral("sonications delivered"), false);
+    html += figure(QString::number(shams), QStringLiteral("of which sham"), false);
+    html += figure(QString::number(stopped), QStringLiteral("stopped early"), false);
+    html += figure(QStringLiteral("%1 s").arg(seconds, 0, 'f', 1),
+                   QStringLiteral("total output"), true);
+    html += QStringLiteral("</tr></table>");
+
+    html += sectionTitle(QStringLiteral("SONICATIONS"));
+    // Qt honours neither per-cell padding nor cellpadding here, so the gap
+    // between a right-aligned number and the left-aligned name beside it has
+    // to come from the column width itself -- otherwise "1" and "SCC1" meet
+    // and the row reads "1SCC1".
+    const auto headCell = [&](const QString& text, const QString& align,
+                              const QString& width = QString()) {
+        return QStringLiteral("<td align=\"%1\"%2 style=\"background-color:%3; color:%4; "
+                              "font-size:7.5pt; font-weight:bold; "
+                              "border-bottom:1px solid %5\">%6</td>")
+            .arg(align,
+                 width.isEmpty() ? QString() : QStringLiteral(" width=\"%1\"").arg(width),
+                 kBand, kMuted, kRule, esc(text));
+    };
+    // cellpadding, not per-cell padding: Qt's rich text honours the table
+    // attribute and ignores the CSS. Without it the right-aligned sequence
+    // number sits flush against the left-aligned target name -- "1SCC1".
+    html += QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"4\" "
+                           "style=\"font-size:8pt\"><tr>");
+    // The sequence number needs room on its right or it runs into the target
+    // name: one is right-aligned, the next left-aligned, and they meet.
+    html += headCell(QStringLiteral("#"), QStringLiteral("left"), QStringLiteral("5%"));
+    html += headCell(QStringLiteral("Target"), QStringLiteral("left"));
+    html += headCell(QStringLiteral("Started"), QStringLiteral("left"));
+    html += headCell(QStringLiteral("Ended"), QStringLiteral("left"));
+    html += headCell(QStringLiteral("Dur s"), QStringLiteral("right"));
+    html += headCell(QStringLiteral("Amp"), QStringLiteral("right"));
+    html += headCell(QStringLiteral("BD"), QStringLiteral("right"));
+    html += headCell(QStringLiteral("BI"), QStringLiteral("right"));
+    html += headCell(QStringLiteral("PD"), QStringLiteral("right"));
+    html += headCell(QStringLiteral("PI"), QStringLiteral("right"));
+    html += headCell(QStringLiteral("Sham"), QStringLiteral("center"));
+    html += headCell(QStringLiteral("Outcome"), QStringLiteral("left"));
+    html += headCell(QStringLiteral("Pain"), QStringLiteral("right"));
+    html += headCell(QStringLiteral("Mood"), QStringLiteral("right"));
+    html += QStringLiteral("</tr>");
+
+    int index = 0;
+    for (const beam::gui::TreatmentLogRow& row : rows) {
+        // Striped in the generated markup: Qt's CSS has no nth-child.
+        const QString background = (index++ % 2) == 1 ? kZebra : QStringLiteral("#ffffff");
+        const bool ran = beam::gui::TreatmentLog::delivered(row);
+        // A row that never fired is greyed, so the eye separates what was
+        // given from what was only planned without having to read a column.
+        const QString ink = ran ? kInk : kMuted;
+        const auto cell = [&](const QString& text, const QString& align,
+                             const QString& width = QString()) {
+            return QStringLiteral("<td align=\"%1\"%2 style=\"background-color:%3; color:%4; "
+                                  "border-bottom:1px solid %5\">%6</td>")
+                .arg(align,
+                     width.isEmpty() ? QString() : QStringLiteral(" width=\"%1\"").arg(width),
+                     background, ink, kRule,
+                     text.isEmpty() ? QString() : esc(text));
+        };
+        const QString outcome = !ran ? QStringLiteral("not delivered")
+                                : beam::gui::TreatmentLog::stopped(row)
+                                    ? QStringLiteral("stopped early")
+                                    : QStringLiteral("completed");
+        html += QStringLiteral("<tr>");
+        html += cell(QString::number(row.sequence), QStringLiteral("left"), QStringLiteral("5%"));
+        html += cell(str(row.target), QStringLiteral("left"));
+        html += cell(timeOfDay(row.startedAt), QStringLiteral("left"));
+        html += cell(timeOfDay(row.endedAt), QStringLiteral("left"));
+        html += cell(QString::number(row.endTimeSeconds - row.startTimeSeconds, 'f', 1),
+                     QStringLiteral("right"));
+        html += cell(QString::number(row.amplitude), QStringLiteral("right"));
+        html += cell(QString::number(row.burstDurationSeconds), QStringLiteral("right"));
+        html += cell(QString::number(row.burstIntervalSeconds), QStringLiteral("right"));
+        html += cell(QString::number(row.pulseDurationSeconds), QStringLiteral("right"));
+        html += cell(QString::number(row.pulseIntervalSeconds), QStringLiteral("right"));
+        html += cell(row.sham ? QStringLiteral("yes") : QString(), QStringLiteral("center"));
+        html += cell(outcome, QStringLiteral("left"));
+        html += cell(row.responsePain ? QString::number(*row.responsePain) : QString(),
+                     QStringLiteral("right"));
+        html += cell(row.responseMood ? QString::number(*row.responseMood) : QString(),
+                     QStringLiteral("right"));
+        html += QStringLiteral("</tr>");
+    }
+    html += QStringLiteral("</table>");
+    if (rows.empty()) {
+        html += QStringLiteral("<p style=\"color:%1; font-size:8.5pt\">Nothing was scheduled "
+                               "for this visit.</p>")
+                    .arg(kMuted);
+    }
+
+    // Notes get their own section: they run to several lines and would make
+    // the table above unreadable.
+    QString notes;
+    for (const beam::gui::TreatmentLogRow& row : rows) {
+        if (row.notes.empty()) continue;
+        notes += QStringLiteral("<tr>"
+                                "<td width=\"14%\" valign=\"top\" style=\"padding:3pt 6pt 3pt 0; "
+                                "color:%1\">Sonication %2</td>"
+                                "<td style=\"padding:3pt 0\">%3</td></tr>")
+                     .arg(kMuted)
+                     .arg(row.sequence)
+                     .arg(esc(str(row.notes)).replace(QLatin1Char('\n'), QStringLiteral("<br>")));
+    }
+    if (!notes.isEmpty()) {
+        html += sectionTitle(QStringLiteral("NOTES"));
+        html += QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" "
+                               "style=\"font-size:8.5pt\">") +
+                notes + QStringLiteral("</table>");
+    }
+
+    html += sectionTitle(QStringLiteral("DEVICE"));
+    html += QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
+                           "<td width=\"48%\" valign=\"top\">"
+                           "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\">");
+    html += field(QStringLiteral("BEAM serial number"), str(crf.snBeam));
+    html += field(QStringLiteral("Software version"), str(crf.softwareVersion));
+    html += QStringLiteral("</table></td><td width=\"4%\"></td>"
+                           "<td width=\"48%\" valign=\"top\">"
+                           "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\">");
+    html += field(QStringLiteral("Transducer 1"), str(crf.snTransducer1));
+    html += field(QStringLiteral("Transducer 2"), str(crf.snTransducer2));
+    html += QStringLiteral("</table></td></tr></table>");
+
+    html += QStringLiteral("<p style=\"margin-top:18pt; margin-bottom:0\"></p>");
+    html += rule(kRule, 1);
+    html += QStringLiteral("<p style=\"margin-top:4pt; font-size:7.5pt; color:%1\">"
+                           "Produced by BeamAI on %2 from this patient's treatment log. "
+                           "A blank field is one BeamAI does not collect yet.</p>")
+                .arg(kMuted, esc(QDateTime::currentDateTime().toString(Qt::ISODate)));
+    html += QStringLiteral("</body></html>");
+    return html;
+}
+
+void WorkflowWindow::exportCaseReportPdf() {
+    const int visit = reportVisitCombo_ != nullptr && reportVisitCombo_->currentData().isValid()
+                          ? reportVisitCombo_->currentData().toInt()
+                          : 0;
+    beam::gui::Patient open;
+    if (visit <= 0 || !patients_.find(currentPatientId_, &open)) return;
+
+    const beam::gui::CaseReportForm crf = reportFormForVisit(visit);
+    const QString reports = patientReportsDirectory();
+    const QString suggested =
+        QDir(reports.isEmpty() ? patientDataDirectory() : reports)
+            .filePath(caseReportFileStem(open, crf, visit) + QStringLiteral(".pdf"));
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export case report"),
+                                                      suggested, QStringLiteral("PDF (*.pdf)"));
+    if (path.isEmpty()) return;
+
+    QPdfWriter writer(path);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setPageMargins(QMarginsF(14, 14, 14, 14), QPageLayout::Millimeter);
+    writer.setTitle(QStringLiteral("Case report — %1 visit %2")
+                        .arg(QString::fromStdString(open.externalId))
+                        .arg(visit));
+    QTextDocument document;
+    // No setPageSize: those would be device units, and a document given a page
+    // size is treated as already paginated, skipping the dpi scaling. That is
+    // how 10pt text came out twelve times too small.
+    document.setDefaultFont(QFont(QStringLiteral("Helvetica"), 10));
+    document.setHtml(caseReportHtml(visit));
+    document.print(&writer);
+
+    if (!QFileInfo::exists(path)) {
+        showMessage(QStringLiteral("%1 could not be written.").arg(QDir::toNativeSeparators(path)),
+                    true);
+        return;
+    }
+    refreshPastReports();
+    showMessage(QStringLiteral("Case report written to %1").arg(QDir::toNativeSeparators(path)),
+                false);
+}
+
+// What has already been produced for this patient. A report that cannot be
+// found again is a report that gets made twice.
+void WorkflowWindow::refreshPastReports() {
+    if (pastReportsList_ == nullptr) return;
+    pastReportsList_->clear();
+    const QString reports = patientReportsDirectory();
+    if (reports.isEmpty()) {
+        pastReportsList_->addItem(QStringLiteral("No patient is open."));
+        pastReportsList_->setEnabled(false);
+        return;
+    }
+    pastReportsList_->setEnabled(true);
+    QDir directory(reports);
+    directory.setNameFilters({QStringLiteral("*.pdf"), QStringLiteral("*.csv")});
+    // Newest first: the one just made is the one being looked for.
+    const QFileInfoList files = directory.entryInfoList(QDir::Files, QDir::Time);
+    if (files.isEmpty()) {
+        pastReportsList_->addItem(
+            QStringLiteral("No reports yet for this patient. Exporting one puts it here."));
+        return;
+    }
+    for (const QFileInfo& file : files) {
+        auto* item = new QListWidgetItem(
+            QStringLiteral("%1    %2")
+                .arg(file.fileName(),
+                     file.lastModified().toString(QStringLiteral("yyyy-MM-dd HH:mm"))));
+        item->setData(Qt::UserRole, file.absoluteFilePath());
+        item->setToolTip(QDir::toNativeSeparators(file.absoluteFilePath()));
+        pastReportsList_->addItem(item);
+    }
 }
 
 }  // namespace beam::app
