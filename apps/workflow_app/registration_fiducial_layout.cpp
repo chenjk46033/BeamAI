@@ -105,6 +105,16 @@ std::array<QPointF, 6> RegistrationFiducialLayout::markerCenters() const {
             QPointF(right, bottom)};
 }
 
+void RegistrationFiducialLayout::clearMarkers() {
+    coordinateLabels_ = {};
+    positionsApIsMm_ = {};
+    depthsMm_ = {};
+    hasPositions_ = false;
+    hasDepths_ = false;
+    selectedIndex_ = -1;
+    update();
+}
+
 void RegistrationFiducialLayout::setMarkerDepthsMm(std::array<double, 6> lrMm) {
     depthsMm_ = lrMm;
     hasDepths_ = true;

@@ -400,6 +400,9 @@ void TreatmentLog::load(const std::string& path) {
     std::ifstream file(path);
     if (!file) return;  // no deliveries yet
     rows_.clear();
+    subjectId_.clear();
+    siteId_.clear();
+    subjectName_.clear();
 
     // By header name, not position: BeamV0's own column set varies by protocol
     // (Response, or ResponsePain and ResponseMood), and a file written by one
@@ -463,9 +466,33 @@ void TreatmentLog::load(const std::string& path) {
             row.statusCode = kCompleted;
         const std::string fromPlan = text("FromPlan");
         row.fromPlan = fromPlan.empty() || fromPlan == "1" || fromPlan == "true";
+        // The first row that names anybody names the file. Rows written before
+        // the column was filled are blank and simply do not answer; the
+        // registry is the authority either way, and this is so that a log read
+        // on its own still knows whose it is.
+        if (subjectId_.empty()) subjectId_ = text("SubjectID");
+        if (siteId_.empty()) siteId_ = text("SiteID");
+        if (subjectName_.empty()) subjectName_ = text("SubjectName");
         rows_.push_back(std::move(row));
     }
 }
+
+void TreatmentLog::setPatient(std::string subjectId, std::string siteId, std::string name) {
+    subjectId_ = std::move(subjectId);
+    siteId_ = std::move(siteId);
+    subjectName_ = std::move(name);
+}
+
+// The date the sonication went out, from the stamp already on the row.
+// setLogInfoToCSV.m writes a SessionDate column and this is what it means; a
+// row that never ran has no session to date.
+namespace {
+std::string sessionDateOf(const TreatmentLogRow& row) {
+    const std::string& stamp = row.startedAt.empty() ? row.endedAt : row.startedAt;
+    const std::size_t t = stamp.find('T');
+    return t == std::string::npos ? stamp : stamp.substr(0, t);
+}
+}  // namespace
 
 void TreatmentLog::save(const std::string& path) const {
     std::ofstream file(path);
@@ -482,7 +509,8 @@ void TreatmentLog::save(const std::string& path) const {
          << "# Blank CRF columns are fields BeamAI does not collect yet. They are written\n"
          << "# so the column set matches rather than silently differing.\n"
          << "Number,Name,Duration,Amplitude,Parameters,ResponsePain,ResponseMood,ResponseTotal,"
-            "Notes,X,Y,Z,BD,BI,PD,PI,VisitNumber,SubjectID,SiteID,SessionDate,BEAMSerialNumber,"
+            "Notes,X,Y,Z,BD,BI,PD,PI,VisitNumber,SubjectID,SubjectName,SiteID,SessionDate,"
+            "BEAMSerialNumber,"
             "Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,"
             "HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,"
             "Protocol,FromPlan,StatusCode\n";
@@ -497,8 +525,14 @@ void TreatmentLog::save(const std::string& path) const {
              << row.yMm << ',' << row.zMm << ',' << row.burstDurationSeconds << ','
              << row.burstIntervalSeconds << ',' << row.pulseDurationSeconds << ','
              << row.pulseIntervalSeconds << ',' << row.visit
-             // SubjectID, SiteID, SessionDate, three serials, SoftwareVersion
-             << ",,,,,,,"
+             // Whose treatment, where, and when. Every row carries it, so the
+             // file says who it belongs to wherever it is read -- not only
+             // while it sits in that patient's directory.
+             << ',' << quote(subjectId_) << ',' << quote(subjectName_) << ','
+             << quote(siteId_) << ',' << quote(sessionDateOf(row))
+             // BEAMSerialNumber, Transducer1/2SerialNumber, SoftwareVersion:
+             // still nothing here knows them.
+             << ",,,,"
              // Region is BeamV0's own copy of Name.
              << ',' << quote(row.target)
              // HardwareSerialNumber, which nothing here knows.

@@ -372,16 +372,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // The page palette is intentionally light-text for the dark work surface.
     // Restore an explicit dark foreground for editable fields so entered case
     // identifiers remain visible on their light input backgrounds.
-    for (QLineEdit* edit : findChildren<QLineEdit*>()) {
-        edit->setStyleSheet(QStringLiteral(
-            "QLineEdit { background: #ffffff; color: #17313f; selection-background-color: #58c7e5; "
-            "selection-color: #083d4d; } QLineEdit:disabled { color: #65757d; background: #edf1f2; }"));
-        QPalette palette = edit->palette();
-        palette.setColor(QPalette::Base, QColor(255, 255, 255));
-        palette.setColor(QPalette::Text, QColor(23, 49, 63));
-        palette.setColor(QPalette::PlaceholderText, QColor(105, 121, 129));
-        edit->setPalette(palette);
-    }
+    // Only the fields that exist now. Anything built later -- the Case page
+    // demographics, the patient editor's dialog -- has to ask for this
+    // itself, which is what styleInputField is for. A field that misses it
+    // draws white text on its white background and looks empty while being
+    // typed into.
+    for (QLineEdit* edit : findChildren<QLineEdit*>()) styleInputField(edit);
     for (QComboBox* combo : findChildren<QComboBox*>()) {
         combo->setStyleSheet(QStringLiteral(
             "QComboBox { background: #ffffff; color: #17313f; } "
@@ -1277,7 +1273,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         // coupling is disturbed, and the accept that follows re-completes the
         // stage.
         refresh();
-        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+        goToNextStage();
     });
     connect(runCorrectionButton_, &QPushButton::clicked, this, [this] {
         double transmission = 0.0;
@@ -1399,7 +1395,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             return;
         }
         refresh();
-        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+        goToNextStage();
     });
     connect(acceptSafetyReviewButton_, &QPushButton::clicked, this, [this] {
         std::string reason;
@@ -1411,7 +1407,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         safetyReviewStatusLabel_->setText(QStringLiteral("Safety review accepted. Treatment may now begin."));
         showMessage(QStringLiteral("Safety review accepted. Continuing to Treatment."), false);
         refresh();
-        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+        goToNextStage();
     });
     connect(ui_->simulatePassButton, &QPushButton::clicked, this, [this] {
         deviceCheckPassed_ = true;
@@ -1446,7 +1442,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         ui_->acceptDeviceReadinessButton->setEnabled(false);
         showMessage(QStringLiteral("Device readiness accepted. Continuing to Imaging."), false);
         refresh();
-        ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+        goToNextStage();
     });
     connect(ui_->loadNiftiButton, &QPushButton::clicked, this, [this] { chooseNifti(); });
     connect(ui_->loadDicomButton, &QPushButton::clicked, this, [this] { chooseDicomDirectory(); });
@@ -1639,7 +1635,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             showMessage(QStringLiteral("MRI accepted. Continuing to Registration."), false);
             refresh();
             updateRegistrationAvailability();
-            ui_->stageList->setCurrentRow(static_cast<int>(workflow_.nextStage()));
+            goToNextStage();
         } else {
             showMessage(QString::fromStdString(reason), true);
             refresh();
@@ -3430,10 +3426,9 @@ void WorkflowWindow::acceptFiducialRegistration() {
     showMessage(QStringLiteral("Registration accepted. Continuing to the next workflow stage."), false);
     refresh();
     // Correction is an internal half of the combined Coupling/Correction
-    // gate and is intentionally hidden from the navigation list.
-    const auto next = workflow_.nextStage();
-    ui_->stageList->setCurrentRow(static_cast<int>(
-        next == beam::gui::WorkflowStage::Correction ? beam::gui::WorkflowStage::Coupling : next));
+    // gate and is intentionally hidden from the navigation list, which
+    // goToNextStage knows about along with the other three hidden stages.
+    goToNextStage();
 }
 
 void WorkflowWindow::performCurrentPositionRegistration() {
@@ -3853,8 +3848,50 @@ void WorkflowWindow::showMriPreviews() {
     refreshDetachedViewers();
 }
 
+// Go where the workflow says to go next, by a row the operator can see.
+//
+// Four stages are deliberately missing from the navigation list because they
+// are folded into another tab: System check, Correction (part of Coupling),
+// and Safety review and Treatment delivery (both part of Treatment). Handing
+// one of those rows to setCurrentRow changes the page without moving any
+// highlight, so the list goes on showing the stage the operator came from
+// while a different page is drawn underneath -- which is how accepting Case
+// setup for a second patient put the Treatment delivery page, Finish
+// Treatment button and all, under a list still reading "Case setup".
+//
+// A hidden stage therefore resolves backwards, to the visible tab that owns
+// it, rather than forwards past work that has not been done.
+void WorkflowWindow::goToNextStage() {
+    const int count = ui_->stageList->count();
+    if (count == 0) return;
+    int row = std::clamp(static_cast<int>(workflow_.nextStage()), 0, count - 1);
+    while (row > 0 && ui_->stageList->item(row)->isHidden()) --row;
+    // Only if row 0 itself were hidden, which it is not; forwards is the
+    // honest fallback if that ever changes.
+    while (row < count && ui_->stageList->item(row)->isHidden()) ++row;
+    if (row < count) ui_->stageList->setCurrentRow(row);
+}
+
+// Dark text on the light input background. The pages carry a light-text
+// palette for the dark work surface, which an editable field must not
+// inherit: it would be typed into invisibly.
+void WorkflowWindow::styleInputField(QLineEdit* edit) {
+    if (edit == nullptr) return;
+    edit->setStyleSheet(QStringLiteral(
+        "QLineEdit { background: #ffffff; color: #17313f; selection-background-color: #58c7e5; "
+        "selection-color: #083d4d; } QLineEdit:disabled { color: #65757d; background: #edf1f2; }"));
+    QPalette palette = edit->palette();
+    palette.setColor(QPalette::Base, QColor(255, 255, 255));
+    palette.setColor(QPalette::Text, QColor(23, 49, 63));
+    palette.setColor(QPalette::PlaceholderText, QColor(105, 121, 129));
+    edit->setPalette(palette);
+}
+
 void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     selectedStage_ = stage;
+    // Visits and last-treated change as the session runs, so the list is
+    // rebuilt on arrival rather than only at startup.
+    if (stage == beam::gui::WorkflowStage::CaseSetup) refreshPatientChooser();
     ui_->pageTitle->setText(QString::fromUtf8(beam::gui::workflowStageName(stage).data()));
     const int stageIndex = static_cast<int>(stage);
     ui_->pageStack->setCurrentIndex(stageIndex <= 3 ? stageIndex : 4);
@@ -4043,25 +4080,47 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
 }
 
 void WorkflowWindow::completeCurrentStage() {
-    if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup &&
-        (ui_->participantEdit->text().trimmed().isEmpty() ||
-         ui_->siteEdit->text().trimmed().isEmpty())) {
-        showMessage(QStringLiteral("Participant ID and Site ID are required."), true);
-        return;
+    if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup) {
+        if (ui_->participantEdit->text().trimmed().isEmpty() ||
+            ui_->siteEdit->text().trimmed().isEmpty()) {
+            showMessage(QStringLiteral("Participant ID and Site ID are required."), true);
+            return;
+        }
+        // A date of birth that will not parse is a typo. Saying so beats
+        // accepting the case and quietly recording no date at all.
+        std::string born;
+        if (dateOfBirthEdit_ != nullptr &&
+            !readDateOfBirth(dateOfBirthEdit_->text(), &born)) {
+            showMessage(QStringLiteral("\"%1\" is not a date. Use YYYY-MM-DD, or leave the "
+                                       "date of birth blank.")
+                            .arg(dateOfBirthEdit_->text().trimmed()),
+                        true);
+            dateOfBirthEdit_->setFocus(Qt::OtherFocusReason);
+            dateOfBirthEdit_->selectAll();
+            return;
+        }
     }
     std::string reason;
     if (!workflow_.complete(selectedStage_, &reason)) {
         showMessage(QString::fromStdString(reason), true);
         return;
     }
-    if (selectedStage_ == beam::gui::WorkflowStage::CaseSetup) {
+    const bool caseAccepted = selectedStage_ == beam::gui::WorkflowStage::CaseSetup;
+    if (caseAccepted) {
         // Mark the optional hardware gate complete so Imaging is immediately
         // available for NIfTI, DICOM, and saved Beam-session workflows.
         workflow_.complete(beam::gui::WorkflowStage::SystemCheck, nullptr);
     }
     showMessage(QStringLiteral("%1 complete.").arg(QString::fromUtf8(beam::gui::workflowStageName(selectedStage_).data())), false);
-    const auto next = workflow_.nextStage();
-    ui_->stageList->setCurrentRow(static_cast<int>(next));
+    // Before nextStage() is consulted, not after. The Participant ID checked
+    // above is who this is, and opening them invalidates Imaging onward --
+    // which is what nextStage() reads. Asking first sent the operator to
+    // wherever the LAST patient had reached: for a finished patient that is
+    // the Treatment stage, whose list row is hidden, so the highlight stayed
+    // on Case setup while the Treatment page's Finish Treatment button and
+    // "No sonication running." line appeared under it.
+    if (caseAccepted) selectPatient(caseDemographics());
+    goToNextStage();
     refresh();
 }
 
@@ -4139,6 +4198,85 @@ void WorkflowWindow::fillSimulatedCouplingWaveforms() {
 // Treatment stage would have fed to prepareSonication goes too, or the page
 // would say nothing has been measured while a sonication still ran on the old
 // number. An accepted stage goes back to in-progress for the same reason.
+// Everything on the Imaging, Registration and Treatment pages that was
+// measured on one person. Invalidating the workflow stages was not enough: it
+// stops the next patient being sonicated on the last one's registration, but
+// it leaves the last one's head drawn in all nine viewers, which reads as this
+// patient's scan. Each member goes back to the value it holds at startup.
+void WorkflowWindow::clearPatientImagingAndRegistration() {
+    mriLoaded_ = false;
+    mriVolume_ = {};
+    mriAxes_ = {};
+    mriPath_.clear();
+    focusImageLoaded_ = false;
+    focusImage_ = {};
+    registrationGeometryLoaded_ = false;
+    arrayMask_ = {};
+    arrayData_ = {};
+    registrationOriginArrayData_ = {};
+    targetMm_.setZero();
+    fiducials_.clear();
+    registrationSourceFiducials_.clear();
+    fiducialConfirmed_.fill(false);
+    sourceFiducialConfirmed_.fill(false);
+    fiducialLocated_.fill(false);
+    sourceFiducialLocated_.fill(false);
+    fiducialConfidence_.fill(0.0);
+    fiducialStability_.fill(0.0);
+    registrationStartFiducialRow_ = -1;
+    // The transducer lock position: where this patient's array was clamped,
+    // in 7.5 mm horizontal and 10 mm vertical steps. Nothing else puts these
+    // back -- loadMri recentres the slice sliders for a new volume, but these
+    // four describe the hardware against a head, so they stay until told.
+    // Signals blocked: their handler reopens Step 3, and there is no Step 3
+    // to reopen on a registration that has just been thrown away.
+    for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
+                            rightHorizontalPositionSlider_, rightVerticalPositionSlider_}) {
+        if (slider == nullptr) continue;
+        const QSignalBlocker blocker(slider);
+        slider->setValue(slider->minimum());
+    }
+
+    // A view keeps the last slice it was handed, so dropping the volume does
+    // not blank it -- showMriPreviews is the only thing that ever writes one,
+    // and every caller skips it while no MRI is loaded.
+    for (WorkflowMriView* view : {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview,
+                                  ui_->registrationSagittalPreview,
+                                  ui_->registrationCoronalPreview, ui_->registrationAxialPreview,
+                                  treatmentSagittalPreview_, treatmentCoronalPreview_,
+                                  treatmentAxialPreview_}) {
+        if (view == nullptr) continue;
+        view->setSlice(Eigen::MatrixXd{});
+        view->setMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        view->setSecondaryMaskOverlay(Eigen::MatrixXd{}, QColor(), 0.0);
+        view->setMarkers({});
+    }
+    // Pan and zoom too: they were set looking at somebody else's head.
+    resetMriViews();
+    // Where each target sits is a registration output, carried on the list
+    // item by applyArrayCentreToAllTargets and nowhere else. Dropping the
+    // registration without dropping these left the next patient's firing row
+    // holding the last patient's X/Y/Z.
+    if (targetListWidget_ != nullptr) {
+        for (int row = 0; row < targetListWidget_->count(); ++row)
+            targetListWidget_->item(row)->setData(Qt::UserRole, QVariant());
+    }
+    ui_->imagingFiducialLayout->clearMarkers();
+    ui_->registrationFiducialLayout->clearMarkers();
+    ui_->registrationTable->clearContents();
+    // The strings the .ui ships with, which is what "nothing loaded" looks
+    // like on a machine that has only just been started.
+    ui_->mriPathLabel->setText(QStringLiteral("No MRI loaded"));
+    ui_->mriPathLabel->setToolTip(QString());
+    ui_->mriMetadataLabel->setText(
+        QStringLiteral("Dimensions and spatial axes will appear after loading."));
+    ui_->registrationResult->setText(
+        QStringLiteral("Load and accept the patient MRI before registration."));
+    ui_->registrationReturnStartButton->setEnabled(false);
+    updateArrayPositionReadout();
+    setRegistrationPhase(RegistrationPhase::Locating);
+}
+
 void WorkflowWindow::clearCouplingMeasurement() {
     couplingCh0Raw_.resize(0);
     couplingCh1Raw_.resize(0);

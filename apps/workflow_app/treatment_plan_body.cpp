@@ -53,6 +53,7 @@
 #include <QWheelEvent>
 #include <QDateTime>
 #include <QFileDialog>
+#include <QDialogButtonBox>
 #include <QInputDialog>
 #include <QMenu>
 #include <QDir>
@@ -560,6 +561,11 @@ void WorkflowWindow::addTargetListRow(const QString& name, int atRow) {
 }
 
 void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
+    // Before the store: which patient's log is read depends on this.
+    loadPatientRegistry();
+    buildCaseDemographics();
+    buildPatientChooser();
+    refreshPatientChooser();
     // Before anything that reads it: the Target List is seeded from the store,
     // and the protocol combo is filled from its protocol names.
     loadTreatmentTargetStore();
@@ -1173,6 +1179,706 @@ QString WorkflowWindow::treatmentDataDirectory() const {
     return home;
 }
 
+QString WorkflowWindow::patientsPath() const {
+    return QDir(treatmentDataDirectory()).filePath(QStringLiteral("patients.csv"));
+}
+
+// Where one person's record lives: their log, and where each of their visits
+// was left. The protocol/target library is the install's and stays above this.
+//
+// Empty when nobody has been named on a device that has treated somebody
+// before. That is the point: there is then no record to read or write, so
+// whatever is on screen cannot be filed against a patient nobody has chosen.
+// A device that has never named anybody keeps its record where a pre-patient
+// install put it, which is what makes an upgrade a no-op until the first
+// patient is identified.
+QString WorkflowWindow::patientDataDirectory() const {
+    if (currentPatientId_ <= 0)
+        return patients_.empty() ? treatmentDataDirectory() : QString();
+    const QString directory = QDir(treatmentDataDirectory())
+                                  .filePath(QStringLiteral("patients/%1").arg(currentPatientId_));
+    QDir().mkpath(directory);
+    return directory;
+}
+
+// Who the patient is, as against which participant number they carry. Added
+// to the Case page's form rather than a page of their own: it is one of the
+// three things the operator fills in before treating somebody, and splitting
+// it off would mean two places to look for the same answer.
+void WorkflowWindow::buildCaseDemographics() {
+    const auto add = [this](const QString& label, const QString& placeholder) {
+        auto* edit = new QLineEdit(ui_->caseGroup);
+        edit->setPlaceholderText(placeholder);
+        styleInputField(edit);
+        // Below Site ID, above the Accept button, which is the last row.
+        ui_->caseForm->insertRow(ui_->caseForm->rowCount() - 1, label, edit);
+        return edit;
+    };
+    lastNameEdit_ = add(QStringLiteral("Last name"), QStringLiteral("Optional"));
+    firstNameEdit_ = add(QStringLiteral("First name"), QStringLiteral("Optional"));
+    // The format in the label, not only the placeholder: a placeholder is
+    // gone the moment anything is typed, which is exactly when it is needed.
+    dateOfBirthEdit_ =
+        add(QStringLiteral("Date of birth (YYYY-MM-DD)"), QStringLiteral("Optional"));
+    // Typed plainly. An input mask here returned "--" for an empty field --
+    // neither a date nor blank -- which the validation below then rejected,
+    // throwing away everything else the operator had typed. And a date
+    // picker has to start somewhere, and starting on today reads as an
+    // entered answer when nothing has been entered.
+
+    // The header carries the name once there is one -- it is what the
+    // operator recognises, where the Participant ID is what a CRF carries.
+    const auto follow = [this] {
+        const beam::gui::Patient typed = caseDemographics();
+        const QString shown = QString::fromStdString(beam::gui::patientDisplayName(typed));
+        ui_->participantHeader->setText(
+            shown.isEmpty() ? QStringLiteral("Participant: —")
+                            : QStringLiteral("Participant: %1").arg(shown));
+    };
+    connect(lastNameEdit_, &QLineEdit::textChanged, this, follow);
+    connect(firstNameEdit_, &QLineEdit::textChanged, this, follow);
+}
+
+void WorkflowWindow::showCaseDemographics(const beam::gui::Patient& patient) {
+    if (lastNameEdit_ == nullptr) return;
+    ui_->participantEdit->setText(QString::fromStdString(patient.externalId));
+    ui_->siteEdit->setText(QString::fromStdString(patient.site));
+    lastNameEdit_->setText(QString::fromStdString(patient.lastName));
+    firstNameEdit_->setText(QString::fromStdString(patient.firstName));
+    dateOfBirthEdit_->setText(QString::fromStdString(patient.dateOfBirth));
+}
+
+// Blank, or YYYY-MM-DD. Anything else is a typo and is reported rather than
+// quietly dropped -- a date of birth nobody notices failing to save is worse
+// than one that refuses.
+bool WorkflowWindow::readDateOfBirth(const QString& text, std::string* out) {
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
+        out->clear();
+        return true;
+    }
+    if (!QDate::fromString(trimmed, QStringLiteral("yyyy-MM-dd")).isValid()) return false;
+    *out = trimmed.toStdString();
+    return true;
+}
+
+beam::gui::Patient WorkflowWindow::caseDemographics() const {
+    beam::gui::Patient typed;
+    typed.externalId = ui_->participantEdit->text().trimmed().toStdString();
+    typed.site = ui_->siteEdit->text().trimmed().toStdString();
+    if (lastNameEdit_ == nullptr) return typed;
+    typed.lastName = lastNameEdit_->text().trimmed().toStdString();
+    typed.firstName = firstNameEdit_->text().trimmed().toStdString();
+    readDateOfBirth(dateOfBirthEdit_->text(), &typed.dateOfBirth);
+    return typed;
+}
+
+// Who this device has treated, on the page where the operator says which of
+// them is in front of them. Before this, the Participant ID had to be typed
+// from memory and exactly: a near miss did not fail, it quietly opened a new
+// record, which is how one person's history ends up in two files that nothing
+// afterwards can tell apart.
+void WorkflowWindow::buildPatientChooser() {
+    patientChooserGroup_ = new QGroupBox(QStringLiteral("Patients on this device"),
+                                         ui_->casePage);
+    auto* layout = new QVBoxLayout(patientChooserGroup_);
+    layout->setContentsMargins(8, 6, 8, 8);
+    layout->setSpacing(6);
+
+    patientChooserHint_ = new QLabel(patientChooserGroup_);
+    patientChooserHint_->setWordWrap(true);
+    patientChooserHint_->setStyleSheet(QStringLiteral("color: #7e8c93;"));
+    // Fixed, both of them: a QVBoxLayout hands spare height to whatever will
+    // take it, and with the table at a fixed height that was the hint label,
+    // which floated in the middle of an empty box.
+    patientChooserHint_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    patientChooserGroup_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    layout->addWidget(patientChooserHint_);
+
+    patientTable_ = new QTableWidget(0, 7, patientChooserGroup_);
+    patientTable_->setHorizontalHeaderLabels({QStringLiteral("Participant ID"),
+                                              QStringLiteral("Name"),
+                                              QStringLiteral("Date of birth"),
+                                              QStringLiteral("Site"),
+                                              QStringLiteral("Visits"),
+                                              QStringLiteral("Created"),
+                                              QStringLiteral("Last treated")});
+    patientTable_->verticalHeader()->setVisible(false);
+    patientTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    patientTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    patientTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    patientTable_->setAlternatingRowColors(true);
+    patientTable_->setShowGrid(false);
+    // Its own colours, not the registration table's: that one is styled for a
+    // widget with a fixed height on a pane of its own, and borrowing it left
+    // every second row drawn in the dark palette with dark text.
+    patientTable_->setStyleSheet(QStringLiteral(
+        "QTableWidget { color: #17313f; background: #ffffff; border: 1px solid #39758e; } "
+        "QTableWidget::item { color: #17313f; background: #ffffff; padding: 3px 8px; } "
+        "QTableWidget::item:alternate { color: #17313f; background: #eef4f7; } "
+        "QTableWidget::item:selected, QTableWidget::item:selected:!active "
+        "{ background: #58c7e5; color: #083d4d; }"));
+    patientTable_->horizontalHeader()->setStyleSheet(QStringLiteral(
+        "QHeaderView::section { padding: 3px 8px; margin: 0px; color: #17313f; "
+        "background: #dce6ea; border: 0; border-bottom: 1px solid #39758e; }"));
+    // Every column as wide as it needs to be, grouped at the left, with the
+    // last one absorbing the slack. Stretching Participant ID instead put a
+    // hand's width between the name and everything said about it.
+    for (int column = 0; column < patientTable_->columnCount(); ++column)
+        patientTable_->horizontalHeader()->setSectionResizeMode(column,
+                                                                QHeaderView::ResizeToContents);
+    patientTable_->horizontalHeader()->setStretchLastSection(true);
+    // Left, not Qt's centred default: the last column is the stretched one,
+    // so a centred label floats a hand's width from the data beneath it.
+    patientTable_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    layout->addWidget(patientTable_);
+
+    // Selecting fills the fields rather than accepting outright: the operator
+    // still presses Accept, and still sees what they are about to open.
+    const auto take = [this](int row) {
+        if (row < 0 || row >= static_cast<int>(patients_.patients().size())) return;
+        showCaseDemographics(patients_.patients()[static_cast<std::size_t>(row)]);
+    };
+    connect(patientTable_, &QTableWidget::currentCellChanged, this,
+            [take](int row, int, int, int) { take(row); });
+    connect(patientTable_, &QTableWidget::cellDoubleClicked, this,
+            [this, take](int row, int) {
+                take(row);
+                ui_->acceptCaseButton->click();
+            });
+
+    patientTable_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(patientTable_, &QTableWidget::customContextMenuRequested, this,
+            [this](const QPoint& where) {
+                // Viewport coordinates, not the view's: the header is above
+                // the point this reports from.
+                const QModelIndex at = patientTable_->indexAt(where);
+                if (!at.isValid()) return;
+                showPatientMenu(at.row(), patientTable_->viewport()->mapToGlobal(where));
+            });
+
+    // Under the identity form, above the spacer that holds the page open. No
+    // stretch: the list is as tall as it needs to be and the spacer below it
+    // takes the rest, rather than the table filling the screen with blank rows.
+    ui_->casePageLayout->insertWidget(1, patientChooserGroup_, 0);
+}
+
+void WorkflowWindow::refreshPatientChooser() {
+    if (patientTable_ == nullptr) return;
+    const std::vector<beam::gui::Patient>& people = patients_.patients();
+    patientChooserGroup_->setVisible(!people.empty());
+    patientChooserHint_->setText(
+        people.empty()
+            ? QString()
+            : QStringLiteral("Pick the patient in front of you, or type a new Participant ID "
+                             "above to start a record. Each patient's visits are kept "
+                             "separately."));
+
+    const QSignalBlocker blocker(patientTable_);
+    patientTable_->setRowCount(static_cast<int>(people.size()));
+    for (std::size_t index = 0; index < people.size(); ++index) {
+        const beam::gui::Patient& patient = people[index];
+        // Their own log, read only to count what is in it. A log that will
+        // not parse costs this row its two computed columns, not the page.
+        int visits = 0;
+        QString lastTreated;
+        try {
+            beam::gui::TreatmentLog log;
+            log.load(QDir(QDir(treatmentDataDirectory())
+                              .filePath(QStringLiteral("patients/%1").arg(patient.id)))
+                         .filePath(QStringLiteral("treatment_log.csv"))
+                         .toStdString());
+            std::set<std::pair<std::string, int>> seen;
+            for (const beam::gui::TreatmentLogRow& row : log.rows()) {
+                seen.insert({row.protocol, row.visit});
+                if (row.startedAt.empty()) continue;
+                const QString stamp = QString::fromStdString(row.startedAt);
+                if (stamp > lastTreated) lastTreated = stamp;
+            }
+            visits = static_cast<int>(seen.size());
+        } catch (const std::exception&) {
+            lastTreated = QStringLiteral("unreadable");
+        }
+
+        const auto cell = [](const QString& text, bool rightAlign = false) {
+            auto* item = new QTableWidgetItem(text);
+            if (rightAlign) item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            return item;
+        };
+        // Both stamps to the minute: the date alone cannot tell two visits on
+        // one day apart, and the seconds are noise in a column.
+        const auto toMinute = [](const QString& stamp) {
+            if (stamp.isEmpty()) return QStringLiteral("—");
+            QString shown = stamp.left(16);
+            shown.replace(QLatin1Char('T'), QLatin1Char(' '));
+            return shown;
+        };
+        const int row = static_cast<int>(index);
+        patientTable_->setItem(row, 0, cell(QString::fromStdString(patient.externalId)));
+        patientTable_->setItem(
+            row, 1,
+            cell(patient.lastName.empty() && patient.firstName.empty()
+                     ? QStringLiteral("—")
+                     : QString::fromStdString(beam::gui::patientDisplayName(patient))));
+        patientTable_->setItem(row, 2,
+                               cell(patient.dateOfBirth.empty()
+                                        ? QStringLiteral("—")
+                                        : QString::fromStdString(patient.dateOfBirth)));
+        patientTable_->setItem(row, 3, cell(QString::fromStdString(patient.site)));
+        patientTable_->setItem(row, 4, cell(QString::number(visits), true));
+        patientTable_->setItem(row, 5,
+                               cell(toMinute(QString::fromStdString(patient.createdAt))));
+        patientTable_->setItem(row, 6,
+                               cell(lastTreated == QStringLiteral("unreadable")
+                                        ? lastTreated
+                                        : toMinute(lastTreated)));
+        // The one being treated now, so the page says which record is open.
+        if (patient.id == currentPatientId_) {
+            for (int column = 0; column < patientTable_->columnCount(); ++column) {
+                QTableWidgetItem* item = patientTable_->item(row, column);
+                QFont bold = item->font();
+                bold.setBold(true);
+                item->setFont(bold);
+            }
+        }
+    }
+    // As tall as its rows, capped: a device with many patients scrolls rather
+    // than pushing the Accept button off the page.
+    const int rowHeight = patientTable_->verticalHeader()->defaultSectionSize();
+    const int wanted = patientTable_->horizontalHeader()->height() +
+                       static_cast<int>(people.size()) * rowHeight +
+                       2 * patientTable_->frameWidth();
+    patientTable_->setFixedHeight(std::clamp(wanted, rowHeight * 2, rowHeight * 9));
+}
+
+// How many sonications this patient has actually had. The gate on removing
+// them: a patient who has been sonicated is a record, and no later decision
+// erases that. Planned-but-unfired rows do not count -- nothing happened to
+// them -- but they are worth naming before they go.
+int WorkflowWindow::patientDeliveryCount(int patientId, int* plannedRows) const {
+    int delivered = 0;
+    if (plannedRows != nullptr) *plannedRows = 0;
+    try {
+        beam::gui::TreatmentLog log;
+        log.load(QDir(QDir(treatmentDataDirectory())
+                          .filePath(QStringLiteral("patients/%1").arg(patientId)))
+                     .filePath(QStringLiteral("treatment_log.csv"))
+                     .toStdString());
+        for (const beam::gui::TreatmentLogRow& row : log.rows()) {
+            if (beam::gui::TreatmentLog::delivered(row)) ++delivered;
+            else if (plannedRows != nullptr) ++*plannedRows;
+        }
+    } catch (const std::exception&) {
+        // A log that will not parse is not a log that can be proved empty.
+        // Counting it as delivered refuses the removal, which is the safe way
+        // round for a file that may hold a treatment nobody can read.
+        return 1;
+    }
+    return delivered;
+}
+
+void WorkflowWindow::showPatientMenu(int row, const QPoint& globalPosition) {
+    if (row < 0 || row >= static_cast<int>(patients_.patients().size())) return;
+    const beam::gui::Patient patient = patients_.patients()[static_cast<std::size_t>(row)];
+    const QString name = QString::fromStdString(patient.externalId);
+
+    QMenu menu(this);
+    QAction* edit = menu.addAction(QStringLiteral("Edit \"%1\" details…").arg(name));
+    QAction* remove = menu.addAction(QStringLiteral("Delete \"%1\"").arg(name));
+
+    int planned = 0;
+    const int delivered = patientDeliveryCount(patient.id, &planned);
+    const bool open = patient.id == currentPatientId_;
+    remove->setEnabled(delivered == 0 && !open);
+    if (open) {
+        remove->setToolTip(QStringLiteral("This is the patient being treated. Open somebody "
+                                          "else before deleting them."));
+    } else if (delivered > 0) {
+        remove->setToolTip(QStringLiteral("%1 has had %2 sonication(s). What a patient was "
+                                          "given is a record and is not deleted here.")
+                               .arg(name)
+                               .arg(delivered));
+    }
+    // A disabled item says nothing on its own; the reason has to be reachable.
+    menu.setToolTipsVisible(true);
+
+    QAction* chosen = menu.exec(globalPosition);
+    if (chosen == edit) editPatient(patient.id);
+    else if (chosen == remove) deletePatient(patient.id, planned);
+}
+
+// Everything the operator can change about a patient, in one dialog. Two
+// chained input boxes could not show what was already on file while the
+// second was open, and could not reach demographics at all.
+void WorkflowWindow::editPatient(int patientId) {
+    beam::gui::Patient patient;
+    if (!patients_.find(patientId, &patient)) return;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Patient details"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    layout->addLayout(form);
+
+    const auto field = [&](const QString& label, const std::string& value,
+                           const QString& placeholder) {
+        auto* edit = new QLineEdit(QString::fromStdString(value), &dialog);
+        edit->setPlaceholderText(placeholder);
+        styleInputField(edit);
+        form->addRow(label, edit);
+        return edit;
+    };
+    QLineEdit* identifier =
+        field(QStringLiteral("Participant ID *"), patient.externalId, QStringLiteral("Required"));
+    QLineEdit* site = field(QStringLiteral("Site ID"), patient.site, QString());
+    QLineEdit* lastName =
+        field(QStringLiteral("Last name"), patient.lastName, QStringLiteral("Optional"));
+    QLineEdit* firstName =
+        field(QStringLiteral("First name"), patient.firstName, QStringLiteral("Optional"));
+    QLineEdit* born = field(QStringLiteral("Date of birth (YYYY-MM-DD)"), patient.dateOfBirth,
+                            QStringLiteral("Optional"));
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
+                                         &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    // Looped, so a field that will not do sends the operator back to the
+    // dialog with everything they typed still in it. Returning instead threw
+    // the whole edit away over one bad date, which is how a name typed into
+    // this dialog could vanish without the operator being sure it had.
+    beam::gui::Patient edited;
+    while (true) {
+        if (dialog.exec() != QDialog::Accepted) return;
+
+        edited = beam::gui::Patient{};
+        edited.externalId = identifier->text().trimmed().toStdString();
+        edited.site = site->text().trimmed().toStdString();
+        edited.lastName = lastName->text().trimmed().toStdString();
+        edited.firstName = firstName->text().trimmed().toStdString();
+        if (!readDateOfBirth(born->text(), &edited.dateOfBirth)) {
+            QMessageBox::warning(
+                &dialog, QStringLiteral("Date of birth"),
+                QStringLiteral("\"%1\" is not a date. Use YYYY-MM-DD, or leave it blank.")
+                    .arg(born->text().trimmed()));
+            born->setFocus(Qt::OtherFocusReason);
+            born->selectAll();
+            continue;
+        }
+        if (!patients_.update(patientId, edited)) {
+            QMessageBox::warning(
+                &dialog, QStringLiteral("Participant ID"),
+                QStringLiteral("\"%1\" could not be used: it is blank, or it already belongs "
+                               "to another patient on this device.")
+                    .arg(identifier->text().trimmed()));
+            identifier->setFocus(Qt::OtherFocusReason);
+            identifier->selectAll();
+            continue;
+        }
+        break;
+    }
+    savePatientRegistry();
+    // The open patient's log carries their identifier, and the Case page
+    // carries all five fields; both are now out of date.
+    if (patientId == currentPatientId_) {
+        treatmentLog_.setPatient(edited.externalId, edited.site,
+                                 edited.lastName.empty() && edited.firstName.empty()
+                                     ? std::string()
+                                     : beam::gui::patientDisplayName(edited));
+        beam::gui::Patient shown = edited;
+        shown.id = patientId;
+        showCaseDemographics(shown);
+        saveTreatmentTargetStore(/*announce=*/false);
+    }
+    refreshPatientChooser();
+    showMessage(QStringLiteral("Patient %1 saved as \"%2\" (%3).")
+                    .arg(patientId)
+                    .arg(QString::fromStdString(edited.externalId),
+                         QString::fromStdString(beam::gui::patientDisplayName(edited))),
+                false);
+}
+
+void WorkflowWindow::deletePatient(int patientId, int plannedRows) {
+    beam::gui::Patient patient;
+    if (!patients_.find(patientId, &patient)) return;
+    const QString name = QString::fromStdString(patient.externalId);
+    // Checked again here, not only when the menu was built: the menu may have
+    // been open while something else was written.
+    if (patientId == currentPatientId_ || patientDeliveryCount(patientId, nullptr) > 0) {
+        showMessage(QStringLiteral("\"%1\" cannot be deleted.").arg(name), true);
+        return;
+    }
+
+    QMessageBox ask(QMessageBox::Warning, QStringLiteral("Delete patient"),
+                    QStringLiteral("Delete \"%1\" from this device?").arg(name),
+                    QMessageBox::NoButton, this);
+    ask.setInformativeText(
+        plannedRows > 0
+            ? QStringLiteral("They have had no sonications, but %1 planned row(s) will go with "
+                             "them. This cannot be undone.")
+                  .arg(plannedRows)
+            : QStringLiteral("They have had no sonications. This cannot be undone."));
+    QPushButton* confirm = ask.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+    QPushButton* keep = ask.addButton(QStringLiteral("Keep"), QMessageBox::RejectRole);
+    // Return on a delete dialog keeps them.
+    ask.setDefaultButton(keep);
+    ask.exec();
+    if (ask.clickedButton() != confirm) return;
+
+    // The directory goes with the row. Built from the id rather than taken
+    // from anywhere, and removed only after it is confirmed to be the one
+    // under this install's patients/ -- a recursive delete is worth being
+    // sure about.
+    const QDir runtime(treatmentDataDirectory());
+    const QString directory = runtime.filePath(QStringLiteral("patients/%1").arg(patientId));
+    const bool looksRight =
+        QDir(directory).dirName() == QString::number(patientId) &&
+        QFileInfo(QDir(directory).filePath(QStringLiteral(".."))).canonicalFilePath() ==
+            QFileInfo(runtime.filePath(QStringLiteral("patients"))).canonicalFilePath();
+    if (QFileInfo::exists(directory)) {
+        // Refuse rather than carry on: dropping the registry row while the
+        // directory stays would leave files nothing can account for.
+        if (!looksRight || !QDir(directory).removeRecursively()) {
+            showMessage(QStringLiteral("%1 could not be removed, so \"%2\" was left on the "
+                                       "device rather than leaving their files behind.")
+                            .arg(QDir::toNativeSeparators(directory), name),
+                        true);
+            return;
+        }
+    }
+    patients_.remove(patientId);
+    savePatientRegistry();
+    refreshPatientChooser();
+    showMessage(QStringLiteral("\"%1\" was deleted. Patient numbers are not reused, so nobody "
+                               "else is given their place.")
+                    .arg(name),
+                false);
+}
+
+void WorkflowWindow::loadPatientRegistry() {
+    try {
+        patients_.load(patientsPath().toStdString());
+    } catch (const std::exception& error) {
+        // A list of patients that will not parse is not something to carry on
+        // past quietly: every record below it is addressed by an id from it.
+        showMessage(QStringLiteral("The patient list could not be read (%1). No patient record "
+                                   "will be opened until it is fixed.")
+                        .arg(error.what()),
+                    true);
+    }
+}
+
+void WorkflowWindow::savePatientRegistry() {
+    try {
+        patients_.save(patientsPath().toStdString());
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("The patient list could not be saved: %1").arg(error.what()),
+                    true);
+    }
+}
+
+// The Case page is where the operator says who is being treated, so accepting
+// it is where that person's record is opened. BeamV0 had no such step: the
+// subject was whoever the data directory happened to hold, and treating a
+// second person meant copying the whole directory.
+void WorkflowWindow::selectPatient(const beam::gui::Patient& details) {
+    const std::string identifier = details.externalId;
+    if (identifier.empty()) return;
+
+    beam::gui::Patient known;
+    const bool onFile = patients_.findByExternalId(identifier, &known);
+    if (onFile && known.id == currentPatientId_) {
+        // The same person, re-accepted. Their details may have been filled in
+        // or corrected since.
+        patients_.add(details);
+        savePatientRegistry();
+        return;
+    }
+    const bool switching = currentPatientId_ > 0;
+    // A sonication that is going out belongs to the patient it was started
+    // on. Changing who that is part-way through would file it against the
+    // wrong person and leave its row open in a log nothing is writing to.
+    if (switching && deliveryRunning()) {
+        // The header follows the field as it is typed, so leaving the new
+        // identifier in it would name a patient who is not the one being
+        // sonicated.
+        beam::gui::Patient open;
+        if (patients_.find(currentPatientId_, &open)) showCaseDemographics(open);
+        showMessage(QStringLiteral("A sonication is still going out. Stop it before changing "
+                                   "which patient is being treated."),
+                    true);
+        return;
+    }
+    // Whoever is open is written out before anybody else is read in, so a
+    // switch cannot carry one patient's rows into another's file.
+    if (switching) savePatientData();
+
+    beam::gui::Patient patient;
+    try {
+        patient = patients_.add(details);
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("This patient could not be recorded: %1").arg(error.what()),
+                    true);
+        return;
+    }
+    currentPatientId_ = patient.id;
+    savePatientRegistry();
+    // The record may hold details the Case page was not told, which is what
+    // picking an existing patient and pressing Accept should show.
+    showCaseDemographics(patient);
+    refreshPatientChooser();
+    adoptLegacyPatientData(patient.id);
+
+    // Before the plan is rebuilt, not after: the rebuild reads the array
+    // position off the Target List, so clearing it afterwards would leave the
+    // last patient's X/Y/Z in the row that was just built.
+    if (switching) {
+        // Everything from the MRI down belongs to the person it was measured
+        // on, so it goes: the stages are invalidated, which is what stops the
+        // new patient being sonicated on the last one's registration, AND the
+        // data behind them is dropped, which is what stops the last one's
+        // head being drawn on this patient's pages.
+        workflow_.change(beam::gui::WorkflowStage::Imaging,
+                         "A different patient is being treated; this patient's imaging, "
+                         "registration and coupling have not been done.");
+        clearPatientImagingAndRegistration();
+        clearCouplingMeasurement();
+    }
+    loadPatientData();
+    if (switching) refresh();
+
+    // Whether this device has seen them before is the thing the operator
+    // wants confirmed: a new patient and a mistyped identifier look the same
+    // on screen otherwise.
+    showMessage(onFile ? QStringLiteral("Now treating %1 (patient %2), who is already on this device. "
+                                        "The treatment plan shows their visits.")
+                             .arg(QString::fromStdString(patient.externalId))
+                             .arg(patient.id)
+                       : QStringLiteral("%1 is new to this device, and is patient %2.")
+                             .arg(QString::fromStdString(patient.externalId))
+                             .arg(patient.id),
+                false);
+}
+
+// A pre-patient install kept one subject's record directly in the runtime
+// directory. The first patient named on it is that subject, so the record
+// moves under them rather than waiting there for the next person. Nothing is
+// overwritten, and a file that cannot be moved is left where it is and said
+// so -- losing a treatment record to a tidy-up is not a trade worth making.
+void WorkflowWindow::adoptLegacyPatientData(int patientId) {
+    if (patientId <= 0) return;
+    const QDir runtime(treatmentDataDirectory());
+    const QString directory =
+        runtime.filePath(QStringLiteral("patients/%1").arg(patientId));
+    if (!QDir().mkpath(directory)) return;
+    for (const QString& name : {QStringLiteral("treatment_log.csv"),
+                                QStringLiteral("treatment_visit_state.csv")}) {
+        const QString from = runtime.filePath(name);
+        const QString to = QDir(directory).filePath(name);
+        if (!QFileInfo::exists(from) || QFileInfo::exists(to)) continue;
+        if (QFile::rename(from, to)) continue;
+        if (QFile::copy(from, to) && QFile::remove(from)) continue;
+        showMessage(QStringLiteral("%1 could not be moved under patient %2 and is no longer "
+                                   "being read. Move it there by hand.")
+                        .arg(QDir::toNativeSeparators(from))
+                        .arg(patientId),
+                    true);
+    }
+}
+
+void WorkflowWindow::loadPatientData() {
+    // The Treatment page keeps its own copy of the last message, because
+    // showMessage only mirrors onto it while that page is the one showing --
+    // and a patient is changed from the Case page. Left alone, the new
+    // patient arrived at a page still saying the LAST one's visit was
+    // complete and offering to finish their treatment.
+    if (sonicationCountdownLabel_ != nullptr) {
+        sonicationCountdownLabel_->setText(QStringLiteral("No sonication running."));
+        sonicationCountdownLabel_->setStyleSheet(
+            QStringLiteral("QLabel { color: #dcebef; padding: 4px; }"));
+    }
+    treatmentLog_.clear();
+    visitSonication_.clear();
+    editedVisits_.clear();
+    // So loadTreatmentProtocol treats this as a fresh protocol and opens on
+    // this patient's latest visit rather than keeping the last one's place.
+    lastLoadedProtocol_.clear();
+    lastLoadedVisit_ = 0;
+    currentSonication_ = 1;
+
+    const QString directory = patientDataDirectory();
+    if (!directory.isEmpty()) {
+        try {
+            treatmentLog_.load(
+                QDir(directory).filePath(QStringLiteral("treatment_log.csv")).toStdString());
+        } catch (const std::exception& error) {
+            showMessage(QStringLiteral("This patient's treatment log could not be read: %1")
+                            .arg(error.what()),
+                        true);
+        }
+        loadVisitState();
+    }
+    // After the load, which clears it, and whatever the file said: the
+    // registry is the authority on who this is. An old log whose SubjectID
+    // column was never filled is stamped from here on its next save.
+    beam::gui::Patient open;
+    if (patients_.find(currentPatientId_, &open)) {
+        treatmentLog_.setPatient(open.externalId, open.site,
+                                 open.lastName.empty() && open.firstName.empty()
+                                     ? std::string()
+                                     : beam::gui::patientDisplayName(open));
+    }
+    if (treatmentProtocolCombo_ == nullptr) return;
+
+    // Their Target List, which carries the parameters prescribed for them.
+    // Read before the plan: loadTreatmentProtocol fills the grid from it.
+    const QString own = patientTargetsPath();
+    const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
+                                    ? own
+                                    : locateDataFile(QStringLiteral("treatment_targets.csv"));
+    if (!targetsPath.isEmpty()) {
+        try {
+            beam::gui::TreatmentTargetStore loaded = targetStore_;
+            loaded.loadTargets(targetsPath.toStdString());
+            targetStore_ = std::move(loaded);
+        } catch (const std::exception& error) {
+            showMessage(QStringLiteral("This patient's Target List could not be read (%1); the "
+                                       "one on screen is the previous patient's.")
+                            .arg(error.what()),
+                        true);
+        }
+    }
+    // The list widget and the per-target grids are built from the store, so
+    // they are rebuilt with it. Nothing survives into the next patient.
+    //
+    // Disown the grid BEFORE emptying the list. Emptying it changes the
+    // selection, which runs switchToSelectedTarget, which saves the grid
+    // against whichever target it still thinks is showing -- the last
+    // patient's -- and that save writes the store back out. The new patient's
+    // Target List was being read correctly and then overwritten, in their own
+    // file, by the parameters just read off the previous patient's screen.
+    targetSonications_.clear();
+    currentTargetId_ = -1;
+    gridTargetId_ = -1;
+    stimParamModel_->setRows({});
+    targetListWidget_->clear();
+    for (const beam::gui::TreatmentTarget& target : targetStore_.targets())
+        addTargetListRow(QString::fromStdString(target.name));
+    if (targetListWidget_->count() > 0) targetListWidget_->setCurrentRow(0);
+    refreshVisitCombo();
+    loadTreatmentProtocol(currentProtocolName());
+}
+
+void WorkflowWindow::savePatientData() {
+    if (patientDataDirectory().isEmpty()) return;
+    // The whole page, not just the log: the Target List and the protocol grid
+    // are edited on the same screen, and a switch must not drop what was
+    // typed into them any more than it may drop a delivery. Quietly, though:
+    // the operator asked to open somebody, not to save somebody.
+    saveTreatmentTargetStore(/*announce=*/false);
+    saveVisitState();
+}
+
 // The install's own copy, read straight from data/ and never from the
 // operator's runtime directory: loadTreatmentTargetStore prefers the runtime
 // file, which is exactly the file this one exists to undo.
@@ -1281,23 +1987,51 @@ void WorkflowWindow::restoreShippedParameters() {
                 false);
 }
 
+// The operator's device-wide copy if they have one, else the shipped seed.
+QString WorkflowWindow::locateDataFile(const QString& fileName) const {
+    const QString user = QDir(treatmentDataDirectory()).filePath(fileName);
+    if (QFileInfo::exists(user)) return user;
+    const QString executableDir = QCoreApplication::applicationDirPath();
+    const QStringList seeds = {
+        QDir(executableDir).filePath(QStringLiteral("../../../data/") + fileName),
+        QDir(executableDir).filePath(QStringLiteral("../../data/") + fileName),
+        QDir(executableDir).filePath(QStringLiteral("data/") + fileName),
+        QDir::current().filePath(QStringLiteral("data/") + fileName)};
+    for (const QString& seed : seeds)
+        if (QFileInfo::exists(seed)) return seed;
+    return QString();
+}
+
+// Where this patient's Target List is read from.
+//
+// A target's parameters -- amplitude, the burst and pulse schedule -- are
+// prescribed for a person, not for the device. Keeping one copy meant tuning
+// SCC1 for the patient in the room also tuned it for everybody treated after
+// them, silently, with nothing on screen to say it had happened. BeamV0 had no
+// such leak only because a new subject there meant a new copy of the whole
+// data directory.
+//
+// A patient with no list of their own starts from the device-wide copy, which
+// is what the operator has already set up; that copy is never written again
+// once a patient is open, so it stays the starting point rather than drifting
+// into whoever was treated last.
+//
+// Protocols are not here. A protocol is a schedule of which targets to visit
+// in what order -- a library the site writes once -- so it stays shared.
+QString WorkflowWindow::patientTargetsPath() const {
+    const QString patientDirectory = patientDataDirectory();
+    if (patientDirectory.isEmpty()) return QString();
+    return QDir(patientDirectory).filePath(QStringLiteral("treatment_targets.csv"));
+}
+
 void WorkflowWindow::loadTreatmentTargetStore() {
-    const auto locate = [this](const QString& fileName) {
-        const QString user = QDir(treatmentDataDirectory()).filePath(fileName);
-        if (QFileInfo::exists(user)) return user;
-        const QString executableDir = QCoreApplication::applicationDirPath();
-        const QStringList seeds = {
-            QDir(executableDir).filePath(QStringLiteral("../../../data/") + fileName),
-            QDir(executableDir).filePath(QStringLiteral("../../data/") + fileName),
-            QDir(executableDir).filePath(QStringLiteral("data/") + fileName),
-            QDir::current().filePath(QStringLiteral("data/") + fileName)};
-        for (const QString& seed : seeds)
-            if (QFileInfo::exists(seed)) return seed;
-        return QString();
-    };
+    const auto locate = [this](const QString& fileName) { return locateDataFile(fileName); };
 
     loadShippedTargetStore();
-    const QString targetsPath = locate(QStringLiteral("treatment_targets.csv"));
+    const QString own = patientTargetsPath();
+    const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
+                                    ? own
+                                    : locate(QStringLiteral("treatment_targets.csv"));
     const QString protocolsPath = locate(QStringLiteral("treatment_protocols.csv"));
     if (targetsPath.isEmpty() || protocolsPath.isEmpty()) {
         showMessage(QStringLiteral("Treatment target/protocol data was not found; using built-in "
@@ -1308,10 +2042,14 @@ void WorkflowWindow::loadTreatmentTargetStore() {
     try {
         targetStore_.loadTargets(targetsPath.toStdString());
         targetStore_.loadProtocols(protocolsPath.toStdString());
-        // The log lives with the patient's data, not the install's seed.
-        treatmentLog_.load(QDir(treatmentDataDirectory())
-                               .filePath(QStringLiteral("treatment_log.csv"))
-                               .toStdString());
+        // The log belongs to the patient, not to the install's seed -- and on
+        // a device that has treated somebody before, to no patient at all
+        // until the Case page names one.
+        const QString patientDirectory = patientDataDirectory();
+        if (!patientDirectory.isEmpty())
+            treatmentLog_.load(QDir(patientDirectory)
+                                   .filePath(QStringLiteral("treatment_log.csv"))
+                                   .toStdString());
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Treatment data could not be read: %1").arg(error.what()), true);
         return;
@@ -1377,21 +2115,46 @@ void WorkflowWindow::writeProtocolGridToStore() {
     }
 }
 
-void WorkflowWindow::saveTreatmentTargetStore() {
+void WorkflowWindow::saveTreatmentTargetStore(bool announce) {
     writeProtocolGridToStore();
     writeTargetPointsToStore();
     const QString directory = treatmentDataDirectory();
     try {
+        // The Target List goes under the patient once there is one: its
+        // parameters were prescribed for them. Before any patient is named it
+        // goes where a pre-patient install put it, which is also where the
+        // next new patient will be seeded from.
+        const QString own = patientTargetsPath();
         targetStore_.saveTargets(
-            QDir(directory).filePath(QStringLiteral("treatment_targets.csv")).toStdString());
+            (own.isEmpty()
+                 ? QDir(directory).filePath(QStringLiteral("treatment_targets.csv"))
+                 : own)
+                .toStdString());
+        // Protocols are the site's library and stay shared.
         targetStore_.saveProtocols(
             QDir(directory).filePath(QStringLiteral("treatment_protocols.csv")).toStdString());
-        const QString logPath = QDir(directory).filePath(QStringLiteral("treatment_log.csv"));
+        // The library above is the install's; the log below is this patient's.
+        const QString patientDirectory = patientDataDirectory();
+        if (patientDirectory.isEmpty()) {
+            // Nobody is named, so there is nobody to file this against. Only
+            // worth saying when something would actually be lost: this also
+            // runs while the window is being built, before the Case page has
+            // been near the operator, and a red banner there says nothing.
+            if (!treatmentLog_.rows().empty()) {
+                showMessage(QStringLiteral("Nothing was logged: the Case page has not said which "
+                                           "patient is being treated."),
+                            true);
+            }
+            return;
+        }
+        const QString logPath =
+            QDir(patientDirectory).filePath(QStringLiteral("treatment_log.csv"));
         treatmentLog_.save(logPath.toStdString());
         // The log writes itself on every change, so there is no Save button to
         // press and no way to tell whether it happened. This is that telling.
         // The file first, then what happened to it: the operator is checking
         // which log this went into, not reading a headline.
+        if (!announce) return;
         showMessage(QStringLiteral("%1 updated at %2")
                         .arg(QDir::toNativeSeparators(logPath))
                         .arg(QDateTime::currentDateTime().toString(
@@ -2721,14 +3484,19 @@ void WorkflowWindow::setSerialConnectedLamp(bool connected) {
 // figure is the one the Correction stage actually measured.
 
 QString WorkflowWindow::visitStatePath() const {
-    return QDir(treatmentDataDirectory()).filePath(QStringLiteral("treatment_visit_state.csv"));
+    const QString directory = patientDataDirectory();
+    if (directory.isEmpty()) return QString();
+    return QDir(directory).filePath(QStringLiteral("treatment_visit_state.csv"));
 }
 
 // Where each visit was left. The log holds what was delivered, which is not the
 // same thing: the operator can point the visit at a sonication without firing
 // it, and that choice has to survive a restart like everything else on the page.
 void WorkflowWindow::saveVisitState() const {
-    QFile file(visitStatePath());
+    const QString path = visitStatePath();
+    // Nobody named, so nothing to file it against.
+    if (path.isEmpty()) return;
+    QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return;
     QTextStream out(&file);
     out << "Protocol,Visit,CurrentSonication,Edited\n";
@@ -2760,7 +3528,9 @@ void WorkflowWindow::markVisitEdited(const QString& protocol, int visit) {
 }
 
 void WorkflowWindow::loadVisitState() {
-    QFile file(visitStatePath());
+    const QString path = visitStatePath();
+    if (path.isEmpty()) return;
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
     QTextStream in(&file);
     in.readLine();  // header
@@ -3855,9 +4625,15 @@ void WorkflowWindow::applyTreatmentLibrary(const beam::gui::TreatmentTargetStore
     const QString protocol = treatmentProtocolCombo_->currentText();
     targetStore_ = edited;
 
-    targetListWidget_->clear();
+    // Disowned before the list is emptied, for the reason loadPatientData
+    // spells out: emptying it saves the grid against the target it still
+    // thinks is showing, and that save would put the parameters just replaced
+    // straight back.
     targetSonications_.clear();
     currentTargetId_ = -1;
+    gridTargetId_ = -1;
+    stimParamModel_->setRows({});
+    targetListWidget_->clear();
     for (const beam::gui::TreatmentTarget& target : targetStore_.targets())
         addTargetListRow(QString::fromStdString(target.name));
     if (targetListWidget_->count() > 0) targetListWidget_->setCurrentRow(0);

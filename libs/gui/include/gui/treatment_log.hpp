@@ -78,6 +78,24 @@ public:
     void save(const std::string& path) const;
 
     const std::vector<TreatmentLogRow>& rows() const { return rows_; }
+
+    // Whose treatment this is: the Participant ID and Site ID from the Case
+    // page. A property of the log rather than of each row -- one log holds one
+    // patient's deliveries, so two rows of the same file cannot name different
+    // people -- but written into every row, because setLogInfoToCSV.m's column
+    // shape has a SubjectID and a SiteID per row and that is what a CRF reads.
+    //
+    // Until BeamAI knew who the patient was, both columns were written empty.
+    // A log that names nobody is identified only by the directory it sits in,
+    // which does not survive the file being copied out of it.
+    // name is written to a SubjectName column of its own, beside the two
+    // setLogInfoToCSV.m already has. It is identifying information in the file
+    // most likely to leave the device, so it is here because an operator asked
+    // for it, not because the column shape wanted it.
+    void setPatient(std::string subjectId, std::string siteId, std::string name = {});
+    const std::string& subjectId() const { return subjectId_; }
+    const std::string& siteId() const { return siteId_; }
+    const std::string& subjectName() const { return subjectName_; }
     // Appends, numbering the row for its protocol and visit. Returns the
     // sequence given.
     int append(TreatmentLogRow row);
@@ -150,7 +168,14 @@ public:
     // Stamps the end time on a row left open by a delivery.
     bool close(const std::string& protocol, int visit, int sequence, const std::string& endedAt);
 
-    void clear() { rows_.clear(); }
+    // The rows and the identity together: clearing one without the other
+    // would leave a log attributed to a patient whose deliveries have gone.
+    void clear() {
+        rows_.clear();
+        subjectId_.clear();
+        siteId_.clear();
+        subjectName_.clear();
+    }
 
     // getResponseFromTreatmentProtocolData.m: each score rounded and clamped to
     // [-2, 2], a missing one zero, the total their sum.
@@ -160,6 +185,9 @@ public:
 
 private:
     std::vector<TreatmentLogRow> rows_;
+    std::string subjectId_;
+    std::string siteId_;
+    std::string subjectName_;
 };
 
 }  // namespace beam::gui

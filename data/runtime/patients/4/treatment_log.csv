@@ -1,0 +1,15 @@
+# BeamAI treatment log, in setLogInfoToCSV.m's column shape: the protocol
+# table's own columns, the Parameters string parsed out beside it, and the
+# visit/site metadata that function appends.
+#
+# SonicationStartDTM and SonicationEndDTM are the names BeamV0's own rename
+# list gives them; it never fills them, and these are stamped at fire time.
+# Sham and Protocol are ours: BeamV0 logs one protocol per file and does not
+# record which deliveries were masked.
+#
+# Blank CRF columns are fields BeamAI does not collect yet. They are written
+# so the column set matches rather than silently differing.
+Number,Name,Duration,Amplitude,Parameters,ResponsePain,ResponseMood,ResponseTotal,Notes,X,Y,Z,BD,BI,PD,PI,VisitNumber,SubjectID,SubjectName,SiteID,SessionDate,BEAMSerialNumber,Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,Protocol,FromPlan,StatusCode
+3,SCC1,5,0.5,"X:0,Y:0,Z:0,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,0,0,0,0.03,0.7,0.005,0.01,1,p102,"Shoemaker, Cindy",site_100,,,,,,SCC1,,,,,,0,Default,0,0
+2,SCC2,30,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.06,BI:1.1,PD:0.005,PI:0.01",,,0,,-16.8242,42.0389,2.93901,0.06,1.1,0.005,0.01,1,p102,"Shoemaker, Cindy",site_100,2026-10-20,,,,,SCC2,,,,2026-10-20T13:10:25.903,2026-10-20T13:10:55.905,1,Default,0,200
+1,SCC3,5,0.5,"X:20.7225,Y:38.4372,Z:16.3678,BD:0.09,BI:1.4,PD:0.001,PI:0.005",,,0,,20.7225,38.4372,16.3678,0.09,1.4,0.001,0.005,1,p102,"Shoemaker, Cindy",site_100,2026-10-20,,,,,SCC3,,,,2026-10-20T12:21:31.831,2026-10-20T12:21:36.899,1,Default,0,200

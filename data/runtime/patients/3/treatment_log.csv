@@ -1,0 +1,20 @@
+# BeamAI treatment log, in setLogInfoToCSV.m's column shape: the protocol
+# table's own columns, the Parameters string parsed out beside it, and the
+# visit/site metadata that function appends.
+#
+# SonicationStartDTM and SonicationEndDTM are the names BeamV0's own rename
+# list gives them; it never fills them, and these are stamped at fire time.
+# Sham and Protocol are ours: BeamV0 logs one protocol per file and does not
+# record which deliveries were masked.
+#
+# Blank CRF columns are fields BeamAI does not collect yet. They are written
+# so the column set matches rather than silently differing.
+Number,Name,Duration,Amplitude,Parameters,ResponsePain,ResponseMood,ResponseTotal,Notes,X,Y,Z,BD,BI,PD,PI,VisitNumber,SubjectID,SubjectName,SiteID,SessionDate,BEAMSerialNumber,Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,Protocol,FromPlan,StatusCode
+2,SCC3,5,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.09,BI:1.4,PD:0.001,PI:0.005",,,0,,-16.8242,42.0389,2.93901,0.09,1.4,0.001,0.005,1,p100,"Shoemaker, Bill",s100,2026-10-20,,,,,SCC3,,0.302296,0.506427,2026-10-20T11:26:45.479,2026-10-20T11:26:50.544,0,Default,0,200
+1,SCC1,5,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,-16.8242,42.0389,2.93901,0.03,0.7,0.005,0.01,1,p100,"Shoemaker, Bill",s100,2026-10-20,,,,,SCC1,,0.302296,0.506427,2026-10-20T11:23:11.405,2026-10-20T11:23:16.454,0,Default,0,200
+6,SCC1,5,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,-16.8242,42.0389,2.93901,0.03,0.7,0.005,0.01,1,p100,"Shoemaker, Bill",s100,2026-10-20,,,,,SCC1,,,,2026-10-20T12:20:21.755,2026-10-20T12:20:26.822,1,Default,0,200
+3,SCC1,5,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,-16.8242,42.0389,2.93901,0.03,0.7,0.005,0.01,1,p100,"Shoemaker, Bill",s100,2026-10-20,,,,,SCC1,,0.302296,0.506427,2026-10-20T11:36:24.127,2026-10-20T11:36:29.237,0,Default,0,200
+4,SCC1,5,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,-16.8242,42.0389,2.93901,0.03,0.7,0.005,0.01,1,p100,"Shoemaker, Bill",s100,2026-10-20,,,,,SCC1,,0.302296,0.506427,2026-10-20T11:54:54.480,2026-10-20T11:54:59.582,0,Default,0,200
+5,SCC1,5,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,-16.8242,42.0389,2.93901,0.03,0.7,0.005,0.01,1,p100,"Shoemaker, Bill",s100,2026-10-20,,,,,SCC1,,,,2026-10-20T12:09:35.414,2026-10-20T12:09:40.511,1,Default,0,200
+7,SCC1,5,0.5,"X:-16.8242,Y:42.0389,Z:2.93901,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,-16.8242,42.0389,2.93901,0.03,0.7,0.005,0.01,1,p100,"Shoemaker, Bill",s100,2026-10-20,,,,,SCC1,,,,2026-10-20T13:11:32.117,2026-10-20T13:11:37.214,1,Default,0,200
+8,SCC1,5,0.5,"X:0,Y:0,Z:0,BD:0.03,BI:0.7,PD:0.005,PI:0.01",,,0,,0,0,0,0.03,0.7,0.005,0.01,1,p100,"Shoemaker, Bill",s100,,,,,,SCC1,,,,,,0,Default,0,0

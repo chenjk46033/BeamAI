@@ -820,3 +820,143 @@ TEST(TreatmentLog, MultiLineNotesSurviveTheRoundTrip) {
     ASSERT_NE(back, nullptr);
     EXPECT_EQ(back->notes, written);
 }
+
+// setLogInfoToCSV.m's column shape has a SubjectID and a SiteID on every row,
+// and BeamAI wrote both empty: a log that named nobody was identified only by
+// the directory it happened to sit in.
+TEST(TreatmentLog, EveryRowCarriesTheSubjectAndSite) {
+    const std::string path = scratch("treatment_log_subject.csv");
+    beam::gui::TreatmentLog written;
+    written.setPatient("p001", "s001", "Kowalski, Ada");
+    written.append(makeRow(1, "SCC1"));
+    written.append(makeRow(1, "SCC3"));
+    ASSERT_NO_THROW(written.save(path));
+
+    std::ifstream file(path);
+    int dataRows = 0;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#' || line.rfind("Number,", 0) == 0) continue;
+        ++dataRows;
+        // quote() only quotes what needs it, so a plain identifier is bare;
+        // a name holds the separator and is quoted.
+        EXPECT_NE(line.find(",p001,\"Kowalski, Ada\",s001,"), std::string::npos) << line;
+    }
+    EXPECT_EQ(dataRows, 2);
+}
+
+TEST(TreatmentLog, SubjectAndSiteSurviveTheRoundTrip) {
+    const std::string path = scratch("treatment_log_subject_roundtrip.csv");
+    beam::gui::TreatmentLog written;
+    written.setPatient("Smith, John", "s001");
+    written.append(makeRow(1, "SCC1"));
+    ASSERT_NO_THROW(written.save(path));
+
+    beam::gui::TreatmentLog read;
+    ASSERT_NO_THROW(read.load(path));
+    // An identifier an operator typed can hold the separator.
+    EXPECT_EQ(read.subjectId(), "Smith, John");
+    EXPECT_EQ(read.siteId(), "s001");
+    ASSERT_EQ(read.rows().size(), 1u);
+}
+
+// The session is dated by the delivery already stamped on the row, and a row
+// that never ran has no session to date.
+TEST(TreatmentLog, SessionDateComesFromTheDelivery) {
+    const std::string path = scratch("treatment_log_session_date.csv");
+    beam::gui::TreatmentLog written;
+    written.setPatient("p001", "s001");
+    written.append(makeRow(1, "SCC1"));
+    beam::gui::TreatmentLogRow planned = makeRow(1, "SCC2");
+    planned.startedAt.clear();
+    planned.endedAt.clear();
+    written.append(std::move(planned));
+    ASSERT_NO_THROW(written.save(path));
+
+    std::ifstream file(path);
+    std::string line;
+    int delivered = 0;
+    int unrun = 0;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#' || line.rfind("Number,", 0) == 0) continue;
+        if (line.find(",p001,,s001,2026-10-14,") != std::string::npos) ++delivered;
+        if (line.find(",p001,,s001,,") != std::string::npos) ++unrun;
+    }
+    EXPECT_EQ(delivered, 1);
+    EXPECT_EQ(unrun, 1);
+}
+
+// A log written before the column was filled still loads; it simply does not
+// answer, and the registry stamps it on the next save.
+TEST(TreatmentLog, AnUnnamedLogLoadsWithNoSubject) {
+    const std::string path = scratch("treatment_log_unnamed.csv");
+    beam::gui::TreatmentLog written;
+    written.append(makeRow(1, "SCC1"));
+    ASSERT_NO_THROW(written.save(path));
+
+    beam::gui::TreatmentLog read;
+    ASSERT_NO_THROW(read.load(path));
+    EXPECT_TRUE(read.subjectId().empty());
+    EXPECT_TRUE(read.siteId().empty());
+    EXPECT_EQ(read.rows().size(), 1u);
+
+    // Naming it and saving again is the backfill: every row, not just new ones.
+    read.setPatient("p001", "s001");
+    ASSERT_NO_THROW(read.save(path));
+    beam::gui::TreatmentLog again;
+    ASSERT_NO_THROW(again.load(path));
+    EXPECT_EQ(again.subjectId(), "p001");
+}
+
+// Clearing the rows must clear who they belonged to: a log attributed to a
+// patient whose deliveries have gone is how one patient's identity reaches
+// another patient's file.
+TEST(TreatmentLog, ClearForgetsThePatient) {
+    beam::gui::TreatmentLog log;
+    log.setPatient("p001", "s001");
+    log.append(makeRow(1, "SCC1"));
+    log.clear();
+    EXPECT_TRUE(log.subjectId().empty());
+    EXPECT_TRUE(log.siteId().empty());
+    EXPECT_TRUE(log.rows().empty());
+}
+
+// The name was asked for by an operator; it is identifying information in the
+// file most likely to leave the device, so it gets a column of its own rather
+// than being folded into SubjectID.
+TEST(TreatmentLog, TheSubjectNameRoundTripsAndIsSeparateFromTheId) {
+    const std::string path = scratch("treatment_log_subject_name.csv");
+    beam::gui::TreatmentLog written;
+    written.setPatient("p001", "s001", "Okonkwo-Fitzgerald, Chidinma");
+    written.append(makeRow(1, "SCC1"));
+    ASSERT_NO_THROW(written.save(path));
+
+    beam::gui::TreatmentLog read;
+    ASSERT_NO_THROW(read.load(path));
+    EXPECT_EQ(read.subjectId(), "p001");
+    EXPECT_EQ(read.siteId(), "s001");
+    EXPECT_EQ(read.subjectName(), "Okonkwo-Fitzgerald, Chidinma");
+}
+
+// A patient with no name recorded leaves the column empty rather than
+// repeating the Participant ID into it.
+TEST(TreatmentLog, AnUnnamedPatientLeavesTheNameColumnEmpty) {
+    const std::string path = scratch("treatment_log_no_name.csv");
+    beam::gui::TreatmentLog written;
+    written.setPatient("p001", "s001");
+    written.append(makeRow(1, "SCC1"));
+    ASSERT_NO_THROW(written.save(path));
+
+    beam::gui::TreatmentLog read;
+    ASSERT_NO_THROW(read.load(path));
+    EXPECT_EQ(read.subjectId(), "p001");
+    EXPECT_TRUE(read.subjectName().empty());
+}
+
+TEST(TreatmentLog, ClearForgetsTheName) {
+    beam::gui::TreatmentLog log;
+    log.setPatient("p001", "s001", "Kowalski, Ada");
+    log.append(makeRow(1, "SCC1"));
+    log.clear();
+    EXPECT_TRUE(log.subjectName().empty());
+}

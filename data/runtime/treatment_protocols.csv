@@ -149,3 +149,6 @@ Default,23,T3,0.75,300
 Default,24,T1,0.75,240
 Protocol1,1,SCC3,,30
 Protocol1,2,aMCC1,,30
+TestShared,1,SCC1,0.75,5
+TestShared,2,SCC2,0.75,6
+TestShared,3,SCC3,0.75,7

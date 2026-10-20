@@ -17,6 +17,7 @@ add_library(gui STATIC
     src/treatment_session_store.cpp
     src/treatment_log.cpp
     src/treatment_target_store.cpp
+    src/patient_registry.cpp
     src/registration_check_presenter.cpp
     src/treatment_workflow.cpp
 )

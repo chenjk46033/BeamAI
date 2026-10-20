@@ -1,0 +1,9 @@
+# Who this device has treated. id names the directory their visits
+# live in, so it is never reused or renumbered; externalId is the
+# operator's own Participant ID and is what appears on a CRF.
+# next-id: 10
+id,externalId,site,lastName,firstName,dateOfBirth,createdAt
+1,"p001","site_100","Doe","John","1999-01-01","2026-10-20T11:02:17"
+3,"p101","site_100","Shoemaker","Bill","1970-01-01","2026-10-20T11:21:58"
+4,"p102","site_100","Shoemaker","Cindy","1989-01-23","2026-10-20T11:23:27"
+9,"p103","site_100","Short","Clint","1993-04-03","2026-10-20T14:43:29"

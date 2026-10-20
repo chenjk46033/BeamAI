@@ -8,8 +8,10 @@
 #include <QSize>
 #include <array>
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "gui/patient_registry.hpp"
 #include "gui/treatment_log.hpp"
 #include "gui/treatment_target_store.hpp"
 #include "treatment_library_dialog.hpp"
@@ -29,6 +31,7 @@ class QChartView;
 class QHBoxLayout;
 class QGroupBox;
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QMenu;
 class QPushButton;
@@ -81,7 +84,13 @@ private:
     bool registrationFitApplied() const;
     bool registrationLockPositionRegistered() const;
     void setRegistrationPhase(RegistrationPhase phase);
+    // Dark text on a light field. Anything built after the constructor has to
+    // ask for this, or it is typed into invisibly.
+    static void styleInputField(QLineEdit* edit);
     void selectStage(beam::gui::WorkflowStage stage);
+    // Navigates to workflow_.nextStage() by a row the list actually shows:
+    // four stages are folded into other tabs and their rows are hidden.
+    void goToNextStage();
     void completeCurrentStage();
     // Where the three imaging dialogs open: the last place one was used,
     // falling back to the MRI library.
@@ -213,11 +222,62 @@ private:
     void updateStimGridHeight();
     void loadTreatmentProtocol(const QString& protocolName);
     QString treatmentDataDirectory() const;
+    // The install's own files -- the protocol/target library and the list of
+    // people treated on it -- live in treatmentDataDirectory(). What belongs
+    // to one person lives here, under them.
+    QString patientDataDirectory() const;
+    QString patientsPath() const;
+    // The operator's device-wide copy of a data file, else the shipped seed.
+    QString locateDataFile(const QString& fileName) const;
+    // This patient's own Target List. Empty when nobody is named.
+    QString patientTargetsPath() const;
+    void loadPatientRegistry();
+    void savePatientRegistry();
+    // The list of people on this device, on the Case page. Typing the exact
+    // Participant ID was the only way in, with nothing on screen to say who
+    // was already on file.
+    void buildPatientChooser();
+    void refreshPatientChooser();
+    // Builds the Case page demographics fields; fills them from a patient.
+    void buildCaseDemographics();
+    void showCaseDemographics(const beam::gui::Patient& patient);
+    // What the Case page currently says about who is being treated.
+    beam::gui::Patient caseDemographics() const;
+    // Blank, or YYYY-MM-DD. False for anything else, so a typo is reported
+    // rather than quietly dropped.
+    static bool readDateOfBirth(const QString& text, std::string* out);
+    // Edit, or delete, the patient on one row of the chooser.
+    void showPatientMenu(int row, const QPoint& globalPosition);
+    void editPatient(int patientId);
+    void deletePatient(int patientId, int plannedRows);
+    // How many sonications this patient has had. Zero is the gate on deleting
+    // them. plannedRows, when given, counts the rows that never fired.
+    int patientDeliveryCount(int patientId, int* plannedRows) const;
+    // Opens the record of whoever the Case page names, writing out whoever was
+    // open before. Adds them if this device has not treated them.
+    void selectPatient(const beam::gui::Patient& details);
+    // Reads this patient's log and visit state in place of whoever was there,
+    // and puts the treatment plan on their visits.
+    void loadPatientData();
+    void savePatientData();
+    // Moves a pre-patient install's record under the first patient identified
+    // on it. Idempotent: it moves what is there and nothing else.
+    void adoptLegacyPatientData(int patientId);
+    // Throws away everything measured on a person -- their MRI, the fiducials
+    // found in it, the registration fitted to them and the array position it
+    // placed -- putting those pages back to the state the application starts
+    // in. A different patient's head must not be on screen.
+    void clearPatientImagingAndRegistration();
     QString currentProtocolName() const;
     void loadTreatmentTargetStore();
     void refreshProtocolCombo(const QString& select);
     void writeProtocolGridToStore();
-    void saveTreatmentTargetStore();
+    // announce: the "log updated at ..." confirmation. The log saves itself on
+    // every change with no button to press, so normally the operator has to be
+    // told it happened. A save the application takes on its own -- closing one
+    // patient to open another -- is not something they asked for, and saying so
+    // buries what they did ask about.
+    void saveTreatmentTargetStore(bool announce = true);
     int currentVisitNumber() const;
     void recordSonicationStart(const beam::gui_qt::StimParamRow& row, bool sham,
                                std::optional<double> attenuation,
@@ -411,7 +471,24 @@ private:
     // install, saved to the user's own copy -- see treatmentDataDirectory().
     beam::gui::TreatmentTargetStore targetStore_;
     // What was actually delivered, per visit. The store above is the plan.
+    // Holds ONE patient's rows: the switch writes them out and reads the next
+    // patient's in, so there is never a second patient's row in here to leak.
     beam::gui::TreatmentLog treatmentLog_;
+    // Everybody this device has treated.
+    beam::gui::PatientRegistry patients_;
+    QGroupBox* patientChooserGroup_ = nullptr;
+    QTableWidget* patientTable_ = nullptr;
+    QLabel* patientChooserHint_ = nullptr;
+    // Demographics, on the Case page beside the Participant and Site IDs.
+    // All three may be left blank: somebody can be enrolled and treated
+    // before their details are to hand.
+    QLineEdit* lastNameEdit_ = nullptr;
+    QLineEdit* firstNameEdit_ = nullptr;
+    QLineEdit* dateOfBirthEdit_ = nullptr;
+    // Whose record is open. Zero until the Case page names somebody -- and on
+    // a device that has never named anybody, that is where a pre-patient
+    // install's single record still is.
+    int currentPatientId_ = 0;
     // The row runSonication opened, so the countdown can stamp its end.
     int openLogSequence_ = 0;
     // Held while PlaySound is reading from it.

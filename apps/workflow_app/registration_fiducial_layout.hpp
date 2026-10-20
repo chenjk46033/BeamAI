@@ -20,6 +20,10 @@ public:
     // rather than the distance in the projection the diagram draws.
     void setMarkerDepthsMm(std::array<double, 6> lrMm);
     void setSelectionHandler(std::function<void(int)> handler);
+    // Back to the nominal right-triangle drawing with no coordinates against
+    // it. Nothing else can un-set the measured shape, and a diagram still
+    // holding the last patient's marker positions is a drawing of their head.
+    void clearMarkers();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
