@@ -1,6 +1,8 @@
 # Framework-independent GUI presenter logic -- the data transforms behind
 # BeamV0's GUI/*.m, with no Qt dependency. Unit-tested on its own; the Qt
 # views live in libs/gui_qt.
+find_package(miniz CONFIG REQUIRED)
+
 add_library(gui STATIC
     src/safety_presenter.cpp
     src/correction_tab_presenter.cpp
@@ -18,8 +20,10 @@ add_library(gui STATIC
     src/treatment_log.cpp
     src/treatment_target_store.cpp
     src/patient_registry.cpp
+    src/treatment_session.cpp
     src/registration_check_presenter.cpp
     src/treatment_workflow.cpp
 )
 target_include_directories(gui PUBLIC include)
 target_link_libraries(gui PUBLIC safety correction registration array mri stimulation sham Eigen3::Eigen)
+target_link_libraries(gui PRIVATE miniz::miniz)

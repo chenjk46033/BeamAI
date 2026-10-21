@@ -399,13 +399,6 @@
                                       </widget>
                                     </item>
                                     <item>
-                                      <widget class="QPushButton" name="loadBeamSessionButton">
-                                        <property name="text">
-                                          <string>Load Beam MRI session…</string>
-                                        </property>
-                                      </widget>
-                                    </item>
-                                    <item>
                                       <spacer name="loadMriSpacer">
                                         <property name="orientation">
                                           <enum>Qt::Horizontal</enum>

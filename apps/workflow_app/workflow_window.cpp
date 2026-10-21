@@ -453,15 +453,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     detectFiducialsButton_->setStyleSheet(stepButtonStyle);
     connect(detectFiducialsButton_, &QPushButton::clicked, this, [this] { detectFiducials(); });
 
-    importFiducialsButton_ = new QPushButton(QStringLiteral("Import fiducials..."), this);
-    importFiducialsButton_->setObjectName(QStringLiteral("importFiducialsButton"));
-    importFiducialsButton_->setToolTip(
-        QStringLiteral("Load six measured fiducials from a CSV saved earlier"));
-    importFiducialsButton_->setMinimumHeight(30);
-    importFiducialsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    importFiducialsButton_->setStyleSheet(stepButtonStyle);
-    connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
-
     ui_->registrationActions->removeWidget(ui_->resetRegistrationButton);
     ui_->resetRegistrationButton->setText(QStringLiteral("Restore Default"));
     ui_->resetRegistrationButton->setMinimumHeight(30);
@@ -505,11 +496,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     fiducialMenu->addAction(detectAction);
     fiducialMenu->addSeparator();
     fiducialMenu->addAction(fiducialAction(ui_->resetRegistrationButton));
-    fiducialMenu->addAction(fiducialAction(importFiducialsButton_));
     fiducialActionsButton_->setMenu(fiducialMenu);
     fiducialActionsButton_->setDefaultAction(detectAction);
-    for (QPushButton* driver : {detectFiducialsButton_, ui_->resetRegistrationButton,
-                                importFiducialsButton_})
+    for (QPushButton* driver : {detectFiducialsButton_, ui_->resetRegistrationButton})
         driver->hide();
     step1Buttons->addWidget(fiducialActionsButton_, 1);
     triangleColumn->addLayout(step1Buttons);
@@ -580,7 +569,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registerFiducialsButton->setStyleSheet(QStringLiteral(
         "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
         "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
-    // detectFiducialsButton_ and importFiducialsButton_ are built earlier, with
+    // detectFiducialsButton_ is built earlier, with
     // step 1's button row.
 
     auto* markerActions = new QHBoxLayout;
@@ -755,7 +744,27 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     step2ButtonRow->setSpacing(4);
     step2ButtonRow->addWidget(registerCurrentPositionButton_, 1);
     step2ButtonRow->addWidget(ui_->acceptRegistrationButton, 1);
+    // Saving belongs where the expensive thing was just done: the fiducials
+    // and the lock position are what a session exists to avoid repeating.
+    saveSessionOnRegistrationButton_ =
+        new QPushButton(QStringLiteral("Save session..."), calibrationGroup_);
+    saveSessionOnRegistrationButton_->setFixedHeight(kRegistrationButtonHeight);
+    saveSessionOnRegistrationButton_->setStyleSheet(
+        registerCurrentPositionButton_->styleSheet());
+    saveSessionOnRegistrationButton_->setToolTip(
+        QStringLiteral("Writes the MRI, the fiducials, the lock position and this patient's "
+                       "record to one file, beside the MRIs."));
+    connect(saveSessionOnRegistrationButton_, &QPushButton::clicked, this,
+            [this] { saveTreatmentSessionFile(); });
     calibrationLayout->insertLayout(0, step2ButtonRow);
+    // Its own line: sharing the row above clipped "Accept registration and
+    // continue" to "ccept registration and continue".
+    saveSessionOnRegistrationButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    auto* saveSessionRow = new QHBoxLayout;
+    saveSessionRow->setContentsMargins(0, 0, 0, 0);
+    saveSessionRow->addStretch(1);
+    saveSessionRow->addWidget(saveSessionOnRegistrationButton_);
+    calibrationLayout->insertLayout(1, saveSessionRow);
     // Calibration sliders use their own sliderPressed/valueChanged handlers
     // below. Do not install a parent mouse filter here: re-entering
     // updateRegistrationAvailability() from a slider mouse event can change
@@ -1447,46 +1456,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         refresh();
         goToNextStage();
     });
-    connect(ui_->loadNiftiButton, &QPushButton::clicked, this, [this] { chooseNifti(); });
+    // Two explicit buttons rather than BeamV0's one Load MRI that first asks
+    // file-or-folder: the operator knows which they have, so the prompt is a
+    // step with nothing to decide.
     connect(ui_->loadDicomButton, &QPushButton::clicked, this, [this] { chooseDicomDirectory(); });
-    connect(ui_->loadBeamSessionButton, &QPushButton::clicked, this, [this] { chooseBeamSession(); });
-    // The three stay as hidden drivers so their connections hold.
-    loadMriButton_ = new QToolButton(ui_->imagingGroup);
-    loadMriButton_->setPopupMode(QToolButton::MenuButtonPopup);
-    loadMriButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    loadMriButton_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    loadMriButton_->setMinimumHeight(ui_->loadDicomButton->sizeHint().height());
-    // The label centres across the whole button, menu section included, so
-    // without matching right padding it reads as pushed right.
-    loadMriButton_->setStyleSheet(ui_->loadDicomButton->styleSheet().replace(
-        QStringLiteral("QPushButton"), QStringLiteral("QToolButton")) +
-        QStringLiteral(""
-                       " QToolButton::menu-button { width: 18px; }"));
-    const auto loadAction = [this](QPushButton* driver) {
-        auto* action = new QAction(driver->text(), this);
-        action->setToolTip(driver->toolTip());
-        connect(action, &QAction::triggered, driver, &QPushButton::click);
-        return action;
-    };
-    auto* loadMenu = new QMenu(loadMriButton_);
-    QAction* dicomAction = loadAction(ui_->loadDicomButton);
-    loadMenu->addAction(dicomAction);
-    loadMenu->addSeparator();
-    loadMenu->addAction(loadAction(ui_->loadNiftiButton));
-    loadMenu->addAction(loadAction(ui_->loadBeamSessionButton));
-    loadMriButton_->setMenu(loadMenu);
-    loadMriButton_->setDefaultAction(dicomAction);
-    // Qt centres the label over the whole button and paints the menu section
-    // on top of its right end, so the text reads as pushed right. Neither
-    // padding-right nor text-align reaches a QToolButton's label; padding the
-    // string does. Set after setDefaultAction, which assigns the text.
-    loadMriButton_->setText(dicomAction->text() + QStringLiteral("    "));
-    for (QPushButton* driver : {ui_->loadDicomButton, ui_->loadNiftiButton,
-                                ui_->loadBeamSessionButton}) {
-        ui_->loadMriButtons->removeWidget(driver);
-        driver->hide();
-    }
-    ui_->loadMriButtons->insertWidget(0, loadMriButton_);
+    connect(ui_->loadNiftiButton, &QPushButton::clicked, this, [this] { chooseNifti(); });
 
     // The loaded path reads better beside the button that loaded it than on
     // a line of its own.
@@ -2166,73 +2140,6 @@ void WorkflowWindow::chooseDicomDirectory() {
 // Imports the MRI and six fiducials from a BeamV0 session. NOT session
 // restore: a session carries 38 fields and this reads two. Kept as the
 // reminder that the real thing is unbuilt -- see docs/known_gaps_session.md.
-void WorkflowWindow::chooseBeamSession() {
-    const QString path =
-        QFileDialog::getOpenFileName(this, QStringLiteral("Load legacy Beam MRI session"),
-                                     imagingStartDirectory(),
-                                     QStringLiteral("MATLAB Beam sessions (*.mat)"));
-    if (path.isEmpty()) return;
-    rememberImagingDirectory(path);
-    auto* progress = new QProgressDialog(QStringLiteral("Loading MRI from Beam session…"), QString(), 0, 0, this);
-    progress->setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
-    progress->setWindowModality(Qt::WindowModal);
-    progress->setMinimumWidth(520);
-    progress->setMinimumDuration(0);
-    progress->setCancelButton(nullptr);
-    progress->setAutoClose(false);
-    progress->setAutoReset(false);
-    progress->show();
-    ui_->loadBeamSessionButton->setEnabled(false);
-    if (loadMriButton_) loadMriButton_->setEnabled(false);
-
-    using Import = beam::infra::mat::LegacyBeamMri;
-    struct ImportState { std::optional<Import> value; std::exception_ptr error; };
-    const auto state = std::make_shared<ImportState>();
-    QThread* worker = QThread::create([state, path] {
-        try { state->value = beam::infra::mat::loadLegacyBeamMri(path.toStdString()); }
-        catch (...) { state->error = std::current_exception(); }
-    });
-    connect(worker, &QThread::finished, this, [this, state, progress, path] {
-        progress->close();
-        progress->deleteLater();
-        ui_->loadBeamSessionButton->setEnabled(true);
-        if (loadMriButton_) loadMriButton_->setEnabled(true);
-        try {
-            if (state->error) std::rethrow_exception(state->error);
-            auto imported = std::move(state->value.value());
-            installMri(std::move(imported.volume), std::move(imported.axes), path);
-            rebuildFocusImage();
-            showMriPreviews();
-            if (imported.fiducials.size() == 6) {
-                fiducials_.clear();
-                for (std::size_t fiducialIndex = 0; fiducialIndex < imported.fiducials.size(); ++fiducialIndex) {
-                    const auto& source = imported.fiducials[fiducialIndex];
-                    beam::registration::FiducialMarker marker;
-                    marker.name = source.name;
-                    marker.position = source.positionMm / 1000.0;
-                    fiducials_.push_back(marker);
-                }
-                registrationSourceFiducials_ = fiducials_;
-                fiducialConfirmed_.fill(true);
-                sourceFiducialConfirmed_.fill(true);
-                fiducialLocated_.fill(true);
-                sourceFiducialLocated_.fill(true);
-                populateRegistrationTable();
-                showMriPreviews();
-                ui_->registrationResult->setText(
-                    QStringLiteral("Six saved MRI fiducials imported from the Beam session · requires review"));
-                showMessage(QStringLiteral("Beam MRI and six saved fiducials imported read-only. Review the MRI, then run registration."), false);
-            } else {
-                showMessage(QStringLiteral("Beam MRI imported; no complete six-fiducial set was found, so model estimates are shown."), true);
-            }
-        } catch (const std::exception& error) {
-            QMessageBox::critical(this, QStringLiteral("Beam session import failed"), QString::fromUtf8(error.what()));
-            showMessage(QStringLiteral("The session was not imported; the previous MRI was preserved."), true);
-        }
-    });
-    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
-    worker->start();
-}
 
 
 void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes,
@@ -2483,6 +2390,7 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     sourceFiducialConfirmed_.fill(false);
     fiducialLocated_.fill(false);
     sourceFiducialLocated_.fill(false);
+    fiducialDetected_.fill(false);
     fiducialConfidence_.fill(0.0);
     fiducialStability_.fill(0.0);
     registrationOriginArrayData_ = arrayData_;
@@ -2518,7 +2426,9 @@ void WorkflowWindow::populateRegistrationTable() {
         const std::size_t statusIndex = static_cast<std::size_t>(row);
         QString stateText;
         if (!fiducialLocated_[statusIndex]) stateText = QStringLiteral("Unidentified");
-        else if (!fiducialConfirmed_[statusIndex]) stateText = QStringLiteral("Located");
+        else if (!fiducialConfirmed_[statusIndex])
+            stateText = fiducialDetected_[statusIndex] ? QStringLiteral("Detected")
+                                                       : QStringLiteral("Located");
         else if (sourceFiducialConfirmed_[statusIndex]) stateText = QStringLiteral("Imported");
         else stateText = QStringLiteral("Confirmed");
         auto* source = new QTableWidgetItem(stateText);
@@ -2753,9 +2663,7 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
     updateRegistrationAvailability();
 }
 
-// No caller: the Save fiducials button was removed, and writing the six
-// measured points belongs to session saving when that is built. Kept because
-// it is the only definition of the CSV layout importFiducialsCsv() reads.
+// No caller; superseded by the session file.
 void WorkflowWindow::saveFiducialsCsv() {
     if (fiducials_.size() < 6) {
         showMessage(QStringLiteral("Load an MRI before saving fiducials."), true);
@@ -3035,6 +2943,7 @@ void WorkflowWindow::detectSingleFiducial(int row) {
     fiducialLocated_[index] = true;
     fiducialConfirmed_[index] = false;
     sourceFiducialConfirmed_[index] = false;
+    fiducialDetected_[index] = true;
 
     ui_->registrationTable->blockSignals(true);
     for (int axis = 0; axis < 3; ++axis) {
@@ -3124,6 +3033,7 @@ void WorkflowWindow::detectFiducials() {
         fiducialLocated_[index] = true;
         fiducialConfirmed_[index] = false;
         sourceFiducialConfirmed_[index] = false;
+        fiducialDetected_[index] = true;
         if (QTableWidgetItem* cell = ui_->registrationTable->item(row, 4))
             cell->setText(QStringLiteral("Detected"));
     }
@@ -3169,6 +3079,7 @@ void WorkflowWindow::detectFiducials() {
     refresh();
 }
 
+// No caller; superseded by the session file.
 void WorkflowWindow::importFiducialsCsv() {
     if (!registrationGeometryLoaded_ || fiducials_.size() < 6) {
         showMessage(QStringLiteral("Load an MRI before importing fiducials."), true);
@@ -4228,6 +4139,7 @@ void WorkflowWindow::clearPatientImagingAndRegistration() {
     sourceFiducialConfirmed_.fill(false);
     fiducialLocated_.fill(false);
     sourceFiducialLocated_.fill(false);
+    fiducialDetected_.fill(false);
     fiducialConfidence_.fill(0.0);
     fiducialStability_.fill(0.0);
     registrationStartFiducialRow_ = -1;

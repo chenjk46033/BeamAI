@@ -145,47 +145,35 @@ void TreatmentLibraryDialog::setSaveHandler(
 }
 
 void TreatmentLibraryDialog::setTargetScope(const QString& whose,
-                                            const QString& deviceDefaultsPath) {
+                                            const QString& shippedTargetsPath) {
     if (page_ != Page::Targets || scopeBanner_ == nullptr) return;
-    deviceDefaultsPath_ = deviceDefaultsPath;
-
+    shippedTargetsPath_ = shippedTargetsPath;
     if (whose.isEmpty()) {
-        setWindowTitle(QStringLiteral("Target List — device defaults"));
+        setWindowTitle(QStringLiteral("Target List"));
         scopeBanner_->setText(
-            QStringLiteral("Editing the DEVICE DEFAULTS. These are what a patient with no "
-                           "Target List of their own starts from. No patient is open, so "
-                           "nobody's prescription is being changed here."));
+            QStringLiteral("No patient is open, so these edits are not saved against anybody. "
+                           "Accept a case first."));
         scopeBanner_->setVisible(true);
         return;
     }
-
     setWindowTitle(QStringLiteral("Target List - %1").arg(whose));
     scopeBanner_->setText(
         QStringLiteral("Editing the Target List for %1. These parameters are theirs alone; "
                        "no other patient is affected.")
             .arg(whose));
     scopeBanner_->setVisible(true);
-    if (deviceDefaultsPath_.isEmpty() || footerLayout_ == nullptr) return;
+    if (shippedTargetsPath_.isEmpty() || footerLayout_ == nullptr) return;
 
-    // The two directions between this patient's list and the device's. Here
-    // rather than on the Treatment page because this is where the operator is
-    // already looking at the list they want to move.
     auto* useDefaults = new QPushButton(QStringLiteral("Use device defaults"), this);
     useDefaults->setToolTip(
-        QStringLiteral("Replaces this patient's Target List with the device defaults. Their "
-                       "own parameters are lost; what has already been delivered is not."));
-    auto* makeDefaults = new QPushButton(QStringLiteral("Save as device defaults"), this);
-    makeDefaults->setToolTip(
-        QStringLiteral("Makes this Target List what every future patient starts from. "
-                       "Patients already on the device keep their own."));
+        QStringLiteral("Replaces this patient's Target List with the values the device ships "
+                       "with. Their own parameters are lost; what has already been delivered "
+                       "is not."));
     footerLayout_->insertWidget(1, useDefaults);
-    footerLayout_->insertWidget(2, makeDefaults);
-
     connect(useDefaults, &QPushButton::clicked, this, [this] {
         try {
-            // loadTargets replaces the targets and leaves the protocols, which
-            // are the site's library and belong to nobody.
-            store_.loadTargets(deviceDefaultsPath_.toStdString());
+            // Targets only: protocols are the site's library and belong to nobody.
+            store_.loadTargets(shippedTargetsPath_.toStdString());
         } catch (const std::exception& error) {
             QMessageBox::warning(this, QStringLiteral("Device defaults"),
                                  QStringLiteral("The device defaults could not be read: %1")
@@ -196,18 +184,6 @@ void TreatmentLibraryDialog::setTargetScope(const QString& whose,
         if (saveHandler_) saveHandler_(store_);
         if (savedNotice_ != nullptr)
             savedNotice_->setText(QStringLiteral("Device defaults applied and saved."));
-    });
-    connect(makeDefaults, &QPushButton::clicked, this, [this] {
-        try {
-            store_.saveTargets(deviceDefaultsPath_.toStdString());
-        } catch (const std::exception& error) {
-            QMessageBox::warning(this, QStringLiteral("Device defaults"),
-                                 QStringLiteral("The device defaults could not be written: %1")
-                                     .arg(QString::fromUtf8(error.what())));
-            return;
-        }
-        if (savedNotice_ != nullptr)
-            savedNotice_->setText(QStringLiteral("Saved as the device defaults."));
     });
 }
 

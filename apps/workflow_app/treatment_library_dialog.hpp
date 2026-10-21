@@ -37,17 +37,9 @@ public:
     // Save writes without dismissing, so a run of edits is one visit.
     void setSaveHandler(std::function<void(const beam::gui::TreatmentTargetStore&)> handler);
 
-    // Says whose Target List is open, and offers the two directions between
-    // it and the device-wide defaults.
-    //
-    // A target's parameters are prescribed for a person, so this dialog edits
-    // one patient's list when a patient is open and the device's own when none
-    // is. Those are very different acts behind one button, and nothing used to
-    // distinguish them on screen.
-    //
-    // `whose` empty means the device-wide list is the one being edited;
-    // `deviceDefaultsPath` is then ignored and no transfer buttons appear.
-    void setTargetScope(const QString& whose, const QString& deviceDefaultsPath);
+    // Says whose Target List is open; a target is prescribed for a person.
+    // `shippedTargetsPath` backs the button that restores them.
+    void setTargetScope(const QString& whose, const QString& shippedTargetsPath);
 
 
 private:
@@ -74,7 +66,7 @@ private:
     QLabel* savedNotice_ = nullptr;
     QLabel* scopeBanner_ = nullptr;
     QHBoxLayout* footerLayout_ = nullptr;
-    QString deviceDefaultsPath_;
+    QString shippedTargetsPath_;
     Page page_ = Page::Targets;
     beam::gui::TreatmentTargetStore store_;
     QTableWidget* targetTable_ = nullptr;

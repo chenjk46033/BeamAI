@@ -14,6 +14,7 @@
 
 #include "gui/case_report_form.hpp"
 #include "gui/patient_registry.hpp"
+#include "gui/treatment_session.hpp"
 #include "gui/treatment_log.hpp"
 #include "gui/treatment_target_store.hpp"
 #include "treatment_library_dialog.hpp"
@@ -98,9 +99,9 @@ private:
     // falling back to the MRI library.
     QString imagingStartDirectory() const;
     void rememberImagingDirectory(const QString& path);
+
     void chooseNifti();
     void chooseDicomDirectory();
-    void chooseBeamSession();
     void loadMri(const QString& path);
     void installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes, const QString& path);
     void showMriPreviews();
@@ -230,6 +231,7 @@ private:
     QString patientDataDirectory() const;
     QString patientsPath() const;
     // The operator's device-wide copy of a data file, else the shipped seed.
+    QString shippedDataFile(const QString& fileName) const;
     QString locateDataFile(const QString& fileName) const;
     // This patient's own Target List. Empty when nobody is named.
     QString patientTargetsPath() const;
@@ -250,6 +252,13 @@ private:
     void refreshReport();
     void exportCaseReport();
     void exportCaseReportPdf();
+    // The portable session: one subject plus the imaging and registration
+    // needed to resume. See gui/treatment_session.hpp.
+    void saveTreatmentSessionFile();
+    void chooseTreatmentSession();
+    void loadTreatmentSessionFile(const beam::gui::TreatmentSessionFile& session,
+                                  const QString& path);
+    QString patientFileText(const QString& name) const;
     QString caseReportHtml(int visit) const;
     // What an exported report is called: BeamV0's computeCrfAutoSaveFilename,
     // sanitised for the filesystem. One place, so the format is one edit.
@@ -317,6 +326,7 @@ private:
     void advanceToNextScheduledSonication();
     void showScheduleRowMenu(const QPoint& where);
     void placeSonicateButton(int oneBased);
+    bool currentSonicationIsPending() const;
     void setSonicateEnabled(bool enabled);
     void paintRunningButton();
     void selectScheduledSonication(int oneBased);
@@ -423,6 +433,8 @@ private:
     std::array<bool, 6> sourceFiducialConfirmed_{};
     std::array<bool, 6> fiducialLocated_{};
     std::array<bool, 6> sourceFiducialLocated_{};
+    // Found for the operator, not placed by hand.
+    std::array<bool, 6> fiducialDetected_{};
     // 0 when placed by hand or imported rather than detected.
     std::array<double, 6> fiducialConfidence_{};
     std::array<double, 6> fiducialStability_{};
@@ -444,10 +456,8 @@ private:
     QSlider* rightHorizontalPositionSlider_ = nullptr;
     QSlider* rightVerticalPositionSlider_ = nullptr;
     QPushButton* registerCurrentPositionButton_ = nullptr;
-    QPushButton* importFiducialsButton_ = nullptr;
     QPushButton* detectFiducialsButton_ = nullptr;
     QToolButton* fiducialActionsButton_ = nullptr;
-    QToolButton* loadMriButton_ = nullptr;
     // The picker is rebuilt per right-click, so the pick is remembered here.
     int treatmentFiducialPick_ = -1;
     QLabel* arrayPositionLabel_ = nullptr;
@@ -520,6 +530,9 @@ private:
     QTableWidget* reportTable_ = nullptr;
     QPushButton* exportReportButton_ = nullptr;
     QPushButton* exportReportPdfButton_ = nullptr;
+    QPushButton* saveSessionButton_ = nullptr;
+    QPushButton* saveSessionOnRegistrationButton_ = nullptr;
+    QPushButton* saveSessionOnTreatmentButton_ = nullptr;
     QListWidget* pastReportsList_ = nullptr;
     // Whose record is open. Zero until the Case page names somebody -- and on
     // a device that has never named anybody, that is where a pre-patient
