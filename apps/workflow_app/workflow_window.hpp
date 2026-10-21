@@ -14,6 +14,7 @@
 
 #include "gui/case_report_form.hpp"
 #include "gui/patient_registry.hpp"
+#include "gui/treatment_session.hpp"
 #include "gui/treatment_log.hpp"
 #include "gui/treatment_target_store.hpp"
 #include "treatment_library_dialog.hpp"
@@ -98,9 +99,9 @@ private:
     // falling back to the MRI library.
     QString imagingStartDirectory() const;
     void rememberImagingDirectory(const QString& path);
+
     void chooseNifti();
     void chooseDicomDirectory();
-    void chooseBeamSession();
     void loadMri(const QString& path);
     void installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes, const QString& path);
     void showMriPreviews();
@@ -250,6 +251,13 @@ private:
     void refreshReport();
     void exportCaseReport();
     void exportCaseReportPdf();
+    // The portable session: one subject plus the imaging and registration
+    // needed to resume. See gui/treatment_session.hpp.
+    void saveTreatmentSessionFile();
+    void chooseTreatmentSession();
+    void loadTreatmentSessionFile(const beam::gui::TreatmentSessionFile& session,
+                                  const QString& path);
+    QString patientFileText(const QString& name) const;
     QString caseReportHtml(int visit) const;
     // What an exported report is called: BeamV0's computeCrfAutoSaveFilename,
     // sanitised for the filesystem. One place, so the format is one edit.
@@ -447,7 +455,6 @@ private:
     QPushButton* importFiducialsButton_ = nullptr;
     QPushButton* detectFiducialsButton_ = nullptr;
     QToolButton* fiducialActionsButton_ = nullptr;
-    QToolButton* loadMriButton_ = nullptr;
     // The picker is rebuilt per right-click, so the pick is remembered here.
     int treatmentFiducialPick_ = -1;
     QLabel* arrayPositionLabel_ = nullptr;
@@ -520,6 +527,9 @@ private:
     QTableWidget* reportTable_ = nullptr;
     QPushButton* exportReportButton_ = nullptr;
     QPushButton* exportReportPdfButton_ = nullptr;
+    QPushButton* saveSessionButton_ = nullptr;
+    QPushButton* saveSessionOnRegistrationButton_ = nullptr;
+    QPushButton* saveSessionOnTreatmentButton_ = nullptr;
     QListWidget* pastReportsList_ = nullptr;
     // Whose record is open. Zero until the Case page names somebody -- and on
     // a device that has never named anybody, that is where a pre-patient

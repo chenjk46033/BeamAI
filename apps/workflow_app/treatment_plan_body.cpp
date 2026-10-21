@@ -869,6 +869,15 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolSelectorRow->addStretch(1);
     protocolSelectorRow->addWidget(manageLibraryButton_);
     protocolSelectorRow->addWidget(manageTargetsButton_);
+    // Also here: a visit is saved from where the operator is working, and once
+    // treatment has started that is this page.
+    saveSessionOnTreatmentButton_ = makeProtocolButton(
+        QStringLiteral("Save session..."),
+        QStringLiteral("Writes the MRI, the registration and this patient's record to one "
+                       "file, beside the MRIs"));
+    connect(saveSessionOnTreatmentButton_, &QPushButton::clicked, this,
+            [this] { saveTreatmentSessionFile(); });
+    protocolSelectorRow->addWidget(saveSessionOnTreatmentButton_);
     protocolLayout->addLayout(protocolSelectorRow);
 
     protocolModel_ = new beam::gui_qt::TreatmentProtocolTableModel(this);
@@ -1265,6 +1274,23 @@ void WorkflowWindow::buildCaseDemographics() {
     buttons->addWidget(createPatientButton_, 1);
     buttons->addWidget(ui_->acceptCaseButton, 2);
     ui_->caseForm->addRow(buttons);
+
+    // A session names the patient it belongs to, so it opens a record the
+    // same way the two buttons above do. On the Imaging page it read as
+    // loading an image for whoever was already open, which it is not.
+    auto* loadSession = new QPushButton(QStringLiteral("Load session file…"), ui_->caseGroup);
+    loadSession->setStyleSheet(
+        QStringLiteral("QPushButton { padding: 7px 14px; background: #24323a; color: #cfe3ea; "
+                       "border: 1px solid #3d5c6b; border-radius: 5px; } "
+                       "QPushButton:hover { background: #2d3f49; }"));
+    loadSession->setToolTip(
+        QStringLiteral("Opens a saved visit: its patient, their history, the MRI, the fiducials "
+                       "and the registration. The fields above are not used."));
+    connect(loadSession, &QPushButton::clicked, this, [this] { chooseTreatmentSession(); });
+    auto* sessionRow = new QHBoxLayout;
+    sessionRow->addWidget(loadSession, 0);
+    sessionRow->addStretch(1);
+    ui_->caseForm->addRow(sessionRow);
 }
 
 // The two required fields, and a date of birth that is blank or a date.
@@ -1539,10 +1565,15 @@ void WorkflowWindow::refreshPatientChooser() {
             cell(patient.lastName.empty() && patient.firstName.empty()
                      ? QStringLiteral("—")
                      : QString::fromStdString(beam::gui::patientDisplayName(patient))));
+        // Masked, not shown: the list is a lookup aid on a screen other
+        // people can see, and a full date of birth identifies somebody. The
+        // record itself keeps it, and the editor is where it is read.
         patientTable_->setItem(row, 2,
                                cell(patient.dateOfBirth.empty()
                                         ? QStringLiteral("—")
-                                        : QString::fromStdString(patient.dateOfBirth)));
+                                        : QString::fromUtf8("\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2"
+                                                            "\xe2\x80\xa2-\xe2\x80\xa2\xe2\x80\xa2"
+                                                            "-\xe2\x80\xa2\xe2\x80\xa2")));
         patientTable_->setItem(row, 3, cell(QString::fromStdString(patient.site)));
         auto* visitCell = cell(QString::number(visits), true);
         // Sorted as a number, not as text, or 10 would come before 2.
@@ -4843,23 +4874,30 @@ void WorkflowWindow::buildReportBody() {
     reportOperatorEdit_->setPlaceholderText(QStringLiteral("Who ran this visit"));
     // Wide enough to type an initial-and-number into, not wide enough to
     // push the export buttons off the edge of a narrower screen.
-    reportOperatorEdit_->setMaximumWidth(220);
+    reportOperatorEdit_->setMaximumWidth(160);
     styleInputField(reportOperatorEdit_);
     connect(reportOperatorEdit_, &QLineEdit::textChanged, this, [this] { refreshReport(); });
     chooser->addWidget(reportOperatorEdit_);
     chooser->addStretch(1);
-    exportReportButton_ = new QPushButton(QStringLiteral("Export CSV..."), identityGroup);
+    exportReportButton_ = new QPushButton(QStringLiteral("Export CSV"), identityGroup);
     exportReportButton_->setStyleSheet(
         QStringLiteral("QPushButton { padding: 7px 14px; background: #176b87; color: white; "
                        "border: 0; border-radius: 5px; font-weight: 600; } "
                        "QPushButton:disabled { background: #3b474e; color: #7e8c93; }"));
     connect(exportReportButton_, &QPushButton::clicked, this, [this] { exportCaseReport(); });
     chooser->addWidget(exportReportButton_);
-    exportReportPdfButton_ = new QPushButton(QStringLiteral("Export PDF..."), identityGroup);
+    exportReportPdfButton_ = new QPushButton(QStringLiteral("Export PDF"), identityGroup);
     exportReportPdfButton_->setStyleSheet(exportReportButton_->styleSheet());
     connect(exportReportPdfButton_, &QPushButton::clicked, this,
             [this] { exportCaseReportPdf(); });
     chooser->addWidget(exportReportPdfButton_);
+    saveSessionButton_ = new QPushButton(QStringLiteral("Save session..."), identityGroup);
+    saveSessionButton_->setStyleSheet(exportReportButton_->styleSheet());
+    saveSessionButton_->setToolTip(
+        QStringLiteral("Writes this patient's record, the MRI and the registration to one file, "
+                       "so the next visit can resume without repeating them."));
+    connect(saveSessionButton_, &QPushButton::clicked, this, [this] { saveTreatmentSessionFile(); });
+    chooser->addWidget(saveSessionButton_);
     identityLayout->addLayout(chooser);
 
     reportIdentityLabel_ = new QLabel(identityGroup);
@@ -5501,5 +5539,219 @@ void WorkflowWindow::refreshPastReports() {
         pastReportsList_->addItem(item);
     }
 }
+
+// Reads a file the application itself wrote, so the session carries exactly
+// what is on disk rather than a second rendering of it.
+QString WorkflowWindow::patientFileText(const QString& name) const {
+    const QString directory = patientDataDirectory();
+    if (directory.isEmpty()) return QString();
+    QFile file(QDir(directory).filePath(name));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return QString();
+    return QString::fromUtf8(file.readAll());
+}
+
+void WorkflowWindow::saveTreatmentSessionFile() {
+    beam::gui::Patient open;
+    if (!patients_.find(currentPatientId_, &open)) {
+        showMessage(QStringLiteral("Accept a case before saving a session."), true);
+        return;
+    }
+    // Written out first, so the session and the device agree.
+    savePatientData();
+
+    beam::gui::TreatmentSessionFile session;
+    session.participantId = open.externalId;
+    session.siteId = open.site;
+    session.mriPath = mriPath_.toStdString();
+    session.appVersion = QCoreApplication::applicationVersion().toStdString();
+    session.treatmentLogCsv = patientFileText(QStringLiteral("treatment_log.csv")).toStdString();
+    session.visitStateCsv =
+        patientFileText(QStringLiteral("treatment_visit_state.csv")).toStdString();
+    session.targetsCsv = patientFileText(QStringLiteral("treatment_targets.csv")).toStdString();
+    if (session.targetsCsv.empty()) {
+        // A patient with no list of their own carries the device's, so the
+        // session is self-contained wherever it is opened.
+        QFile seed(locateDataFile(QStringLiteral("treatment_targets.csv")));
+        if (seed.open(QIODevice::ReadOnly | QIODevice::Text))
+            session.targetsCsv = QString::fromUtf8(seed.readAll()).toStdString();
+    }
+
+    session.fiducials = fiducials_;
+    session.fiducialLocated = fiducialLocated_;
+    session.fiducialConfirmed = fiducialConfirmed_;
+    if (leftHorizontalPositionSlider_ != nullptr) {
+        session.lock.leftHorizontal = leftHorizontalPositionSlider_->value();
+        session.lock.leftVertical = leftVerticalPositionSlider_->value();
+        session.lock.rightHorizontal = rightHorizontalPositionSlider_->value();
+        session.lock.rightVertical = rightVerticalPositionSlider_->value();
+    }
+    const auto complete = [this](beam::gui::WorkflowStage stage) {
+        return workflow_.state(stage).status == beam::gui::WorkflowStatus::Complete;
+    };
+    session.imagingAccepted = complete(beam::gui::WorkflowStage::Imaging);
+    session.registrationAccepted = complete(beam::gui::WorkflowStage::Registration);
+    if (mriLoaded_) {
+        session.mri.present = true;
+        session.mri.volume = mriVolume_;
+        session.mri.axes = mriAxes_;
+    }
+
+    // Beside the MRIs, which is where BeamV0's own sessions sit and where the
+    // operator goes looking for one. The name is the CRF auto-save name, as
+    // uiputfile pre-fills it there.
+    const beam::gui::CaseReportForm crf = reportFormForVisit(currentVisitNumber());
+    const QString suggested =
+        QDir(imagingStartDirectory())
+            .filePath(caseReportFileStem(open, crf, currentVisitNumber()) +
+                      QStringLiteral(".beamsession"));
+    const QString path =
+        QFileDialog::getSaveFileName(this, QStringLiteral("Save session"), suggested,
+                                     QStringLiteral("Beam session (*.beamsession)"));
+    if (path.isEmpty()) return;
+    try {
+        beam::gui::writeTreatmentSession(path.toStdString(), session);
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("The session could not be saved: %1").arg(error.what()), true);
+        return;
+    }
+    showMessage(QStringLiteral("Session saved to %1%2")
+                    .arg(QDir::toNativeSeparators(path),
+                         session.mri.present ? QString()
+                                             : QStringLiteral(" (no MRI was loaded to include)")),
+                false);
+}
+
+void WorkflowWindow::chooseTreatmentSession() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Load session"), imagingStartDirectory(),
+        QStringLiteral("Beam session (*.beamsession);;All files (*)"));
+    if (path.isEmpty()) return;
+    rememberImagingDirectory(path);
+
+    beam::gui::TreatmentSessionFile session;
+    try {
+        session = beam::gui::readTreatmentSession(path.toStdString());
+    } catch (const std::exception& error) {
+        QMessageBox::critical(this, QStringLiteral("Load session"),
+                              QString::fromUtf8(error.what()));
+        showMessage(QStringLiteral("The session was not loaded; nothing was changed."), true);
+        return;
+    }
+    loadTreatmentSessionFile(session, path);
+}
+
+void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionFile& session,
+                                              const QString& path) {
+    if (deliveryRunning()) {
+        showMessage(QStringLiteral("A sonication is still going out. Stop it before loading a "
+                                   "session."),
+                    true);
+        return;
+    }
+    const QString participant = QString::fromStdString(session.participantId);
+
+    // Opening them runs the whole switch: the outgoing patient is written out
+    // and everything of theirs is cleared.
+    beam::gui::Patient details;
+    details.externalId = session.participantId;
+    details.site = session.siteId;
+    selectPatient(details, /*advancing=*/true);
+    beam::gui::Patient opened;
+    if (!patients_.find(currentPatientId_, &opened) ||
+        opened.externalId != session.participantId) {
+        showMessage(QStringLiteral("%1 could not be opened; the session was not loaded.")
+                        .arg(participant),
+                    true);
+        return;
+    }
+
+    // The session IS the case record, so loading it is what accepting it
+    // means. Without this the first incomplete stage is Case setup and the
+    // operator is sent back to the patient page with everything restored.
+    workflow_.complete(beam::gui::WorkflowStage::CaseSetup, nullptr);
+    workflow_.complete(beam::gui::WorkflowStage::SystemCheck, nullptr);
+
+    const QString directory = patientDataDirectory();
+    // BeamV0 loads a subject without asking, because its file IS the record
+    // and there is nothing on disk to overwrite. Here there is, so whatever is
+    // replaced is renamed aside rather than destroyed: no prompt, nothing lost.
+    const QString stamp =
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    int setAside = 0;
+    const auto put = [&](const QString& name, const std::string& text) {
+        if (text.empty()) return;
+        const QString target = QDir(directory).filePath(name);
+        if (QFileInfo::exists(target) &&
+            QFile::rename(target, QStringLiteral("%1.replaced-%2").arg(target, stamp))) {
+            ++setAside;
+        }
+        QFile file(target);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+            file.write(QByteArray::fromStdString(text));
+    };
+    put(QStringLiteral("treatment_log.csv"), session.treatmentLogCsv);
+    put(QStringLiteral("treatment_visit_state.csv"), session.visitStateCsv);
+    put(QStringLiteral("treatment_targets.csv"), session.targetsCsv);
+    loadPatientData();
+
+    if (!session.mri.present) {
+        showMessage(QStringLiteral("Session loaded for %1. It carries no MRI, so imaging and "
+                                   "registration still have to be done.")
+                        .arg(participant),
+                    false);
+        return;
+    }
+
+    // Repeat the registration rather than restoring its result: the array
+    // position is a pure function of the image, the six fiducials and the two
+    // lock positions, and recomputing it is what stops a session disagreeing
+    // with the code that reads it.
+    installMri(session.mri.volume, session.mri.axes,
+               QString::fromStdString(session.mriPath));
+    fiducials_ = session.fiducials;
+    registrationSourceFiducials_ = fiducials_;
+    fiducialLocated_ = session.fiducialLocated;
+    fiducialConfirmed_ = session.fiducialConfirmed;
+    sourceFiducialLocated_ = fiducialLocated_;
+    sourceFiducialConfirmed_ = fiducialConfirmed_;
+    for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
+                            rightHorizontalPositionSlider_, rightVerticalPositionSlider_}) {
+        if (slider == nullptr) continue;
+        const QSignalBlocker blocker(slider);
+        slider->setValue(slider == leftHorizontalPositionSlider_ ? session.lock.leftHorizontal
+                         : slider == leftVerticalPositionSlider_ ? session.lock.leftVertical
+                         : slider == rightHorizontalPositionSlider_
+                             ? session.lock.rightHorizontal
+                             : session.lock.rightVertical);
+    }
+    populateRegistrationTable();
+    showMriPreviews();
+
+    QString restored = QStringLiteral("Session loaded for %1.").arg(participant);
+    if (fiducials_.size() == 6) {
+        performFiducialRegistration();
+        performCurrentPositionRegistration();
+        if (session.imagingAccepted) workflow_.complete(beam::gui::WorkflowStage::Imaging, nullptr);
+        if (session.registrationAccepted &&
+            registrationPhase_ == RegistrationPhase::LockPositionRegistered) {
+            acceptFiducialRegistration();
+        }
+        restored += registrationPhase_ == RegistrationPhase::Accepted
+                        ? QStringLiteral(" MRI and registration restored.")
+                        : QStringLiteral(" MRI restored; review the registration and accept it.");
+    } else {
+        restored += QStringLiteral(" MRI restored; the fiducials still have to be placed.");
+    }
+    // Coupling is never restored: gel dries and the subject moves, so a
+    // measurement from the saved visit cannot gate this one.
+    clearCouplingMeasurement();
+    goToNextStage();
+    refresh();
+    showMessage(restored + QStringLiteral(" Coupling must be measured again before sonicating."),
+                false);
+    Q_UNUSED(path);
+}
+
+
 
 }  // namespace beam::app

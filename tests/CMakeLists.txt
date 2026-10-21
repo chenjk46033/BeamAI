@@ -12,6 +12,7 @@ add_executable(unit_tests
     treatment_log_tests.cpp
     treatment_target_store_tests.cpp
     patient_registry_tests.cpp
+    treatment_session_tests.cpp
     treatment_migration_tests.cpp
     infra_dicom_tests.cpp
     registration_tests.cpp
@@ -21,7 +22,10 @@ add_executable(unit_tests
     gui_tests.cpp
 )
 
+find_package(miniz CONFIG REQUIRED)
+
 target_link_libraries(unit_tests PRIVATE
+    miniz::miniz
     util
     array
     correction

@@ -33,6 +33,11 @@
 *.nii.gz
 *.mat
 
+# Runtime state the app writes: the patient registry, their visit logs and
+# reports, and the device-level target/protocol copies. The shipped defaults
+# these are seeded from stay tracked in data/.
+/data/runtime/
+
 # OS metadata
 .DS_Store
 Thumbs.db
