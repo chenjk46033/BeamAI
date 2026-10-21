@@ -59,6 +59,15 @@ QIcon makeTick(const QColor& colour, bool cutShort) {
     return QIcon(canvas);
 }
 
+// setTreatmentProtocolTableData.m: yellow below zero, and above it a green
+// that deepens with the score -- [0, 0.5 + 0.5*(min(r,4)/4), 0].
+QColor responseFill(int response) {
+    if (response < 0) return QColor(0xff, 0xff, 0x00);
+    if (response == 0) return QColor();
+    const double strength = 0.5 + 0.5 * (std::min(response, 4) / 4.0);
+    return QColor(0, static_cast<int>(std::lround(255.0 * strength)), 0);
+}
+
 // A delivered sonication shows a tick where the one still to run shows its
 // Sonicate button -- the column says, row by row, what has happened and what
 // is about to. A tick rather than a cross: nothing here failed.
@@ -88,6 +97,12 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
 
     const bool current = currentSonication_ > 0 && index.row() == currentSonication_ - 1;
     if (role == kCurrentRowRole) return current;
+    if (role == kResponseFillRole) {
+        if (!r.delivered) return QVariant();
+        const QColor fill = responseFill(
+            beam::gui::getResponseFromTreatmentProtocolData(r.responseMood, r.responsePain).total);
+        return fill.isValid() ? QVariant(fill) : QVariant();
+    }
     if (index.column() == kAction) {
         if (role == Qt::DecorationRole && r.delivered) return deliveredTick(r.sham, r.aborted);
         if (role == Qt::TextAlignmentRole) return QVariant(Qt::AlignCenter);
@@ -136,9 +151,6 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         return shown.toString().isEmpty() ? QVariant() : shown;
     }
     if (role == Qt::ForegroundRole) {
-        // The fill below is dark enough that the table's near-black text would
-        // disappear into it.
-        if (current) return QColor(0xff, 0xff, 0xff);
         // Anything but 200 is worth seeing without reading the number.
         if (index.column() == kStatus && r.statusCode != 0 && r.statusCode != 200)
             return QColor(0xb1, 0x1c, 0x1c);
@@ -149,11 +161,16 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         // Number points at -- `addStyle(table, sGrey, "row", value)` -- in grey.
         // Dark blue instead: against the light blue of a clicked row the two
         // stay apart, and white text on it reads where grey did not.
-        if (current) return QColor(0x1f, 0x4e, 0x79);
-        // Not setTreatmentProtocolTableData.m's per-response coloring: a row
-        // turning green the moment a response is typed reads as a state the
-        // log is in rather than a number in a cell. The ranking still uses the
-        // same clamped response; only the paint is dropped.
+        // Only a row still to run: BeamV0 greys the current row over its
+        // response, but its number always points past what has been delivered.
+        if (current && !r.delivered) return QColor(0xa0, 0xa0, 0xa0);
+        // Delivered only: a row must not change colour as a score is typed.
+        if (r.delivered) {
+            const QColor fill = responseFill(
+                beam::gui::getResponseFromTreatmentProtocolData(r.responseMood, r.responsePain)
+                    .total);
+            if (fill.isValid()) return fill;
+        }
         return index.row() % 2 == 0 ? QColor(0xff, 0xff, 0xff) : QColor(0xf2, 0xf4, 0xf7);
     }
     if (role != Qt::DisplayRole && role != Qt::EditRole) {

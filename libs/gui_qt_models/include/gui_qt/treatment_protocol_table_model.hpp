@@ -77,6 +77,9 @@ public:
     // True on the row the Current Sonication Number points at. The view's
     // delegate reads it to keep that row grey under the selection highlight.
     static constexpr int kCurrentRowRole = Qt::UserRole + 1;
+    // The response colour alone, so a delegate can tell it from the plain
+    // alternating fill and keep it visible under a selected row.
+    static constexpr int kResponseFillRole = Qt::UserRole + 2;
 
     explicit TreatmentProtocolTableModel(QObject* parent = nullptr);
 

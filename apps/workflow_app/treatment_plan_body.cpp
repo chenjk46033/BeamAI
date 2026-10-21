@@ -182,7 +182,9 @@ constexpr int kCurrentTargetRole = Qt::UserRole + 3;
 // The marker table's own selection fill, reused so a clicked row looks the
 // same on both pages. The dark one marks the current sonication and the
 // target it fires at -- a different thing from what the operator clicked.
-const QColor kRowSelectedFill(190, 235, 245);
+// Selection is transient pointer feedback, so it carries no hue: the table's
+// hues all mean something (yellow and green a response, cyan the next row).
+const QColor kRowSelectedFill(212, 221, 226);
 const QColor kCurrentRowFill(0x1f, 0x4e, 0x79);
 
 // The countdown bar takes the colour of the tick the row will end up with:
@@ -374,8 +376,11 @@ public:
 protected:
     void initStyleOption(QStyleOptionViewItem* option, const QModelIndex& index) const override {
         QStyledItemDelegate::initStyleOption(option, index);
-        if (!index.data(beam::gui_qt::TreatmentProtocolTableModel::kCurrentRowRole).toBool())
-            return;
+        using Model = beam::gui_qt::TreatmentProtocolTableModel;
+        const QVariant fill = index.data(Model::kResponseFillRole);
+        const bool coloured = fill.canConvert<QColor>() && fill.value<QColor>().isValid();
+        // A selected row would otherwise paint its highlight over both.
+        if (!coloured && !index.data(Model::kCurrentRowRole).toBool()) return;
         option->state &= ~QStyle::State_Selected;
         const QVariant background = index.data(Qt::BackgroundRole);
         if (background.canConvert<QColor>())
@@ -5767,6 +5772,10 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
                 false);
     Q_UNUSED(path);
 }
+
+
+
+
 
 
 
