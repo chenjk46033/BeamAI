@@ -453,15 +453,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     detectFiducialsButton_->setStyleSheet(stepButtonStyle);
     connect(detectFiducialsButton_, &QPushButton::clicked, this, [this] { detectFiducials(); });
 
-    importFiducialsButton_ = new QPushButton(QStringLiteral("Import fiducials..."), this);
-    importFiducialsButton_->setObjectName(QStringLiteral("importFiducialsButton"));
-    importFiducialsButton_->setToolTip(
-        QStringLiteral("Load six measured fiducials from a CSV saved earlier"));
-    importFiducialsButton_->setMinimumHeight(30);
-    importFiducialsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    importFiducialsButton_->setStyleSheet(stepButtonStyle);
-    connect(importFiducialsButton_, &QPushButton::clicked, this, [this] { importFiducialsCsv(); });
-
     ui_->registrationActions->removeWidget(ui_->resetRegistrationButton);
     ui_->resetRegistrationButton->setText(QStringLiteral("Restore Default"));
     ui_->resetRegistrationButton->setMinimumHeight(30);
@@ -505,11 +496,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     fiducialMenu->addAction(detectAction);
     fiducialMenu->addSeparator();
     fiducialMenu->addAction(fiducialAction(ui_->resetRegistrationButton));
-    fiducialMenu->addAction(fiducialAction(importFiducialsButton_));
     fiducialActionsButton_->setMenu(fiducialMenu);
     fiducialActionsButton_->setDefaultAction(detectAction);
-    for (QPushButton* driver : {detectFiducialsButton_, ui_->resetRegistrationButton,
-                                importFiducialsButton_})
+    for (QPushButton* driver : {detectFiducialsButton_, ui_->resetRegistrationButton})
         driver->hide();
     step1Buttons->addWidget(fiducialActionsButton_, 1);
     triangleColumn->addLayout(step1Buttons);
@@ -580,7 +569,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registerFiducialsButton->setStyleSheet(QStringLiteral(
         "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; border-radius: 4px; padding: 5px 8px; font-weight: 600; } "
         "QPushButton:hover { background: #2083a3; } QPushButton:disabled { background: #414141; color: #8b8b8b; border-color: #555555; }"));
-    // detectFiducialsButton_ and importFiducialsButton_ are built earlier, with
+    // detectFiducialsButton_ is built earlier, with
     // step 1's button row.
 
     auto* markerActions = new QHBoxLayout;
@@ -2401,6 +2390,7 @@ void WorkflowWindow::initializeRegistrationGeometry() {
     sourceFiducialConfirmed_.fill(false);
     fiducialLocated_.fill(false);
     sourceFiducialLocated_.fill(false);
+    fiducialDetected_.fill(false);
     fiducialConfidence_.fill(0.0);
     fiducialStability_.fill(0.0);
     registrationOriginArrayData_ = arrayData_;
@@ -2436,7 +2426,9 @@ void WorkflowWindow::populateRegistrationTable() {
         const std::size_t statusIndex = static_cast<std::size_t>(row);
         QString stateText;
         if (!fiducialLocated_[statusIndex]) stateText = QStringLiteral("Unidentified");
-        else if (!fiducialConfirmed_[statusIndex]) stateText = QStringLiteral("Located");
+        else if (!fiducialConfirmed_[statusIndex])
+            stateText = fiducialDetected_[statusIndex] ? QStringLiteral("Detected")
+                                                       : QStringLiteral("Located");
         else if (sourceFiducialConfirmed_[statusIndex]) stateText = QStringLiteral("Imported");
         else stateText = QStringLiteral("Confirmed");
         auto* source = new QTableWidgetItem(stateText);
@@ -2671,9 +2663,7 @@ void WorkflowWindow::placeSelectedFiducial(const Eigen::Vector3d& positionMm, in
     updateRegistrationAvailability();
 }
 
-// No caller: the Save fiducials button was removed, and writing the six
-// measured points belongs to session saving when that is built. Kept because
-// it is the only definition of the CSV layout importFiducialsCsv() reads.
+// No caller; superseded by the session file.
 void WorkflowWindow::saveFiducialsCsv() {
     if (fiducials_.size() < 6) {
         showMessage(QStringLiteral("Load an MRI before saving fiducials."), true);
@@ -2953,6 +2943,7 @@ void WorkflowWindow::detectSingleFiducial(int row) {
     fiducialLocated_[index] = true;
     fiducialConfirmed_[index] = false;
     sourceFiducialConfirmed_[index] = false;
+    fiducialDetected_[index] = true;
 
     ui_->registrationTable->blockSignals(true);
     for (int axis = 0; axis < 3; ++axis) {
@@ -3042,6 +3033,7 @@ void WorkflowWindow::detectFiducials() {
         fiducialLocated_[index] = true;
         fiducialConfirmed_[index] = false;
         sourceFiducialConfirmed_[index] = false;
+        fiducialDetected_[index] = true;
         if (QTableWidgetItem* cell = ui_->registrationTable->item(row, 4))
             cell->setText(QStringLiteral("Detected"));
     }
@@ -3087,6 +3079,7 @@ void WorkflowWindow::detectFiducials() {
     refresh();
 }
 
+// No caller; superseded by the session file.
 void WorkflowWindow::importFiducialsCsv() {
     if (!registrationGeometryLoaded_ || fiducials_.size() < 6) {
         showMessage(QStringLiteral("Load an MRI before importing fiducials."), true);
@@ -4146,6 +4139,7 @@ void WorkflowWindow::clearPatientImagingAndRegistration() {
     sourceFiducialConfirmed_.fill(false);
     fiducialLocated_.fill(false);
     sourceFiducialLocated_.fill(false);
+    fiducialDetected_.fill(false);
     fiducialConfidence_.fill(0.0);
     fiducialStability_.fill(0.0);
     registrationStartFiducialRow_ = -1;

@@ -231,6 +231,7 @@ private:
     QString patientDataDirectory() const;
     QString patientsPath() const;
     // The operator's device-wide copy of a data file, else the shipped seed.
+    QString shippedDataFile(const QString& fileName) const;
     QString locateDataFile(const QString& fileName) const;
     // This patient's own Target List. Empty when nobody is named.
     QString patientTargetsPath() const;
@@ -325,6 +326,7 @@ private:
     void advanceToNextScheduledSonication();
     void showScheduleRowMenu(const QPoint& where);
     void placeSonicateButton(int oneBased);
+    bool currentSonicationIsPending() const;
     void setSonicateEnabled(bool enabled);
     void paintRunningButton();
     void selectScheduledSonication(int oneBased);
@@ -431,6 +433,8 @@ private:
     std::array<bool, 6> sourceFiducialConfirmed_{};
     std::array<bool, 6> fiducialLocated_{};
     std::array<bool, 6> sourceFiducialLocated_{};
+    // Found for the operator, not placed by hand.
+    std::array<bool, 6> fiducialDetected_{};
     // 0 when placed by hand or imported rather than detected.
     std::array<double, 6> fiducialConfidence_{};
     std::array<double, 6> fiducialStability_{};
@@ -452,7 +456,6 @@ private:
     QSlider* rightHorizontalPositionSlider_ = nullptr;
     QSlider* rightVerticalPositionSlider_ = nullptr;
     QPushButton* registerCurrentPositionButton_ = nullptr;
-    QPushButton* importFiducialsButton_ = nullptr;
     QPushButton* detectFiducialsButton_ = nullptr;
     QToolButton* fiducialActionsButton_ = nullptr;
     // The picker is rebuilt per right-click, so the pick is remembered here.

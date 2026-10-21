@@ -47,6 +47,9 @@ struct TreatmentSessionFile {
     std::vector<beam::registration::FiducialMarker> fiducials;  // metres
     std::array<bool, 6> fiducialLocated{};
     std::array<bool, 6> fiducialConfirmed{};
+    // Detection scores; 0 for a mark placed by hand.
+    std::array<double, 6> fiducialConfidence{};
+    std::array<double, 6> fiducialStability{};
     SessionLockPosition lock;
     bool imagingAccepted = false;
     bool registrationAccepted = false;

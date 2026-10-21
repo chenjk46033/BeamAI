@@ -1275,22 +1275,20 @@ void WorkflowWindow::buildCaseDemographics() {
     buttons->addWidget(ui_->acceptCaseButton, 2);
     ui_->caseForm->addRow(buttons);
 
-    // A session names the patient it belongs to, so it opens a record the
-    // same way the two buttons above do. On the Imaging page it read as
-    // loading an image for whoever was already open, which it is not.
+    // A session names its patient, so it opens a record like the two above.
     auto* loadSession = new QPushButton(QStringLiteral("Load session file…"), ui_->caseGroup);
+    // The Accept button's blue: both open a record and leave this page.
     loadSession->setStyleSheet(
-        QStringLiteral("QPushButton { padding: 7px 14px; background: #24323a; color: #cfe3ea; "
-                       "border: 1px solid #3d5c6b; border-radius: 5px; } "
-                       "QPushButton:hover { background: #2d3f49; }"));
+        QStringLiteral("QPushButton { padding: 11px 18px; background: #176b87; color: white; "
+                       "border: 0; border-radius: 5px; font-weight: 600; outline: none; } "
+                       "QPushButton:hover { background: #2083a3; } "
+                       "QPushButton:focus { outline: none; border: 0; }"));
+    loadSession->setMinimumHeight(38);
     loadSession->setToolTip(
         QStringLiteral("Opens a saved visit: its patient, their history, the MRI, the fiducials "
                        "and the registration. The fields above are not used."));
     connect(loadSession, &QPushButton::clicked, this, [this] { chooseTreatmentSession(); });
-    auto* sessionRow = new QHBoxLayout;
-    sessionRow->addWidget(loadSession, 0);
-    sessionRow->addStretch(1);
-    ui_->caseForm->addRow(sessionRow);
+    ui_->caseForm->addRow(loadSession);
 }
 
 // The two required fields, and a date of birth that is blank or a date.
@@ -1997,7 +1995,7 @@ void WorkflowWindow::loadPatientData() {
         const QString own = patientTargetsPath();
         const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
                                         ? own
-                                        : locateDataFile(QStringLiteral("treatment_targets.csv"));
+                                        : shippedDataFile(QStringLiteral("treatment_targets.csv"));
         if (!targetsPath.isEmpty()) {
             try {
                 // loadTargets replaces the targets and leaves the protocols,
@@ -2155,9 +2153,9 @@ QString WorkflowWindow::patientTargetsPath() const {
     return QDir(patientDirectory).filePath(QStringLiteral("treatment_targets.csv"));
 }
 
-QString WorkflowWindow::locateDataFile(const QString& fileName) const {
-    const QString user = QDir(treatmentDataDirectory()).filePath(fileName);
-    if (QFileInfo::exists(user)) return user;
+// As shipped, never a runtime copy: a Target List is prescribed per patient,
+// so there is no device-wide one to prefer.
+QString WorkflowWindow::shippedDataFile(const QString& fileName) const {
     const QString executableDir = QCoreApplication::applicationDirPath();
     const QStringList seeds = {
         QDir(executableDir).filePath(QStringLiteral("../../../data/") + fileName),
@@ -2167,6 +2165,12 @@ QString WorkflowWindow::locateDataFile(const QString& fileName) const {
     for (const QString& seed : seeds)
         if (QFileInfo::exists(seed)) return seed;
     return QString();
+}
+
+QString WorkflowWindow::locateDataFile(const QString& fileName) const {
+    const QString user = QDir(treatmentDataDirectory()).filePath(fileName);
+    if (QFileInfo::exists(user)) return user;
+    return shippedDataFile(fileName);
 }
 
 void WorkflowWindow::loadTreatmentTargetStore() {
@@ -2272,10 +2276,7 @@ void WorkflowWindow::saveTreatmentTargetStore(bool announce) {
         // goes where a pre-patient install put it, which is also what the
         // next new patient is seeded from.
         const QString own = patientTargetsPath();
-        targetStore_.saveTargets(
-            (own.isEmpty() ? QDir(directory).filePath(QStringLiteral("treatment_targets.csv"))
-                           : own)
-                .toStdString());
+        if (!own.isEmpty()) targetStore_.saveTargets(own.toStdString());
         // Protocols are the site's library and stay shared.
         targetStore_.saveProtocols(
             QDir(directory).filePath(QStringLiteral("treatment_protocols.csv")).toStdString());
@@ -4049,6 +4050,18 @@ void WorkflowWindow::paintRunningButton() {
 // Running: the one being carried out pulses and is dead to the touch -- it is
 // a readout now -- the other way of starting is dead too, and stop is the only
 // thing that can be pressed.
+// Sonicate and Sham live in the control panel, not on the row, so nothing
+// removes them when a row is finished. This is what stops a delivered
+// sonication being sent a second time.
+bool WorkflowWindow::currentSonicationIsPending() const {
+    if (protocolModel_ == nullptr) return false;
+    const std::vector<beam::gui_qt::TreatmentProtocolRow>& rows = protocolModel_->rows();
+    if (currentSonication_ < 1 || currentSonication_ > static_cast<int>(rows.size())) return false;
+    // The one going out is pending until its row closes.
+    if (openLogSequence_ == currentSonication_) return true;
+    return !rows[static_cast<std::size_t>(currentSonication_) - 1].delivered;
+}
+
 void WorkflowWindow::setSonicateEnabled(bool enabled) {
     sonicateEnabled_ = enabled;
     // Before the early return: the top-bar ABORT is on every page and must
@@ -4059,7 +4072,7 @@ void WorkflowWindow::setSonicateEnabled(bool enabled) {
         sonicationCountdownTimer_ != nullptr && sonicationCountdownTimer_->isActive();
     // checkSonicationSafety.m ends by enabling or disabling SonicateButton on
     // exactly this flag. Nothing goes out while the parameters are unsafe.
-    const bool live = !running && enabled && sonicationSafetyPass_;
+    const bool live = !running && enabled && sonicationSafetyPass_ && currentSonicationIsPending();
     inRowSonicateButton_->setEnabled(live);
     if (!running)
         inRowSonicateButton_->setIcon(makeSonicateIcon(18, live ? kInkOnBlue : kInkOnDead));
@@ -4591,6 +4604,15 @@ void WorkflowWindow::runSonication(bool sham) {
     }
     // The treatment table decides what runs, not whatever is selected.
     if (!selectScheduledTarget()) return;
+    // Backstop: the buttons are already dead for a finished row, and a
+    // second delivery would file a duplicate against the same sequence.
+    if (!currentSonicationIsPending()) {
+        setExecutionStatus(QStringLiteral("Sonication %1 has already been delivered. Nothing "
+                                          "was sent.")
+                               .arg(currentSonication_),
+                           true);
+        return;
+    }
     // The button is already disabled while this is false; this is the
     // backstop for anything that reaches here another way.
     updateSonicationSafety();
@@ -4779,7 +4801,7 @@ void WorkflowWindow::openTreatmentLibrary(TreatmentLibraryDialog::Page page) {
                       .arg(QString::fromStdString(beam::gui::patientDisplayName(open)),
                            QString::fromStdString(open.externalId))
                 : QString(),
-            QDir(treatmentDataDirectory()).filePath(QStringLiteral("treatment_targets.csv")));
+            shippedDataFile(QStringLiteral("treatment_targets.csv")));
     }
     // Applied on each Save rather than once at the end, so the dialog can stay
     // open for the next edit.
@@ -5569,9 +5591,8 @@ void WorkflowWindow::saveTreatmentSessionFile() {
         patientFileText(QStringLiteral("treatment_visit_state.csv")).toStdString();
     session.targetsCsv = patientFileText(QStringLiteral("treatment_targets.csv")).toStdString();
     if (session.targetsCsv.empty()) {
-        // A patient with no list of their own carries the device's, so the
-        // session is self-contained wherever it is opened.
-        QFile seed(locateDataFile(QStringLiteral("treatment_targets.csv")));
+        // So the session is self-contained wherever it is opened.
+        QFile seed(shippedDataFile(QStringLiteral("treatment_targets.csv")));
         if (seed.open(QIODevice::ReadOnly | QIODevice::Text))
             session.targetsCsv = QString::fromUtf8(seed.readAll()).toStdString();
     }
@@ -5579,6 +5600,8 @@ void WorkflowWindow::saveTreatmentSessionFile() {
     session.fiducials = fiducials_;
     session.fiducialLocated = fiducialLocated_;
     session.fiducialConfirmed = fiducialConfirmed_;
+    session.fiducialConfidence = fiducialConfidence_;
+    session.fiducialStability = fiducialStability_;
     if (leftHorizontalPositionSlider_ != nullptr) {
         session.lock.leftHorizontal = leftHorizontalPositionSlider_->value();
         session.lock.leftVertical = leftVerticalPositionSlider_->value();
@@ -5596,9 +5619,7 @@ void WorkflowWindow::saveTreatmentSessionFile() {
         session.mri.axes = mriAxes_;
     }
 
-    // Beside the MRIs, which is where BeamV0's own sessions sit and where the
-    // operator goes looking for one. The name is the CRF auto-save name, as
-    // uiputfile pre-fills it there.
+    // Beside the MRIs, where BeamV0 puts them; CRF auto-save name.
     const beam::gui::CaseReportForm crf = reportFormForVisit(currentVisitNumber());
     const QString suggested =
         QDir(imagingStartDirectory())
@@ -5650,8 +5671,7 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
     }
     const QString participant = QString::fromStdString(session.participantId);
 
-    // Opening them runs the whole switch: the outgoing patient is written out
-    // and everything of theirs is cleared.
+    // Runs the whole patient switch: outgoing written out, theirs cleared.
     beam::gui::Patient details;
     details.externalId = session.participantId;
     details.site = session.siteId;
@@ -5665,16 +5685,12 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
         return;
     }
 
-    // The session IS the case record, so loading it is what accepting it
-    // means. Without this the first incomplete stage is Case setup and the
-    // operator is sent back to the patient page with everything restored.
+    // The session IS the case record, so loading it accepts it.
     workflow_.complete(beam::gui::WorkflowStage::CaseSetup, nullptr);
     workflow_.complete(beam::gui::WorkflowStage::SystemCheck, nullptr);
 
     const QString directory = patientDataDirectory();
-    // BeamV0 loads a subject without asking, because its file IS the record
-    // and there is nothing on disk to overwrite. Here there is, so whatever is
-    // replaced is renamed aside rather than destroyed: no prompt, nothing lost.
+    // No prompt, as BeamV0; what is replaced is renamed aside, not destroyed.
     const QString stamp =
         QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
     int setAside = 0;
@@ -5702,16 +5718,17 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
         return;
     }
 
-    // Repeat the registration rather than restoring its result: the array
-    // position is a pure function of the image, the six fiducials and the two
-    // lock positions, and recomputing it is what stops a session disagreeing
-    // with the code that reads it.
+    // BeamV0 clears both registration flags on load; the head has moved.
     installMri(session.mri.volume, session.mri.axes,
                QString::fromStdString(session.mriPath));
     fiducials_ = session.fiducials;
     registrationSourceFiducials_ = fiducials_;
     fiducialLocated_ = session.fiducialLocated;
-    fiducialConfirmed_ = session.fiducialConfirmed;
+    // Confirming the restored marks is the first step of registering again.
+    fiducialConfirmed_.fill(false);
+    fiducialDetected_ = fiducialLocated_;
+    fiducialConfidence_ = session.fiducialConfidence;
+    fiducialStability_ = session.fiducialStability;
     sourceFiducialLocated_ = fiducialLocated_;
     sourceFiducialConfirmed_ = fiducialConfirmed_;
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
@@ -5728,29 +5745,29 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
     showMriPreviews();
 
     QString restored = QStringLiteral("Session loaded for %1.").arg(participant);
-    if (fiducials_.size() == 6) {
-        performFiducialRegistration();
-        performCurrentPositionRegistration();
-        if (session.imagingAccepted) workflow_.complete(beam::gui::WorkflowStage::Imaging, nullptr);
-        if (session.registrationAccepted &&
-            registrationPhase_ == RegistrationPhase::LockPositionRegistered) {
-            acceptFiducialRegistration();
-        }
-        restored += registrationPhase_ == RegistrationPhase::Accepted
-                        ? QStringLiteral(" MRI and registration restored.")
-                        : QStringLiteral(" MRI restored; review the registration and accept it.");
-    } else {
-        restored += QStringLiteral(" MRI restored; the fiducials still have to be placed.");
-    }
-    // Coupling is never restored: gel dries and the subject moves, so a
-    // measurement from the saved visit cannot gate this one.
+    if (session.imagingAccepted) workflow_.complete(beam::gui::WorkflowStage::Imaging, nullptr);
+    // Nothing was invalidated: the load left this stage waiting to be done.
+    workflow_.begin(beam::gui::WorkflowStage::Registration, nullptr);
+    restored += fiducials_.size() == 6
+                    ? QStringLiteral(" MRI and fiducials restored; register the array and accept.")
+                    : QStringLiteral(" MRI restored; the fiducials still have to be placed.");
+    // Never restored: gel dries and the subject moves.
     clearCouplingMeasurement();
     goToNextStage();
     refresh();
+    // A load already on this page arrives at nothing, so jump explicitly.
+    if (!fiducials_.empty() && selectedStage_ == beam::gui::WorkflowStage::Registration) {
+        ui_->registrationTable->setCurrentCell(0, 0);
+        registrationStartFiducialRow_ = 0;
+        ui_->registrationReturnStartButton->setEnabled(true);
+        // Deferred: panning needs the final view size.
+        QTimer::singleShot(0, this, [this] { navigateToRegistrationFiducial(0); });
+    }
     showMessage(restored + QStringLiteral(" Coupling must be measured again before sonicating."),
                 false);
     Q_UNUSED(path);
 }
+
 
 
 

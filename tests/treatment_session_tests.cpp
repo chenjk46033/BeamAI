@@ -41,6 +41,8 @@ beam::gui::TreatmentSessionFile makeSession() {
         session.fiducials.push_back(marker);
         session.fiducialLocated[static_cast<std::size_t>(i)] = true;
         session.fiducialConfirmed[static_cast<std::size_t>(i)] = i % 2 == 0;
+        session.fiducialConfidence[static_cast<std::size_t>(i)] = 0.1 * (i + 1);
+        session.fiducialStability[static_cast<std::size_t>(i)] = 0.05 * (i + 1);
     }
     return session;
 }
@@ -246,4 +248,45 @@ TEST(TreatmentSession, DISABLED_RealScanSizeAndTime) {
     ASSERT_TRUE(back.mri.present);
     EXPECT_EQ(back.mri.volume.nx, session.mri.volume.nx);
     EXPECT_EQ(back.mri.volume.nz, session.mri.volume.nz);
+}
+
+// A detection score is not recomputed on load -- the pass that measured it is
+// gone -- so the file has to carry it or the Confidence column reads blank.
+TEST(TreatmentSession, CarriesFiducialDetectionScores) {
+    const beam::gui::TreatmentSessionFile written = makeSession();
+    const std::string path = scratch("session_scores.beamsession");
+    beam::gui::writeTreatmentSession(path, written);
+    const beam::gui::TreatmentSessionFile read = beam::gui::readTreatmentSession(path);
+    for (std::size_t i = 0; i < 6; ++i) {
+        EXPECT_DOUBLE_EQ(read.fiducialConfidence[i], 0.1 * (static_cast<double>(i) + 1.0))
+            << "confidence " << i;
+        EXPECT_DOUBLE_EQ(read.fiducialStability[i], 0.05 * (static_cast<double>(i) + 1.0))
+            << "stability " << i;
+    }
+}
+
+// A file written before the columns existed still loads, with the scores zero.
+TEST(TreatmentSession, ReadsFiducialsWithoutScoreColumns) {
+    const std::string path = scratch("session_six_column_fiducials.beamsession");
+    const std::string manifest = "key,value\nformatVersion,1\nparticipantId,p001\n";
+    const std::string fiducials =
+        "name,x,y,z,located,confirmed\n"
+        "F1,1,2,3,1,1\n"
+        "F2,4,5,6,1,0\n";
+    mz_zip_archive zip{};
+    ASSERT_TRUE(mz_zip_writer_init_file(&zip, path.c_str(), 0));
+    ASSERT_TRUE(mz_zip_writer_add_mem(&zip, "manifest.csv", manifest.data(), manifest.size(), 1));
+    ASSERT_TRUE(
+        mz_zip_writer_add_mem(&zip, "fiducials.csv", fiducials.data(), fiducials.size(), 1));
+    ASSERT_TRUE(mz_zip_writer_finalize_archive(&zip));
+    mz_zip_writer_end(&zip);
+
+    beam::gui::TreatmentSessionFile read;
+    ASSERT_NO_THROW(read = beam::gui::readTreatmentSession(path));
+    ASSERT_EQ(read.fiducials.size(), 2u);
+    EXPECT_TRUE(read.fiducialLocated[0]);
+    EXPECT_TRUE(read.fiducialConfirmed[0]);
+    EXPECT_FALSE(read.fiducialConfirmed[1]);
+    EXPECT_DOUBLE_EQ(read.fiducialConfidence[0], 0.0);
+    EXPECT_DOUBLE_EQ(read.fiducialStability[1], 0.0);
 }

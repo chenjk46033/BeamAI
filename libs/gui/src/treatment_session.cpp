@@ -159,17 +159,28 @@ SessionVolume decodeVolume(const std::string& in, const std::string& path) {
 }
 
 std::string encodeFiducials(const TreatmentSessionFile& session) {
-    std::string out = "# BeamAI session fiducials, millimetres, RAS\nname,x,y,z,located,confirmed\n";
+    std::string out = "# BeamAI session fiducials, millimetres, RAS\nname,x,y,z,located,confirmed,confidence,stability\n";
     for (std::size_t i = 0; i < session.fiducials.size(); ++i) {
         const Eigen::Vector3d mm = session.fiducials[i].position * 1000.0;
         char row[256] = {};
-        std::snprintf(row, sizeof(row), "%s,%.17g,%.17g,%.17g,%d,%d\n",
+        std::snprintf(row, sizeof(row), "%s,%.17g,%.17g,%.17g,%d,%d,%.17g,%.17g\n",
                       quote(session.fiducials[i].name).c_str(), mm.x(), mm.y(), mm.z(),
                       i < session.fiducialLocated.size() && session.fiducialLocated[i] ? 1 : 0,
-                      i < session.fiducialConfirmed.size() && session.fiducialConfirmed[i] ? 1 : 0);
+                      i < session.fiducialConfirmed.size() && session.fiducialConfirmed[i] ? 1 : 0,
+                      i < session.fiducialConfidence.size() ? session.fiducialConfidence[i] : 0.0,
+                      i < session.fiducialStability.size() ? session.fiducialStability[i] : 0.0);
         out += row;
     }
     return out;
+}
+
+// A detection score, or 0 if the column is unreadable.
+double score(const std::string& text) {
+    try {
+        return std::stod(text);
+    } catch (const std::exception&) {
+        return 0.0;
+    }
 }
 
 void decodeFiducials(const std::string& text, TreatmentSessionFile& session,
@@ -177,6 +188,8 @@ void decodeFiducials(const std::string& text, TreatmentSessionFile& session,
     session.fiducials.clear();
     session.fiducialLocated.fill(false);
     session.fiducialConfirmed.fill(false);
+    session.fiducialConfidence.fill(0.0);
+    session.fiducialStability.fill(0.0);
     std::size_t at = 0;
     bool headerSeen = false;
     while (at < text.size()) {
@@ -207,6 +220,9 @@ void decodeFiducials(const std::string& text, TreatmentSessionFile& session,
         if (index < session.fiducialLocated.size()) {
             session.fiducialLocated[index] = fields.size() > 4 && fields[4] == "1";
             session.fiducialConfirmed[index] = fields.size() > 5 && fields[5] == "1";
+            // Absent in a file written before these columns existed.
+            if (fields.size() > 6) session.fiducialConfidence[index] = score(fields[6]);
+            if (fields.size() > 7) session.fiducialStability[index] = score(fields[7]);
         }
         session.fiducials.push_back(std::move(marker));
     }
