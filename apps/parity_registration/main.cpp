@@ -288,6 +288,15 @@ int run() {
         registerCurrentTransducerPosition(realArray, mriFiducialsMm, kH, kV);
     r.vec("real_centreAfterLockMm", centreMm(realLock.arrayData));
 
+    // All sixteen notches, which is what the Registration page's "Overlay all
+    // targets" draws. One checked position leaves the other fifteen resting on
+    // an argument; sixteen leaves nothing resting on one.
+    for (const LockPositionTarget& target : targetsForEveryLockPosition(realArray, mriFiducialsMm)) {
+        r.vec("real_lockCentre_H" + std::to_string(target.horizontal) + "V" +
+                  std::to_string(target.vertical),
+              target.centreMm / 1000.0);
+    }
+
     // Every element centre, both stages -- the whole registered geometry,
     // not just its mean.
     for (Eigen::Index c = 0; c < nElements; ++c) {

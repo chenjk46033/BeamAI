@@ -760,9 +760,23 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // Its own line: sharing the row above clipped "Accept registration and
     // continue" to "ccept registration and continue".
     saveSessionOnRegistrationButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    // Beside Save session, because both belong to the lock position: one
+    // shows what the sixteen notches would do, the other keeps the chosen one.
+    overlayAllTargetsButton_ = new QPushButton(QStringLiteral("Overlay all targets"),
+                                               calibrationGroup_);
+    overlayAllTargetsButton_->setCheckable(true);
+    overlayAllTargetsButton_->setFixedHeight(kRegistrationButtonHeight);
+    overlayAllTargetsButton_->setStyleSheet(registerCurrentPositionButton_->styleSheet());
+    overlayAllTargetsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    overlayAllTargetsButton_->setToolTip(
+        QStringLiteral("Draws the target each of the sixteen lock positions would reach, "
+                       "labelled H<horizontal> V<vertical>, on all three views at once."));
+    connect(overlayAllTargetsButton_, &QPushButton::toggled, this,
+            [this](bool on) { setLockOverlayShown(on); });
     auto* saveSessionRow = new QHBoxLayout;
     saveSessionRow->setContentsMargins(0, 0, 0, 0);
     saveSessionRow->addStretch(1);
+    saveSessionRow->addWidget(overlayAllTargetsButton_);
     saveSessionRow->addWidget(saveSessionOnRegistrationButton_);
     calibrationLayout->insertLayout(1, saveSessionRow);
     // Calibration sliders use their own sliderPressed/valueChanged handlers
@@ -3260,7 +3274,82 @@ void WorkflowWindow::updateRegistrationAvailability() {
 
 void WorkflowWindow::updateRegistrationStepIndicators() {}
 
+// Computed here rather than on each toggle: sixteen registrations is most of
+// a second, and the answer only changes when the fit does.
+void WorkflowWindow::setLockOverlayShown(bool shown) {
+    lockOverlayShown_ = shown;
+    if (shown && lockOverlayTargets_.empty() && registrationGeometryLoaded_ &&
+        fiducials_.size() == 6) {
+        std::vector<Eigen::Vector3d> measured;
+        measured.reserve(fiducials_.size());
+        for (const auto& marker : fiducials_) measured.push_back(marker.position * 1000.0);
+        try {
+            lockOverlayTargets_ = beam::registration::targetsForEveryLockPosition(
+                registrationOriginArrayData_, measured);
+        } catch (const std::exception& error) {
+            lockOverlayShown_ = false;
+            showMessage(QStringLiteral("The lock positions could not be worked out: %1")
+                            .arg(QString::fromUtf8(error.what())),
+                        true);
+        }
+    }
+    if (overlayAllTargetsButton_ != nullptr) {
+        const QSignalBlocker blocker(overlayAllTargetsButton_);
+        overlayAllTargetsButton_->setChecked(lockOverlayShown_);
+        overlayAllTargetsButton_->setText(lockOverlayShown_
+                                              ? QStringLiteral("Hide all targets")
+                                              : QStringLiteral("Overlay all targets"));
+    }
+    // So the menu entry reads "Hide" once it is on, in the pane and in any
+    // detached viewer mirroring it.
+    for (WorkflowMriView* view : {ui_->registrationSagittalPreview,
+                                  ui_->registrationCoronalPreview,
+                                  ui_->registrationAxialPreview})
+        if (view != nullptr) view->setLockOverlayShown(lockOverlayShown_);
+    if (lockOverlayShown_ && lockOverlayTargets_.empty())
+        showMessage(QStringLiteral("Register to the MRI fiducials first: the lock positions are "
+                                   "worked out from that fit."),
+                    true);
+    showMriPreviews();
+}
+
+// Every notch the hardware offers, drawn at once so the choice can be seen
+// rather than tried one at a time. Sagittal only: the notches move the array
+// in AP and IS, and by 3 mm in LR across all sixteen, so they lie in one
+// sagittal plane. Coronal and axial each collapse one of those axes.
+void WorkflowWindow::appendLockPositionOverlay(std::vector<WorkflowMriMarker>& sagittal) {
+    if (!lockOverlayShown_ || !mriLoaded_ || lockOverlayTargets_.empty()) return;
+    const int currentHorizontal =
+        leftHorizontalPositionSlider_ == nullptr ? 0 : leftHorizontalPositionSlider_->value();
+    const int currentVertical =
+        leftVerticalPositionSlider_ == nullptr ? 0 : leftVerticalPositionSlider_->value();
+    for (const beam::registration::LockPositionTarget& target : lockOverlayTargets_) {
+        const bool current =
+            target.horizontal == currentHorizontal && target.vertical == currentVertical;
+        const Eigen::Vector3d& mm = target.centreMm;
+        const QString tooltip =
+            QStringLiteral("H%1 V%2\nLR %3  AP %4  IS %5 mm%6")
+                .arg(target.horizontal)
+                .arg(target.vertical)
+                .arg(mm.x(), 0, 'f', 1)
+                .arg(mm.y(), 0, 'f', 1)
+                .arg(mm.z(), 0, 'f', 1)
+                .arg(current ? QStringLiteral("\nThe lock position now set") : QString()) +
+            QStringLiteral("\nSagittal only: the notches move in AP and IS.");
+        // The registered-target yellow, with the one in use picked out.
+        const QColor ink = current ? QColor(0x5c, 0xcd, 0xe5) : QColor(0xff, 0xcc, 0x33);
+        sagittal.push_back(WorkflowMriMarker{
+            QPointF(1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm.y()),
+                    1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm.z())),
+            // No drawn label: sixteen boxes overlap into one band. Its name is
+            // the first line of the tooltip, shown on hover.
+            QString(), ink, false, false, -1, tooltip, 3.0});
+    }
+}
+
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
+    // A new fit moves every notch, so the cached sixteen are stale.
+    lockOverlayTargets_.clear();
     arrayData_ = std::move(result.arrayData);
     // Keep the red MRI fiducials at the operator-measured coordinates. The
     // registration result's marker positions are the fitted model points and
@@ -3692,6 +3781,7 @@ void WorkflowWindow::showMriPreviews() {
         ui_->sagittalPreview->setMarkers(std::move(imagingSagMarkers));
         ui_->coronalPreview->setMarkers(std::move(imagingCorMarkers));
         ui_->axialPreview->setMarkers(std::move(imagingAxialMarkers));
+        appendLockPositionOverlay(sagMarkers);
         ui_->registrationSagittalPreview->setMarkers(std::move(sagMarkers));
         ui_->registrationCoronalPreview->setMarkers(std::move(corMarkers));
         ui_->registrationAxialPreview->setMarkers(std::move(axialMarkers));
@@ -4082,6 +4172,22 @@ void WorkflowWindow::refresh() {
     std::string reason;
     const bool ready = workflow_.canStartTreatment(&reason);
     updateAbortButton();
+    // Whether the visit CAN be finished, not whether a sonication happened to
+    // end while this window was open. Reopening the app, or loading a session
+    // part-way through a visit, left it dead with no way to reach Report.
+    if (finishTreatmentButton_ != nullptr) {
+        const bool running =
+            sonicationCountdownTimer_ != nullptr && sonicationCountdownTimer_->isActive();
+        const bool done =
+            workflow_.state(beam::gui::WorkflowStage::Treatment).status ==
+            beam::gui::WorkflowStatus::Complete;
+        finishTreatmentButton_->setEnabled(
+            !running && !done && workflow_.canBegin(beam::gui::WorkflowStage::Treatment, nullptr));
+        finishTreatmentButton_->setToolTip(
+            running ? QStringLiteral("A sonication is still going out.")
+            : done  ? QStringLiteral("This visit is already finished.")
+                    : QStringLiteral("Ends the visit and opens its case report."));
+    }
     if (selectedStage_ == beam::gui::WorkflowStage::Treatment && !ready) showMessage(QString::fromStdString(reason), true);
 }
 

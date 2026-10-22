@@ -51,6 +51,7 @@ class QTabWidget;
 class QTimer;
 class QToolButton;
 class WorkflowMriView;
+struct WorkflowMriMarker;
 class QWidget;
 class QGroupBox;
 QT_END_NAMESPACE
@@ -105,6 +106,9 @@ private:
     void loadMri(const QString& path);
     void installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVectors axes, const QString& path);
     void showMriPreviews();
+    // The sixteen lock positions, drawn together so the choice is visible.
+    void appendLockPositionOverlay(std::vector<WorkflowMriMarker>& sagittal);
+    void setLockOverlayShown(bool shown);
     void resetMriViews();
     void rebuildFocusImage();
     void initializeRegistrationGeometry();
@@ -448,6 +452,10 @@ private:
     QString lastImagingDirectory_;
     bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
+    bool lockOverlayShown_ = false;
+    // Sixteen registrations is most of a second, so they are computed when the
+    // fit changes rather than on every toggle.
+    std::vector<beam::registration::LockPositionTarget> lockOverlayTargets_;
     bool focusImageLoaded_ = false;
     bool suppressRegistrationNavigation_ = false;
     bool couplingCheckPassed_ = false;
@@ -536,6 +544,7 @@ private:
     QPushButton* exportReportPdfButton_ = nullptr;
     QPushButton* saveSessionButton_ = nullptr;
     QPushButton* saveSessionOnRegistrationButton_ = nullptr;
+    QPushButton* overlayAllTargetsButton_ = nullptr;
     QPushButton* saveSessionOnTreatmentButton_ = nullptr;
     QListWidget* pastReportsList_ = nullptr;
     // Whose record is open. Zero until the Case page names somebody -- and on

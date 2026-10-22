@@ -212,7 +212,19 @@ void WorkflowWindow::wireDetachedViewerMenus() {
             openDetachedViewer(captured.view, QString::fromLatin1(captured.title), captured.slider,
                                captured.previous, captured.next, captured.reset, captured.label);
         });
+        // Only the Registration panes carry the overlay, which is what their
+        // lock position is for.
+        if (pane.view == ui_->registrationSagittalPreview ||
+            pane.view == ui_->registrationCoronalPreview ||
+            pane.view == ui_->registrationAxialPreview) {
+            pane.view->setLockOverlayHandler([this](bool on) { setLockOverlayShown(on); });
+        }
     }
 }
 
 }  // namespace beam::app
+
+
+
+
+

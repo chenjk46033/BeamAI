@@ -226,6 +226,14 @@ void WorkflowMriView::setPointMovedHandler(std::function<void(const Eigen::Vecto
     pointMovedHandler_ = std::move(handler);
 }
 
+void WorkflowMriView::setLockOverlayHandler(std::function<void(bool)> handler) {
+    lockOverlayHandler_ = std::move(handler);
+}
+
+void WorkflowMriView::setLockOverlayShown(bool shown) {
+    lockOverlayShown_ = shown;
+}
+
 void WorkflowMriView::setOpenViewerHandler(std::function<void()> handler) {
     openViewerHandler_ = std::move(handler);
 }
@@ -351,9 +359,12 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
             painter.setPen(QPen(marker.color, 1.5));
             // draggable does not change the drawing: the grab radius below is
             // a fixed 14 px, and a wider ring hid the donut underneath it.
-            painter.drawEllipse(point, 5.0, 5.0);
+            painter.drawEllipse(point, marker.radius, marker.radius);
             if (!marker.label.isEmpty()) {
-                const QRectF labelRect(point + QPointF(7, -17), QSizeF(105, 18));
+                QRectF labelRect(point + QPointF(7, -17), QSizeF(105, 18));
+                // Inside the view: a marker near the right edge would otherwise
+                // have its label clipped away.
+                if (labelRect.right() > width() - 2) labelRect.moveRight(point.x() - 7);
                 painter.fillRect(labelRect, QColor(150, 25, 35, 205));
                 painter.setPen(Qt::white);
                 painter.drawText(labelRect.adjusted(4, 0, -2, 0), Qt::AlignVCenter, marker.label);
@@ -606,6 +617,16 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
             QAction* clear = menu.addAction(QStringLiteral("Clear measurements"));
             connect(clear, &QAction::triggered, this, [this] { clearMeasurement(); });
         }
+    }
+    if (lockOverlayHandler_) {
+        menu.addSeparator();
+        // Here as well as on the Registration page, so a detached viewer -- the
+        // bigger view the sixteen are easiest to read in -- can turn them off.
+        QAction* overlay = menu.addAction(lockOverlayShown_
+                                              ? QStringLiteral("Hide all lock-position targets")
+                                              : QStringLiteral("Overlay all lock-position targets"));
+        connect(overlay, &QAction::triggered, this,
+                [this] { lockOverlayHandler_(!lockOverlayShown_); });
     }
     if (openViewerHandler_) {
         menu.addSeparator();

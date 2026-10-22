@@ -22,6 +22,9 @@ struct WorkflowMriMarker {
     // Shown on hover. Last, so the existing aggregate initialisers that stop
     // at markerIndex keep compiling with no tooltip.
     QString tooltip;
+    // Ring radius. Sixteen lock positions sit close together and read as
+    // blobs at the fiducial size.
+    double radius = 5.0;
 };
 
 // Native image interaction used by the new workflow UI. Kept independent
@@ -72,6 +75,10 @@ public:
     // itself is the caller's to build -- this view knows nothing about the
     // slider row that drives it.
     void setOpenViewerHandler(std::function<void()> handler);
+    // Lets the overlay be turned on and off from a detached viewer too, which
+    // is where sixteen labels are easiest to read.
+    void setLockOverlayHandler(std::function<void(bool)> handler);
+    void setLockOverlayShown(bool shown);
 
     // Widget placed at the top of the context menu; nullptr adds nothing.
     void setContextWidgetFactory(std::function<QWidget*(QMenu*)> factory);
@@ -183,5 +190,7 @@ private:
     std::optional<Eigen::Vector3d> hoverRasMm_;
     QPointer<WorkflowMriView> measurementPeer_;
     std::function<void()> openViewerHandler_;
+    std::function<void(bool)> lockOverlayHandler_;
+    bool lockOverlayShown_ = false;
     std::function<QWidget*(QMenu*)> contextWidgetFactory_;
 };

@@ -115,4 +115,29 @@ AffineArrayResult registerCurrentTransducerPosition(const beam::array::ArrayData
     return applyAffineToArrayData(translation, fiducialFit.arrayData);
 }
 
+// The centre registerCurrentTransducerPostion.m stamps into every target:
+// mean(arrayData.arrayTotal.rect(17:19,:),2)'*1000.
+std::vector<LockPositionTarget> targetsForEveryLockPosition(
+    const beam::array::ArrayData& originArrayData,
+    const std::vector<Eigen::Vector3d>& mriFiducialsMm) {
+    std::vector<LockPositionTarget> targets;
+    targets.reserve(16);
+    for (int horizontal = 1; horizontal <= 4; ++horizontal) {
+        for (int vertical = 1; vertical <= 4; ++vertical) {
+            AffineArrayResult placed = registerCurrentTransducerPosition(
+                originArrayData, mriFiducialsMm, horizontal, vertical);
+            LockPositionTarget target;
+            target.horizontal = horizontal;
+            target.vertical = vertical;
+            target.centreMm =
+                placed.arrayData.arrayTotal.rect.block(16, 0, 3, placed.arrayData.arrayTotal.rect.cols())
+                    .rowwise()
+                    .mean() *
+                1000.0;
+            targets.push_back(std::move(target));
+        }
+    }
+    return targets;
+}
+
 }  // namespace beam::registration

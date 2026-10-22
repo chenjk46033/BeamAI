@@ -77,4 +77,18 @@ AffineArrayResult registerCurrentTransducerPosition(const beam::array::ArrayData
                                                      const std::vector<Eigen::Vector3d>& mriFiducialsMm,
                                                      double horizontalSliderValue, double verticalSliderValue);
 
+// One lock position and where it puts the array centre, in millimetres.
+struct LockPositionTarget {
+    int horizontal = 0;  // the slider readings, 1..4
+    int vertical = 0;
+    Eigen::Vector3d centreMm = Eigen::Vector3d::Zero();
+};
+
+// Every lock position the hardware offers, each registered in turn: the same
+// call the operator makes for one notch, made for all sixteen. Lets the
+// choice be seen rather than tried one at a time.
+std::vector<LockPositionTarget> targetsForEveryLockPosition(
+    const beam::array::ArrayData& originArrayData,
+    const std::vector<Eigen::Vector3d>& mriFiducialsMm);
+
 }  // namespace beam::registration

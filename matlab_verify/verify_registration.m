@@ -192,6 +192,22 @@ rTranslation(1:3,4) = reshape(rRegdXYZ, [], 1);
 realLock = applyAffineToArrayData(rTranslation, realFit);
 writeVec(fid, 'real_centreAfterLockMm', mean(realLock.arrayTotal.rect(17:19,:), 2)' * 1000);
 
+% All sixteen lock positions, which is what BeamAI's "Overlay all targets"
+% draws. The basis above does not depend on the notch, so only the offset is
+% rebuilt per position.
+for hh = 1:4
+    for vv = 1:4
+        lockDY = -(hh - 1) * horizontalDelta / 1000;
+        lockDZ =  (vv - 1) * verticalDelta / 1000;
+        lockXYZ = rM * reshape([0, lockDY, lockDZ], [], 1);
+        lockT = eye(4);
+        lockT(1:3,4) = reshape(lockXYZ, [], 1);
+        lockArray = applyAffineToArrayData(lockT, realFit);
+        writeVec(fid, sprintf('real_lockCentre_H%dV%d', hh, vv), ...
+                 mean(lockArray.arrayTotal.rect(17:19,:), 2)');
+    end
+end
+
 for c = 0:nElements-1
     for k = 0:2
         fprintf(fid, 'real_fitElem_%d_%d,%.17g\n',  c, k, realFit.arrayTotal.rect(17+k,  c+1));

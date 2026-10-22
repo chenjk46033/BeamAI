@@ -551,3 +551,137 @@ TEST(RegistrationCentreParity, DetectedFiducialsRegisterTheSameInBothApps) {
                                           42.181532240634823);
     EXPECT_NEAR((afterLock - handPlacedLock).norm(), 1.810676, 1e-5);
 }
+
+// --- targetsForEveryLockPosition ---
+//
+// What the "Overlay all targets" button draws: the sixteen notches the
+// hardware offers, each registered the way the operator registers one.
+
+namespace {
+Eigen::Vector3d centreOf(const AffineArrayResult& placed) {
+    return placed.arrayData.arrayTotal.rect
+               .block(16, 0, 3, placed.arrayData.arrayTotal.rect.cols())
+               .rowwise()
+               .mean() *
+           1000.0;
+}
+}  // namespace
+
+TEST(TargetsForEveryLockPosition, CoversAllSixteenNotchesOnce) {
+    const beam::array::ArrayData data = beam::array::defineArrayData(buildRect(100));
+    const std::vector<FiducialMarker> originFiducials = setArrayFiducialMarkers(data);
+    std::vector<Eigen::Vector3d> mriFiducialsMm;
+    for (const FiducialMarker& m : originFiducials) mriFiducialsMm.push_back(m.position * 1000.0);
+
+    const std::vector<LockPositionTarget> targets =
+        targetsForEveryLockPosition(data, mriFiducialsMm);
+    ASSERT_EQ(targets.size(), 16u);
+    std::set<std::pair<int, int>> seen;
+    for (const LockPositionTarget& target : targets) {
+        EXPECT_GE(target.horizontal, 1);
+        EXPECT_LE(target.horizontal, 4);
+        EXPECT_GE(target.vertical, 1);
+        EXPECT_LE(target.vertical, 4);
+        seen.insert({target.horizontal, target.vertical});
+    }
+    EXPECT_EQ(seen.size(), 16u);
+}
+
+// The overlay must show the same place the operator would reach by setting
+// the notches and pressing Register, or it is illustrating something else.
+TEST(TargetsForEveryLockPosition, EachCentreMatchesRegisteringThatNotchAlone) {
+    const beam::array::ArrayData data = beam::array::defineArrayData(buildRect(100));
+    const std::vector<FiducialMarker> originFiducials = setArrayFiducialMarkers(data);
+    const Eigen::Vector3d shiftM(0.004, -0.002, 0.003);
+    std::vector<Eigen::Vector3d> mriFiducialsMm;
+    for (const FiducialMarker& m : originFiducials)
+        mriFiducialsMm.push_back((m.position + shiftM) * 1000.0);
+
+    for (const LockPositionTarget& target : targetsForEveryLockPosition(data, mriFiducialsMm)) {
+        const AffineArrayResult alone = registerCurrentTransducerPosition(
+            data, mriFiducialsMm, target.horizontal, target.vertical);
+        EXPECT_TRUE(target.centreMm.isApprox(centreOf(alone), 1e-9))
+            << "H" << target.horizontal << " V" << target.vertical;
+    }
+}
+
+// Sixteen notches, sixteen places. Two that coincided would make the overlay
+// read as fifteen choices with one label hidden under another.
+TEST(TargetsForEveryLockPosition, NoTwoNotchesLandInTheSamePlace) {
+    const beam::array::ArrayData data = beam::array::defineArrayData(buildRect(100));
+    const std::vector<FiducialMarker> originFiducials = setArrayFiducialMarkers(data);
+    std::vector<Eigen::Vector3d> mriFiducialsMm;
+    for (const FiducialMarker& m : originFiducials) mriFiducialsMm.push_back(m.position * 1000.0);
+
+    const std::vector<LockPositionTarget> targets =
+        targetsForEveryLockPosition(data, mriFiducialsMm);
+    for (std::size_t i = 0; i < targets.size(); ++i) {
+        for (std::size_t j = i + 1; j < targets.size(); ++j) {
+            EXPECT_GT((targets[i].centreMm - targets[j].centreMm).norm(), 1e-6)
+                << "H" << targets[i].horizontal << "V" << targets[i].vertical << " and "
+                << "H" << targets[j].horizontal << "V" << targets[j].vertical;
+        }
+    }
+}
+
+// A single notch step is a move along one basis vector, and those vectors are
+// normalised -- so neighbouring centres sit exactly the hardware's detent
+// apart however the array is posed. The diagonal is not Pythagoras: the basis
+// is built from fiducial differences and never orthogonalised, so the grid is
+// a slight parallelogram rather than a rectangle.
+TEST(TargetsForEveryLockPosition, NeighbouringNotchesSitExactlyTheDetentApart) {
+    // F010's measured fiducials, from a saved session.
+    const std::vector<Eigen::Vector3d> mriFiducialsMm = {
+        {-66.486081279690765, 67.876072324606326, 29.159698267452775},
+        {-66.585687233896948, 71.867713365564001, 10.09698218743539},
+        {-68.226608862095361, 50.292390471951201, 3.8916546202385609},
+        {146.46194243506937, 49.226789920085992, 17.76698925305362},
+        {145.17040997932509, 53.358535855548155, -1.7027354896098121},
+        {142.92157102917602, 31.802131858772945, -6.3232749790166558}};
+    const beam::array::ArrayData data = beam::array::defineArrayData(buildRect(100));
+    const std::vector<LockPositionTarget> targets =
+        targetsForEveryLockPosition(data, mriFiducialsMm);
+    const auto at = [&targets](int h, int v) {
+        for (const auto& e : targets)
+            if (e.horizontal == h && e.vertical == v) return e.centreMm;
+        return Eigen::Vector3d::Zero().eval();
+    };
+    for (int v = 1; v <= 4; ++v)
+        for (int h = 1; h <= 3; ++h)
+            EXPECT_NEAR((at(h, v) - at(h + 1, v)).norm(), 7.5, 1e-9) << "H" << h << " V" << v;
+    for (int h = 1; h <= 4; ++h)
+        for (int v = 1; v <= 3; ++v)
+            EXPECT_NEAR((at(h, v) - at(h, v + 1)).norm(), 10.0, 1e-9) << "H" << h << " V" << v;
+    // Not 12.5: the two notch axes meet at about 92 degrees, not 90.
+    EXPECT_NEAR((at(1, 1) - at(2, 2)).norm(), 12.253, 1e-3);
+}
+
+// Sixteen values, but not sixteen independent computations: they lie on an
+// affine lattice, origin + (h-1)*u + (v-1)*w. So the whole overlay is right
+// if the origin and the two notch vectors are, which is what the parity
+// harness checks against BeamV0 itself.
+TEST(TargetsForEveryLockPosition, TheSixteenLieOnAnExactLattice) {
+    const std::vector<Eigen::Vector3d> mriFiducialsMm = {
+        {-66.486081279690765, 67.876072324606326, 29.159698267452775},
+        {-66.585687233896948, 71.867713365564001, 10.09698218743539},
+        {-68.226608862095361, 50.292390471951201, 3.8916546202385609},
+        {146.46194243506937, 49.226789920085992, 17.76698925305362},
+        {145.17040997932509, 53.358535855548155, -1.7027354896098121},
+        {142.92157102917602, 31.802131858772945, -6.3232749790166558}};
+    const beam::array::ArrayData data = beam::array::defineArrayData(buildRect(100));
+    const std::vector<LockPositionTarget> targets =
+        targetsForEveryLockPosition(data, mriFiducialsMm);
+    const auto at = [&targets](int h, int v) {
+        for (const auto& e : targets)
+            if (e.horizontal == h && e.vertical == v) return e.centreMm;
+        return Eigen::Vector3d::Zero().eval();
+    };
+    const Eigen::Vector3d origin = at(1, 1);
+    const Eigen::Vector3d u = at(2, 1) - origin;
+    const Eigen::Vector3d w = at(1, 2) - origin;
+    for (int h = 1; h <= 4; ++h)
+        for (int v = 1; v <= 4; ++v)
+            EXPECT_LT((at(h, v) - (origin + (h - 1) * u + (v - 1) * w)).norm(), 1e-9)
+                << "H" << h << " V" << v;
+}
+
