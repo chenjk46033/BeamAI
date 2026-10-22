@@ -274,41 +274,59 @@ BestTargets getTopTargetsFromTreatmentProtocolTable(const std::vector<TargetResp
 
 namespace beam::gui {
 
-std::vector<RankedTarget> rankTreatmentRows(const std::vector<PlanRow>& plan) {
-    std::vector<RankedTarget> changes;
-    std::vector<TargetResponse> screening;
+std::vector<PlanBlock> planBlocks(const std::vector<PlanRow>& plan) {
+    std::vector<PlanBlock> blocks;
     std::size_t at = 0;
     while (at < plan.size()) {
-        if (plan[at].duration < kScreeningSeconds) {
-            TargetResponse scored;
-            scored.sonicationNumber = plan[at].sequence;
-            scored.name = plan[at].target;
-            scored.numericResponse = plan[at].response;
-            scored.duration = plan[at].duration;
-            screening.push_back(std::move(scored));
-            ++at;
-            continue;
-        }
-        // A run of treatment rows, taking the winners of the screening block
-        // above it and cycling through them in rank order.
+        const bool screening = plan[at].duration < kScreeningSeconds;
         std::size_t end = at;
-        while (end < plan.size() && plan[end].duration >= kScreeningSeconds) ++end;
-        if (!screening.empty()) {
-            const BestTargets best =
-                getTopTargetsFromTreatmentProtocolTable(screening, regionOf(screening));
-            // From the first row still to run, so the best target goes next: a
-            // delivered row keeps what it ran and no longer holds a slot.
-            std::size_t slot = 0;
-            for (std::size_t row = at; row < end && !best.name.empty(); ++row) {
-                if (plan[row].delivered) continue;
-                const std::string& wanted = best.name[slot % best.name.size()];
-                ++slot;
-                if (plan[row].target == wanted) continue;
-                changes.push_back({plan[row].sequence, wanted});
-            }
+        while (end < plan.size() && (plan[end].duration < kScreeningSeconds) == screening) ++end;
+        PlanBlock block;
+        block.screening = screening;
+        block.first = plan[at].sequence;
+        block.last = plan[end - 1].sequence;
+        // Neighbouring, reading down: the screening run just passed is the
+        // one this treatment run takes its winners from.
+        if (!screening && !blocks.empty() && blocks.back().screening) {
+            block.feedFirst = blocks.back().first;
+            block.feedLast = blocks.back().last;
         }
-        screening.clear();
+        blocks.push_back(block);
         at = end;
+    }
+    return blocks;
+}
+
+std::vector<RankedTarget> rankTreatmentRows(const std::vector<PlanRow>& plan) {
+    std::vector<RankedTarget> changes;
+    std::size_t at = 0;
+    for (const PlanBlock& block : planBlocks(plan)) {
+        const std::size_t first = at;
+        while (at < plan.size() && plan[at].sequence <= block.last) ++at;
+        if (block.screening || block.feedFirst == 0) continue;
+        std::vector<TargetResponse> screening;
+        for (const PlanRow& row : plan) {
+            if (row.sequence < block.feedFirst || row.sequence > block.feedLast) continue;
+            TargetResponse scored;
+            scored.sonicationNumber = row.sequence;
+            scored.name = row.target;
+            scored.numericResponse = row.response;
+            scored.duration = row.duration;
+            screening.push_back(std::move(scored));
+        }
+        if (screening.empty()) continue;
+        const BestTargets best =
+            getTopTargetsFromTreatmentProtocolTable(screening, regionOf(screening));
+        // From the first row still to run, so the best target goes next: a
+        // delivered row keeps what it ran and no longer holds a slot.
+        std::size_t slot = 0;
+        for (std::size_t row = first; row < at && !best.name.empty(); ++row) {
+            if (plan[row].delivered) continue;
+            const std::string& wanted = best.name[slot % best.name.size()];
+            ++slot;
+            if (plan[row].target == wanted) continue;
+            changes.push_back({plan[row].sequence, wanted});
+        }
     }
     return changes;
 }

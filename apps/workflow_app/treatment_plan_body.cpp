@@ -943,6 +943,15 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // space under it and no surplus for the layout to spread between the rows
     // above. Its own scrollbar handles a schedule longer than the space.
     protocolLayout->addWidget(protocolView_, 1);
+    // Nothing in the plan says which rows screen and which treat -- it is read
+    // off the durations. This says out loud what was read.
+    planBlocksLabel_ = new QLabel(protocolTab);
+    // Not wrapped: a wrapped label's height depends on its width, which this
+    // layout settles only on a resize -- until then it is drawn half cut.
+    planBlocksLabel_->setWordWrap(false);
+    planBlocksLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    planBlocksLabel_->setStyleSheet(QStringLiteral("QLabel { color: #9fb0ba; padding: 2px 2px; }"));
+    protocolLayout->addWidget(planBlocksLabel_, 0);
     // The table takes the slack in this column, and nothing else does. With
     // the table hidden there was nothing to take it, so the layout spread it
     // over the row above and the controls sat a few lines down the page until
@@ -1162,6 +1171,7 @@ void WorkflowWindow::wireTreatmentPlanBody() {
     connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
             [this](const QModelIndex& topLeft, const QModelIndex& bottomRight) {
                 updateBestTargets();
+                updatePlanBlocksLabel();
                 // A score is the ranking's input, so the plan follows it at once.
                 // BeamV0 waits for the next Sonicate; by then the answer is the same.
                 using Model = beam::gui_qt::TreatmentProtocolTableModel;
@@ -2615,6 +2625,7 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
         this, [this] { precheckPendingSonications(); }, Qt::QueuedConnection);
     selectScheduledSonication(keep);
     updateBestTargets();
+    updatePlanBlocksLabel();
     // The checkbox belongs to the visit, so it follows the one just opened.
     if (autoRankCheckBox_ != nullptr) {
         const QSignalBlocker block(autoRankCheckBox_);
@@ -3228,6 +3239,40 @@ void WorkflowWindow::applyTargetRanking(bool quiet) {
         showMessage(QStringLiteral("Target ranking repointed %1 sonication(s) still to run.")
                         .arg(moved),
                     false);
+}
+
+void WorkflowWindow::updatePlanBlocksLabel() {
+    if (planBlocksLabel_ == nullptr || protocolModel_ == nullptr) return;
+    std::vector<beam::gui::PlanRow> plan;
+    for (const beam::gui_qt::TreatmentProtocolRow& row : protocolModel_->rows()) {
+        beam::gui::PlanRow entry;
+        entry.sequence = row.number;
+        entry.target = row.target.toStdString();
+        entry.duration = row.duration;
+        plan.push_back(std::move(entry));
+    }
+    QStringList pairs;
+    QStringList orphans;
+    for (const beam::gui::PlanBlock& block : beam::gui::planBlocks(plan)) {
+        if (block.screening) continue;
+        if (block.feedFirst == 0) {
+            orphans << QStringLiteral("%1-%2").arg(block.first).arg(block.last);
+            continue;
+        }
+        pairs << QStringLiteral("%1-%2 screen \u2192 %3-%4 treat")
+                     .arg(block.feedFirst).arg(block.feedLast).arg(block.first).arg(block.last);
+    }
+    QString text;
+    if (!pairs.isEmpty()) text = pairs.join(QStringLiteral("   \u00b7   "));
+    if (!orphans.isEmpty()) {
+        if (!text.isEmpty()) text += QStringLiteral("   \u00b7   ");
+        text += QStringLiteral("rows %1 have no screening above them, so ranking leaves them alone")
+                    .arg(orphans.join(QStringLiteral(", ")));
+    }
+    planBlocksLabel_->setText(text.isEmpty() ? QString()
+                                             : QStringLiteral("Read from the durations:  %1").arg(text));
+    planBlocksLabel_->setToolTip(planBlocksLabel_->text());
+    planBlocksLabel_->setVisible(!text.isEmpty());
 }
 
 void WorkflowWindow::updateBestTargets() {
@@ -5763,6 +5808,8 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
                 false);
     Q_UNUSED(path);
 }
+
+
 
 
 

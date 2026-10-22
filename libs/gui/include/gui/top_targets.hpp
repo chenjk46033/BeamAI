@@ -87,6 +87,22 @@ struct PlanRow {
     bool delivered = false;
 };
 
+// A run of rows of one kind. The plan has no column saying which a row is:
+// under a minute screens, a minute or more treats, and a run of each is a
+// block. feedFirst/feedLast name the screening block a treatment block takes
+// its winners from, or 0 when there is none above it.
+struct PlanBlock {
+    bool screening = false;
+    int first = 0;  // sequence numbers, inclusive
+    int last = 0;
+    int feedFirst = 0;
+    int feedLast = 0;
+};
+
+// The same scan rankTreatmentRows makes, exposed so what is shown and what is
+// done cannot drift apart.
+std::vector<PlanBlock> planBlocks(const std::vector<PlanRow>& plan);
+
 // A planned row and the target it should run instead.
 struct RankedTarget {
     int sequence = 0;

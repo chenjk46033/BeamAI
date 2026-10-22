@@ -1168,3 +1168,99 @@ TEST(TreatmentWorkflow, ReopeningCorrectionInvalidatesTreatment) {
     EXPECT_FALSE(workflow.begin(beam::gui::WorkflowStage::Treatment, &reason));
     EXPECT_NE(reason.find("must be complete first"), std::string::npos);
 }
+
+
+
+// --- planBlocks ---
+//
+// The scan ranking reads its blocks from. Covered here as well as through
+// rankTreatmentRows because the Treatment page shows what it returns: a label
+// that disagreed with the ranking would be worse than no label.
+
+namespace {
+std::vector<beam::gui::PlanRow> planOf(const std::vector<double>& durations) {
+    std::vector<beam::gui::PlanRow> plan;
+    for (std::size_t i = 0; i < durations.size(); ++i)
+        plan.push_back(pr(static_cast<int>(i) + 1, "X", durations[i]));
+    return plan;
+}
+}  // namespace
+
+// The two SCC/aMCC protocols: screen six, treat six, twice over.
+TEST(PlanBlocks, PairsEachTreatmentRunWithTheScreeningRunAboveIt) {
+    const std::vector<beam::gui::PlanBlock> blocks = beam::gui::planBlocks(planOf(
+        {30, 30, 30, 30, 30, 30, 180, 180, 180, 180, 180, 180,
+         30, 30, 30, 30, 30, 30, 180, 180, 180, 180, 180, 180}));
+    ASSERT_EQ(blocks.size(), 4u);
+    EXPECT_TRUE(blocks[0].screening);
+    EXPECT_EQ(blocks[0].first, 1);
+    EXPECT_EQ(blocks[0].last, 6);
+    EXPECT_FALSE(blocks[1].screening);
+    EXPECT_EQ(blocks[1].first, 7);
+    EXPECT_EQ(blocks[1].last, 12);
+    EXPECT_EQ(blocks[1].feedFirst, 1);
+    EXPECT_EQ(blocks[1].feedLast, 6);
+    EXPECT_EQ(blocks[3].first, 19);
+    EXPECT_EQ(blocks[3].last, 24);
+    EXPECT_EQ(blocks[3].feedFirst, 13);
+    EXPECT_EQ(blocks[3].feedLast, 18);
+}
+
+// PTSD treats at 90, 180 and 240 s. All are a minute or more, so they are one
+// run fed by one screening block -- the threshold groups, the exact value
+// does not.
+TEST(PlanBlocks, MixedTreatmentDurationsAreStillOneBlock) {
+    const std::vector<beam::gui::PlanBlock> blocks =
+        beam::gui::planBlocks(planOf({30, 30, 30, 90, 90, 180, 180, 240}));
+    ASSERT_EQ(blocks.size(), 2u);
+    EXPECT_EQ(blocks[1].first, 4);
+    EXPECT_EQ(blocks[1].last, 8);
+    EXPECT_EQ(blocks[1].feedFirst, 1);
+    EXPECT_EQ(blocks[1].feedLast, 3);
+}
+
+// Nothing above them to rank from, which the label says out loud.
+TEST(PlanBlocks, ATreatmentRunWithNoScreeningAboveItHasNoFeed) {
+    const std::vector<beam::gui::PlanBlock> blocks = beam::gui::planBlocks(planOf({180, 180, 240}));
+    ASSERT_EQ(blocks.size(), 1u);
+    EXPECT_FALSE(blocks[0].screening);
+    EXPECT_EQ(blocks[0].feedFirst, 0);
+    EXPECT_EQ(blocks[0].feedLast, 0);
+}
+
+TEST(PlanBlocks, APlanOfOnlyScreeningRowsHasNoTreatmentBlock) {
+    const std::vector<beam::gui::PlanBlock> blocks = beam::gui::planBlocks(planOf({30, 30, 30}));
+    ASSERT_EQ(blocks.size(), 1u);
+    EXPECT_TRUE(blocks[0].screening);
+}
+
+TEST(PlanBlocks, AnEmptyPlanHasNoBlocks) {
+    EXPECT_TRUE(beam::gui::planBlocks({}).empty());
+}
+
+// 60 s treats, 59 screens. The boundary is the whole definition, so it is
+// pinned rather than left to the reader.
+TEST(PlanBlocks, SixtySecondsTreatsAndFiftyNineScreens) {
+    const std::vector<beam::gui::PlanBlock> blocks = beam::gui::planBlocks(planOf({59, 60}));
+    ASSERT_EQ(blocks.size(), 2u);
+    EXPECT_TRUE(blocks[0].screening);
+    EXPECT_FALSE(blocks[1].screening);
+    EXPECT_EQ(blocks[1].feedFirst, 1);
+}
+
+// Editing a duration moves the boundary, with nothing recording that the row
+// was meant to treat. The label exists so this is visible rather than silent.
+TEST(PlanBlocks, ShorteningATreatmentRowMovesItIntoTheScreeningBlock) {
+    const std::vector<beam::gui::PlanBlock> before =
+        beam::gui::planBlocks(planOf({30, 30, 30, 180, 180, 180}));
+    ASSERT_EQ(before.size(), 2u);
+    EXPECT_EQ(before[0].last, 3);
+    EXPECT_EQ(before[1].first, 4);
+
+    const std::vector<beam::gui::PlanBlock> after =
+        beam::gui::planBlocks(planOf({30, 30, 30, 30, 180, 180}));
+    ASSERT_EQ(after.size(), 2u);
+    EXPECT_EQ(after[0].last, 4);
+    EXPECT_EQ(after[1].first, 5);
+    EXPECT_EQ(after[1].feedLast, 4);
+}

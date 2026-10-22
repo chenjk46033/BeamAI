@@ -346,6 +346,9 @@ private:
     // The same, skipped when the operator has turned ranking off.
     void applyTargetRankingIfAutomatic();
     bool automaticRankingOn() const;
+    // Says which rows the plan screens with and which it treats with, read
+    // off the durations by the same scan the ranking uses.
+    void updatePlanBlocksLabel();
     // Opens the note on one sonication for editing. A note is a running
     // record, so the box opens on a fresh stamped line.
     void editRowNotes(int sequence);
@@ -555,6 +558,7 @@ private:
     // both have no rows -- and seeding the second must not refill the first.
     QSet<QString> editedVisits_;
     QCheckBox* autoRankCheckBox_ = nullptr;
+    QLabel* planBlocksLabel_ = nullptr;
     // Visits the operator has turned ranking off for. Absent means on, so a
     // visit written before this existed keeps BeamV0's always-on behaviour.
     QSet<QString> rankingOffVisits_;
