@@ -296,12 +296,14 @@ std::vector<RankedTarget> rankTreatmentRows(const std::vector<PlanRow>& plan) {
         if (!screening.empty()) {
             const BestTargets best =
                 getTopTargetsFromTreatmentProtocolTable(screening, regionOf(screening));
+            // From the first row still to run, so the best target goes next: a
+            // delivered row keeps what it ran and no longer holds a slot.
+            std::size_t slot = 0;
             for (std::size_t row = at; row < end && !best.name.empty(); ++row) {
-                // The counter walks every row of the run, delivered ones
-                // included, so the pattern a visit is running keeps its shape
-                // as it goes.
-                const std::string& wanted = best.name[(row - at) % best.name.size()];
-                if (plan[row].delivered || plan[row].target == wanted) continue;
+                if (plan[row].delivered) continue;
+                const std::string& wanted = best.name[slot % best.name.size()];
+                ++slot;
+                if (plan[row].target == wanted) continue;
                 changes.push_back({plan[row].sequence, wanted});
             }
         }

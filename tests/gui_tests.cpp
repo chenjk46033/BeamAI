@@ -1122,11 +1122,12 @@ TEST(RankTreatmentRows, ADeliveredRowKeepsWhatItRan) {
     std::vector<beam::gui::PlanRow> plan = {pr(1, "SCC1", 30, 4, true), pr(2, "SCC2", 30, 1, true),
                                             pr(3, "T1", 180, 0, true), pr(4, "T2", 180)};
     const std::vector<beam::gui::RankedTarget> changes = beam::gui::rankTreatmentRows(plan);
-    // Row 3 already ran as T1 and is left alone; row 4 takes the second
-    // winner, because the counter still walks past the delivered row.
+    // Row 3 already ran as T1 and is left alone. Row 4 is the first row still
+    // to run, so it takes the BEST winner: a finished row no longer holds a
+    // slot in the rotation.
     ASSERT_EQ(changes.size(), 1u);
     EXPECT_EQ(changes.front().sequence, 4);
-    EXPECT_EQ(changes.front().target, "SCC2");
+    EXPECT_EQ(changes.front().target, "SCC1");
 }
 
 TEST(RankTreatmentRows, TreatmentRowsWithNothingScreenedAboveThemAreLeftAlone) {

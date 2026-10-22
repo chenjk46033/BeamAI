@@ -41,6 +41,7 @@
 #include <string>
 #include <vector>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDataStream>
@@ -834,22 +835,16 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
                                   QStringLiteral("Large")});
     hydrogelSizeCombo_->setCurrentIndex(0);  // HydrogelSizeButtonGroup's own default
     applyItemViewPalette(hydrogelSizeCombo_);
-    // On demand, never on its own: the plan changes when the operator presses
-    // this and not otherwise, and the message line says what it did.
-    rankTargetsButton_ = makeProtocolButton(
-        QStringLiteral("Rank Targets"),
-        QStringLiteral("Point the treatment sonications still to come at whichever targets "
-                       "scored best in the screening sonications above them. Delivered rows "
-                       "are never changed."));
-    rankTargetsButton_->setObjectName(QStringLiteral("rankTargetsButton"));
-    // A plan that changed under you is only safe if you can put it back.
-    // What it can undo is held in memory and only for one press, so a greyed
-    // button has to say which of those it is.
-    undoRankingButton_ = makeProtocolButton(
-        QStringLiteral("Undo Ranking"),
-        QStringLiteral("Nothing to undo: Rank Targets has not been pressed this session"));
-    undoRankingButton_->setObjectName(QStringLiteral("undoRankingButton"));
-    undoRankingButton_->setEnabled(false);
+    // BeamV0 ranks after every delivery and offers no way out. The box is
+    // the way out: ticked is BeamV0, unticked leaves the plan alone.
+    autoRankCheckBox_ = new QCheckBox(QStringLiteral("Rank targets automatically"), protocolTab);
+    autoRankCheckBox_->setObjectName(QStringLiteral("autoRankCheckBox"));
+    autoRankCheckBox_->setChecked(true);
+    autoRankCheckBox_->setStyleSheet(QStringLiteral("QCheckBox { color: #dcebef; }"));
+    autoRankCheckBox_->setToolTip(
+        QStringLiteral("After each sonication, point the treatment rows still to come at "
+                       "whichever targets scored best in the screening rows above them. "
+                       "Delivered rows are never changed. Untick to edit the plan yourself."));
     auto* sonicationNumberLabel = new QLabel(QStringLiteral("Current Sonication Number:"), protocolTab);
     currentSonicationNumberLabel_ = new QLabel(protocolTab);
     currentSonicationNumberLabel_->setStyleSheet(QStringLiteral(
@@ -869,8 +864,7 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     protocolSelectorRow->addWidget(hydrogelLabel);
     protocolSelectorRow->addWidget(hydrogelSizeCombo_);
     protocolSelectorRow->addSpacing(18);
-    protocolSelectorRow->addWidget(rankTargetsButton_);
-    protocolSelectorRow->addWidget(undoRankingButton_);
+    protocolSelectorRow->addWidget(autoRankCheckBox_);
     protocolSelectorRow->addStretch(1);
     protocolSelectorRow->addWidget(manageLibraryButton_);
     protocolSelectorRow->addWidget(manageTargetsButton_);
@@ -1141,18 +1135,41 @@ void WorkflowWindow::wireTreatmentPlanBody() {
             loadTreatmentProtocol(currentProtocolName());
         }, Qt::QueuedConnection);
     });
-    connect(rankTargetsButton_, &QPushButton::clicked, this, [this] { applyTargetRanking(); });
     connect(protocolView_, &QTableView::doubleClicked, this, [this](const QModelIndex& where) {
         if (where.column() == beam::gui_qt::TreatmentProtocolTableModel::kNotes)
             editRowNotes(where.row() + 1);
     });
-    connect(undoRankingButton_, &QPushButton::clicked, this, [this] { undoTargetRanking(); });
+    connect(autoRankCheckBox_, &QCheckBox::toggled, this, [this](bool on) {
+        const QString key = visitKey(currentProtocolName(), currentVisitNumber());
+        if (on) {
+            rankingOffVisits_.remove(key);
+            applyTargetRanking();
+        } else {
+            rankingOffVisits_.insert(key);
+            // Said plainly: unticking stops the ranking, it does not undo it.
+            showMessage(QStringLiteral("Automatic ranking is off for visit %1. The targets "
+                                       "already in the plan stay as they are.")
+                            .arg(currentVisitNumber()),
+                        false);
+        }
+        saveVisitState();
+    });
     connect(computeBestTargetsButton_, &QPushButton::clicked, this, [this] { updateBestTargets(); });
     connect(accFlagCombo_, &QComboBox::currentTextChanged, this, [this] {
         updateBestTargets();
         updateExampleTargetImage();
     });
-    connect(protocolModel_, &QAbstractItemModel::dataChanged, this, [this] { updateBestTargets(); });
+    connect(protocolModel_, &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex& topLeft, const QModelIndex& bottomRight) {
+                updateBestTargets();
+                // A score is the ranking's input, so the plan follows it at once.
+                // BeamV0 waits for the next Sonicate; by then the answer is the same.
+                using Model = beam::gui_qt::TreatmentProtocolTableModel;
+                if (topLeft.column() > Model::kResponseMood ||
+                    bottomRight.column() < Model::kResponsePain)
+                    return;
+                applyTargetRankingIfAutomatic();
+            });
 
     // Before the first load: it decides which sonication each visit opens on.
     loadVisitState();
@@ -2598,6 +2615,11 @@ void WorkflowWindow::loadTreatmentProtocol(const QString& protocolName) {
         this, [this] { precheckPendingSonications(); }, Qt::QueuedConnection);
     selectScheduledSonication(keep);
     updateBestTargets();
+    // The checkbox belongs to the visit, so it follows the one just opened.
+    if (autoRankCheckBox_ != nullptr) {
+        const QSignalBlocker block(autoRankCheckBox_);
+        autoRankCheckBox_->setChecked(automaticRankingOn());
+    }
 }
 
 void WorkflowWindow::selectSonicationRow(int row) {
@@ -3131,8 +3153,22 @@ void WorkflowWindow::editRowNotes(int sequence) {
     saveTreatmentTargetStore();
 }
 
-void WorkflowWindow::applyTargetRanking() {
+bool WorkflowWindow::automaticRankingOn() const {
+    return !rankingOffVisits_.contains(visitKey(currentProtocolName(), currentVisitNumber()));
+}
+
+// BeamV0's three triggers: after a sonication, after a sham, and on a visit
+// change. Silent -- nothing to rank is the normal state for most of a visit.
+void WorkflowWindow::applyTargetRankingIfAutomatic() {
+    if (applyingRanking_ || !automaticRankingOn()) return;
+    applyTargetRanking(/*quiet=*/true);
+}
+
+void WorkflowWindow::applyTargetRanking(bool quiet) {
     if (applyingRanking_) return;
+    // The scores it ranks on are read from the log, and a score just typed is
+    // still only in the table. Flush first or the ranking is an edit behind.
+    writeProtocolGridToStore();
     const QString protocolName = currentProtocolName();
     const std::string protocol = protocolName.toStdString();
     const int visit = currentVisitNumber();
@@ -3150,99 +3186,48 @@ void WorkflowWindow::applyTargetRanking() {
     for (const beam::gui::PlanRow& row : plan)
         if (!row.delivered && row.duration >= 60.0) anyTreatmentRow = true;
     if (!anyTreatmentRow) {
-        showMessage(QStringLiteral("Nothing to rank: this visit has no treatment sonication "
-                                   "left to run. Ranking repoints the long sonications, not "
-                                   "the screening ones."),
-                    true);
+        if (!quiet)
+            showMessage(QStringLiteral("Nothing to rank: this visit has no treatment sonication "
+                                       "left to run. Ranking repoints the long sonications, not "
+                                       "the screening ones."),
+                        true);
         return;
     }
     const std::vector<beam::gui::RankedTarget> changes = beam::gui::rankTreatmentRows(plan);
     if (changes.empty()) {
-        showMessage(
-            QStringLiteral("Target ranking: the plan already runs the best-scoring targets."),
-            false);
+        if (!quiet)
+            showMessage(
+                QStringLiteral("Target ranking: the plan already runs the best-scoring targets."),
+                false);
         return;
     }
 
     applyingRanking_ = true;
-    std::vector<beam::gui::TreatmentLogRow> undo;
+    int moves = 0;
     for (const beam::gui::RankedTarget& change : changes) {
         // Not the one going out: it is already on its way to the hardware.
         if (change.sequence == openLogSequence_) continue;
         const beam::gui::TreatmentLogRow* was =
             treatmentLog_.find(protocol, visit, change.sequence);
         if (was == nullptr) continue;
-        const beam::gui::TreatmentLogRow before = *was;
+        const beam::gui::TreatmentLogRow& before = *was;
         // The duration is the plan's and stays; everything else comes from
         // the target the row now runs.
         beam::gui::TreatmentLogRow row =
             rowForTarget(change.target, before.endTimeSeconds - before.startTimeSeconds);
         if (treatmentLog_.replacePlanned(protocol, visit, change.sequence, std::move(row)))
-            undo.push_back(before);
+            ++moves;
     }
-    const int moved = static_cast<int>(undo.size());
+    const int moved = static_cast<int>(moves);
     if (moved > 0) {
-        rankingUndoRows_ = std::move(undo);
-        rankingUndoProtocol_ = protocolName;
-        rankingUndoVisit_ = visit;
-        if (undoRankingButton_ != nullptr) {
-            undoRankingButton_->setEnabled(true);
-            undoRankingButton_->setToolTip(
-                QStringLiteral("Put back the %1 sonication(s) of visit %2 that press repointed")
-                    .arg(undo.size())
-                    .arg(visit));
-        }
         loadTreatmentProtocol(protocolName);
         saveTreatmentTargetStore();
     }
     applyingRanking_ = false;
-    if (moved > 0)
-        showMessage(QStringLiteral("Target ranking repointed %1 sonication(s) still to run. "
-                                   "Undo Ranking puts them back.")
+    if (moved > 0 && !quiet)
+        showMessage(QStringLiteral("Target ranking repointed %1 sonication(s) still to run.")
                         .arg(moved),
                     false);
-}
-
-void WorkflowWindow::undoTargetRanking() {
-    if (applyingRanking_ || rankingUndoRows_.empty()) return;
-    const QString protocolName = currentProtocolName();
-    if (protocolName != rankingUndoProtocol_ || currentVisitNumber() != rankingUndoVisit_) {
-        showMessage(QStringLiteral("The ranking to undo was in visit %1 of \"%2\".")
-                        .arg(rankingUndoVisit_)
-                        .arg(rankingUndoProtocol_),
-                    true);
-        return;
-    }
-    applyingRanking_ = true;
-    const std::string protocol = protocolName.toStdString();
-    int back = 0;
-    int ran = 0;
-    for (const beam::gui::TreatmentLogRow& row : rankingUndoRows_) {
-        // A row delivered since the ranking is a record now, and replacePlanned
-        // refuses it. It keeps the target it actually ran.
-        if (treatmentLog_.replacePlanned(protocol, rankingUndoVisit_, row.sequence, row))
-            ++back;
-        else
-            ++ran;
-    }
-    rankingUndoRows_.clear();
-    rankingUndoProtocol_.clear();
-    rankingUndoVisit_ = 0;
-    if (undoRankingButton_ != nullptr) {
-        undoRankingButton_->setEnabled(false);
-        undoRankingButton_->setToolTip(
-            QStringLiteral("Nothing to undo: Rank Targets has not been pressed this session"));
-    }
-    loadTreatmentProtocol(protocolName);
-    saveTreatmentTargetStore();
-    applyingRanking_ = false;
-    showMessage(ran == 0
-                    ? QStringLiteral("Ranking undone: %1 sonication(s) put back.").arg(back)
-                    : QStringLiteral("Ranking undone for %1 sonication(s); %2 had already run "
-                                     "and keep what they delivered.")
-                          .arg(back)
-                          .arg(ran),
-                false);
 }
 
 void WorkflowWindow::updateBestTargets() {
@@ -3651,7 +3636,7 @@ void WorkflowWindow::saveVisitState() const {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return;
     QTextStream out(&file);
-    out << "Protocol,Visit,CurrentSonication,Edited\n";
+    out << "Protocol,Visit,CurrentSonication,Edited,AutoRank\n";
     // Every visit any of the three knows about: one created and left empty
     // has no position of its own, and writing only the positions lost it.
     QSet<QString> keys;
@@ -3659,6 +3644,7 @@ void WorkflowWindow::saveVisitState() const {
          ++entry)
         keys.insert(entry.key());
     keys.unite(editedVisits_);
+    keys.unite(rankingOffVisits_);
     QStringList ordered(keys.constBegin(), keys.constEnd());
     ordered.sort();  // a stable file, so a diff of it means something
     for (const QString& key : ordered) {
@@ -3668,7 +3654,7 @@ void WorkflowWindow::saveVisitState() const {
         protocol.replace(QLatin1Char('"'), QStringLiteral("\"\""));
         out << '"' << protocol << "\"," << key.mid(split + 1) << ','
             << visitSonication_.value(key, 1) << ',' << (editedVisits_.contains(key) ? 1 : 0)
-            << '\n';
+            << ',' << (rankingOffVisits_.contains(key) ? 0 : 1) << '\n';
     }
 }
 
@@ -3689,7 +3675,7 @@ void WorkflowWindow::loadVisitState() {
     while (!in.atEnd()) {
         const QString line = in.readLine();
         if (line.trimmed().isEmpty()) continue;
-        // "Protocol",Visit,CurrentSonication[,Edited] -- the protocol
+        // "Protocol",Visit,CurrentSonication[,Edited[,AutoRank]] -- the protocol
         // is quoted because it may hold a comma; everything after it is a
         // plain number. Edited is read when present, so a file
         // written before it still loads.
@@ -3722,6 +3708,9 @@ void WorkflowWindow::loadVisitState() {
         const QString key = visitKey(protocol, visit);
         visitSonication_.insert(key, position);
         if (fields.value(2).trimmed() == QLatin1String("1")) editedVisits_.insert(key);
+        // Absent means on, so a file written before this column keeps
+        // BeamV0's always-on ranking.
+        if (fields.value(3).trimmed() == QLatin1String("0")) rankingOffVisits_.insert(key);
     }
 }
 
@@ -3996,6 +3985,8 @@ void WorkflowWindow::closeOpenLogRow(bool aborted) {
     // the table, and the save then writes it back unchanged.
     loadTreatmentProtocol(currentProtocolName());
     saveTreatmentTargetStore();
+    // BeamV0 re-ranks here, inside SonicateButtonPushed and ShamButtonPushed.
+    applyTargetRankingIfAutomatic();
     advanceToNextScheduledSonication();
     remeasureCouplingIfDue(justDelivered);
 }
@@ -5772,6 +5763,9 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
                 false);
     Q_UNUSED(path);
 }
+
+
+
 
 
 
