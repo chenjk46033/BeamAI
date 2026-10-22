@@ -767,7 +767,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     overlayAllTargetsButton_->setCheckable(true);
     overlayAllTargetsButton_->setFixedHeight(kRegistrationButtonHeight);
     overlayAllTargetsButton_->setStyleSheet(registerCurrentPositionButton_->styleSheet());
-    overlayAllTargetsButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    // Takes the width Save session leaves: the stretch used to swallow it.
+    overlayAllTargetsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     overlayAllTargetsButton_->setToolTip(
         QStringLiteral("Draws the target each of the sixteen lock positions would reach, "
                        "labelled H<horizontal> V<vertical>, on all three views at once."));
@@ -775,9 +776,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             [this](bool on) { setLockOverlayShown(on); });
     auto* saveSessionRow = new QHBoxLayout;
     saveSessionRow->setContentsMargins(0, 0, 0, 0);
-    saveSessionRow->addStretch(1);
-    saveSessionRow->addWidget(overlayAllTargetsButton_);
-    saveSessionRow->addWidget(saveSessionOnRegistrationButton_);
+    saveSessionRow->addWidget(overlayAllTargetsButton_, 1);
+    saveSessionRow->addWidget(saveSessionOnRegistrationButton_, 0);
     calibrationLayout->insertLayout(1, saveSessionRow);
     // Calibration sliders use their own sliderPressed/valueChanged handlers
     // below. Do not install a parent mouse filter here: re-entering
@@ -3274,25 +3274,28 @@ void WorkflowWindow::updateRegistrationAvailability() {
 
 void WorkflowWindow::updateRegistrationStepIndicators() {}
 
-// Computed here rather than on each toggle: sixteen registrations is most of
-// a second, and the answer only changes when the fit does.
+// Sixteen registrations is most of a second, so this runs when the fit
+// changes or the overlay is switched on -- not on every repaint.
+void WorkflowWindow::recomputeLockOverlayTargets() {
+    lockOverlayTargets_.clear();
+    if (!registrationGeometryLoaded_ || fiducials_.size() != 6) return;
+    std::vector<Eigen::Vector3d> measured;
+    measured.reserve(fiducials_.size());
+    for (const auto& marker : fiducials_) measured.push_back(marker.position * 1000.0);
+    try {
+        lockOverlayTargets_ = beam::registration::targetsForEveryLockPosition(
+            registrationOriginArrayData_, measured);
+    } catch (const std::exception& error) {
+        lockOverlayShown_ = false;
+        showMessage(QStringLiteral("The lock positions could not be worked out: %1")
+                        .arg(QString::fromUtf8(error.what())),
+                    true);
+    }
+}
+
 void WorkflowWindow::setLockOverlayShown(bool shown) {
     lockOverlayShown_ = shown;
-    if (shown && lockOverlayTargets_.empty() && registrationGeometryLoaded_ &&
-        fiducials_.size() == 6) {
-        std::vector<Eigen::Vector3d> measured;
-        measured.reserve(fiducials_.size());
-        for (const auto& marker : fiducials_) measured.push_back(marker.position * 1000.0);
-        try {
-            lockOverlayTargets_ = beam::registration::targetsForEveryLockPosition(
-                registrationOriginArrayData_, measured);
-        } catch (const std::exception& error) {
-            lockOverlayShown_ = false;
-            showMessage(QStringLiteral("The lock positions could not be worked out: %1")
-                            .arg(QString::fromUtf8(error.what())),
-                        true);
-        }
-    }
+    if (shown && lockOverlayTargets_.empty()) recomputeLockOverlayTargets();
     if (overlayAllTargetsButton_ != nullptr) {
         const QSignalBlocker blocker(overlayAllTargetsButton_);
         overlayAllTargetsButton_->setChecked(lockOverlayShown_);
@@ -3348,8 +3351,13 @@ void WorkflowWindow::appendLockPositionOverlay(std::vector<WorkflowMriMarker>& s
 }
 
 void WorkflowWindow::applyRegistrationResult(beam::registration::AffineArrayResult result) {
-    // A new fit moves every notch, so the cached sixteen are stale.
-    lockOverlayTargets_.clear();
+    // A new fit moves every notch. Recompute rather than just dropping them:
+    // clearing alone made the overlay vanish when Register was pressed.
+    if (lockOverlayShown_) {
+        recomputeLockOverlayTargets();
+    } else {
+        lockOverlayTargets_.clear();
+    }
     arrayData_ = std::move(result.arrayData);
     // Keep the red MRI fiducials at the operator-measured coordinates. The
     // registration result's marker positions are the fitted model points and

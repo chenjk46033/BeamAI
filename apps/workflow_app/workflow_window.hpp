@@ -109,6 +109,7 @@ private:
     // The sixteen lock positions, drawn together so the choice is visible.
     void appendLockPositionOverlay(std::vector<WorkflowMriMarker>& sagittal);
     void setLockOverlayShown(bool shown);
+    void recomputeLockOverlayTargets();
     void resetMriViews();
     void rebuildFocusImage();
     void initializeRegistrationGeometry();
