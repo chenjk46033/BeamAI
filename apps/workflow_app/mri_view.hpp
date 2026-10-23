@@ -78,6 +78,8 @@ public:
     // Lets the overlay be turned on and off from a detached viewer too, which
     // is where sixteen labels are easiest to read.
     void setLockOverlayHandler(std::function<void(bool)> handler);
+    // Opens the three slices as planes in space, with the array around them.
+    void setOpenSceneHandler(std::function<void()> handler);
     void setLockOverlayShown(bool shown);
 
     // Widget placed at the top of the context menu; nullptr adds nothing.
@@ -191,6 +193,7 @@ private:
     QPointer<WorkflowMriView> measurementPeer_;
     std::function<void()> openViewerHandler_;
     std::function<void(bool)> lockOverlayHandler_;
+    std::function<void()> openSceneHandler_;
     bool lockOverlayShown_ = false;
     std::function<QWidget*(QMenu*)> contextWidgetFactory_;
 };

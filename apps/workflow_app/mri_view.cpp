@@ -226,6 +226,10 @@ void WorkflowMriView::setPointMovedHandler(std::function<void(const Eigen::Vecto
     pointMovedHandler_ = std::move(handler);
 }
 
+void WorkflowMriView::setOpenSceneHandler(std::function<void()> handler) {
+    openSceneHandler_ = std::move(handler);
+}
+
 void WorkflowMriView::setLockOverlayHandler(std::function<void(bool)> handler) {
     lockOverlayHandler_ = std::move(handler);
 }
@@ -627,6 +631,10 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
                                               : QStringLiteral("Overlay all lock-position targets"));
         connect(overlay, &QAction::triggered, this,
                 [this] { lockOverlayHandler_(!lockOverlayShown_); });
+    }
+    if (openSceneHandler_) {
+        QAction* openScene = menu.addAction(QStringLiteral("Open 3D view in a new window"));
+        connect(openScene, &QAction::triggered, this, [this] { openSceneHandler_(); });
     }
     if (openViewerHandler_) {
         menu.addSeparator();

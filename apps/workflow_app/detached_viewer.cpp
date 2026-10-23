@@ -28,6 +28,10 @@
 #include <QWidget>
 
 #include "mri_view.hpp"
+#include "scene_3d_view.hpp"
+
+#include "array/array_types.hpp"
+#include "mri/slice.hpp"
 
 #include "ui_workflow_shell.h"
 
@@ -40,6 +44,119 @@ constexpr double kViewerScale = 2.0;
 constexpr int kMinViewerSide = 520;
 
 }  // namespace
+
+
+// The scene the 3D window shows: the three slices where they really sit, the
+// transducer around them, and every point worth seeing in depth.
+void WorkflowWindow::buildScene(Scene3DView* view) {
+    if (view == nullptr || !mriLoaded_) return;
+    const auto& lr = mriAxes_.dimLR;
+    const auto& ap = mriAxes_.dimAP;
+    const auto& is = mriAxes_.dimIS;
+    if (lr.size() < 2 || ap.size() < 2 || is.size() < 2) return;
+    const double lr0 = lr(0), lr1 = lr(lr.size() - 1);
+    const double ap0 = ap(0), ap1 = ap(ap.size() - 1);
+    const double is0 = is(0), is1 = is(is.size() - 1);
+
+    const int sagittal = ui_->sagittalSlider->value() + 1;
+    const int coronal = ui_->coronalSlider->value() + 1;
+    const int axial = ui_->axialSlider->value() + 1;
+    const double atLr = lr(std::clamp(sagittal - 1, 0, int(lr.size()) - 1));
+    const double atAp = ap(std::clamp(coronal - 1, 0, int(ap.size()) - 1));
+    const double atIs = is(std::clamp(axial - 1, 0, int(is.size()) - 1));
+
+    // Greyscale straight from the same slice the 2D panes draw.
+    const auto toImage = [](const Eigen::MatrixXd& slice) {
+        QImage out(int(slice.cols()), int(slice.rows()), QImage::Format_Grayscale8);
+        double lo = slice.minCoeff(), hi = slice.maxCoeff();
+        const double range = std::max(hi - lo, 1e-12);
+        for (int y = 0; y < out.height(); ++y) {
+            uchar* row = out.scanLine(y);
+            for (int x = 0; x < out.width(); ++x)
+                row[x] = uchar(std::clamp((slice(y, x) - lo) / range, 0.0, 1.0) * 255.0);
+        }
+        return out;
+    };
+
+    std::vector<ScenePlane> planes;
+    ScenePlane sag;
+    sag.image = toImage(beam::mri::getSliceImage(mriVolume_, sagittal, "sagital"));
+    sag.cornersMm = {Eigen::Vector3d(atLr, ap0, is1), Eigen::Vector3d(atLr, ap1, is1),
+                     Eigen::Vector3d(atLr, ap1, is0), Eigen::Vector3d(atLr, ap0, is0)};
+    planes.push_back(std::move(sag));
+    ScenePlane cor;
+    cor.image = toImage(beam::mri::getSliceImage(mriVolume_, coronal, "coronal"));
+    cor.cornersMm = {Eigen::Vector3d(lr0, atAp, is1), Eigen::Vector3d(lr1, atAp, is1),
+                     Eigen::Vector3d(lr1, atAp, is0), Eigen::Vector3d(lr0, atAp, is0)};
+    planes.push_back(std::move(cor));
+    ScenePlane axi;
+    axi.image = toImage(beam::mri::getSliceImage(mriVolume_, axial, "axial"));
+    axi.cornersMm = {Eigen::Vector3d(lr0, ap1, atIs), Eigen::Vector3d(lr1, ap1, atIs),
+                     Eigen::Vector3d(lr1, ap0, atIs), Eigen::Vector3d(lr0, ap0, atIs)};
+    planes.push_back(std::move(axi));
+    view->setPlanes(std::move(planes));
+
+    // One quad per transducer element, from the corners the geometry carries.
+    std::vector<SceneQuad> quads;
+    if (registrationGeometryLoaded_) {
+        const Eigen::MatrixXd& rect = arrayData_.arrayTotal.rect;
+        for (Eigen::Index c = 0; c < rect.cols(); ++c) {
+            SceneQuad quad;
+            for (int k = 0; k < 4; ++k)
+                quad.cornersMm[std::size_t(k)] =
+                    beam::array::rectCorner(rect, int(c), k + 1) * 1000.0;
+            quad.color = QColor(0xff, 0xdc, 0x28, 120);
+            quads.push_back(std::move(quad));
+        }
+    }
+    view->setQuads(std::move(quads));
+
+    std::vector<ScenePoint> points;
+    for (std::size_t i = 0; i < fiducials_.size(); ++i)
+        points.push_back({fiducials_[i].position * 1000.0, QColor(0xe6, 0x2d, 0x37), QString(), 4.0});
+    const int currentH =
+        leftHorizontalPositionSlider_ == nullptr ? 0 : leftHorizontalPositionSlider_->value();
+    const int currentV =
+        leftVerticalPositionSlider_ == nullptr ? 0 : leftVerticalPositionSlider_->value();
+    for (const beam::registration::LockPositionTarget& target : lockOverlayTargets_) {
+        const bool current = target.horizontal == currentH && target.vertical == currentV;
+        points.push_back({target.centreMm,
+                          current ? QColor(0x5c, 0xcd, 0xe5) : QColor(0xff, 0xcc, 0x33),
+                          current ? QStringLiteral("H%1V%2")
+                                        .arg(target.horizontal)
+                                        .arg(target.vertical)
+                                  : QString(),
+                          current ? 5.0 : 3.0});
+    }
+    view->setPoints(std::move(points));
+    view->setCentreMm(targetMm_);
+}
+
+
+// Its own top-level window, never a fourth pane: a pane would take width from
+// the three MRI views, and those are the instrument.
+void WorkflowWindow::openSceneWindow() {
+    if (!mriLoaded_) {
+        showMessage(QStringLiteral("Load the patient MRI before opening the 3D view."), true);
+        return;
+    }
+    if (sceneWindow_ == nullptr) {
+        sceneWindow_ = new QWidget(this, Qt::Window);
+        sceneWindow_->setWindowTitle(QStringLiteral("BeamAI - array in space"));
+        sceneWindow_->setAttribute(Qt::WA_DeleteOnClose, false);
+        sceneWindow_->resize(720, 620);
+        auto* layout = new QVBoxLayout(sceneWindow_);
+        layout->setContentsMargins(0, 0, 0, 0);
+        sceneView_ = new Scene3DView(sceneWindow_);
+        layout->addWidget(sceneView_);
+        auto* close = new QShortcut(QKeySequence(Qt::Key_Escape), sceneWindow_);
+        connect(close, &QShortcut::activated, sceneWindow_, &QWidget::close);
+    }
+    buildScene(sceneView_);
+    sceneWindow_->show();
+    sceneWindow_->raise();
+    sceneWindow_->activateWindow();
+}
 
 void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& title, QSlider* slider,
                                         QToolButton* previous, QToolButton* next, QToolButton* reset,
@@ -218,6 +335,7 @@ void WorkflowWindow::wireDetachedViewerMenus() {
             pane.view == ui_->registrationCoronalPreview ||
             pane.view == ui_->registrationAxialPreview) {
             pane.view->setLockOverlayHandler([this](bool on) { setLockOverlayShown(on); });
+            pane.view->setOpenSceneHandler([this] { openSceneWindow(); });
         }
     }
 }

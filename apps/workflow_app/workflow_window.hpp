@@ -71,6 +71,9 @@ class SerialPort;
 
 namespace beam::app {
 
+// The 3D window this fills; defined in scene_3d_view.hpp.
+class Scene3DView;
+
 // The Targeting Examples panes: pan and zoom in place, example_image_view.hpp.
 class ExampleImageView;
 
@@ -110,6 +113,9 @@ private:
     void appendLockPositionOverlay(std::vector<WorkflowMriMarker>& sagittal);
     void setLockOverlayShown(bool shown);
     void recomputeLockOverlayTargets();
+    // Fills the 3D window: slices where they sit, the array, the targets.
+    void buildScene(Scene3DView* view);
+    void openSceneWindow();
     void resetMriViews();
     void rebuildFocusImage();
     void initializeRegistrationGeometry();
@@ -457,6 +463,8 @@ private:
     // Sixteen registrations is most of a second, so they are computed when the
     // fit changes rather than on every toggle.
     std::vector<beam::registration::LockPositionTarget> lockOverlayTargets_;
+    QWidget* sceneWindow_ = nullptr;
+    Scene3DView* sceneView_ = nullptr;
     bool focusImageLoaded_ = false;
     bool suppressRegistrationNavigation_ = false;
     bool couplingCheckPassed_ = false;

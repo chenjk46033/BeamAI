@@ -94,6 +94,7 @@ if(Qt6_FOUND AND TARGET gui_qt)
         # "Open viewer in a new window": a larger, Escape-closable window for
         # one MRI plane, driving that pane's own slice controls.
         workflow_app/detached_viewer.cpp
+        workflow_app/scene_3d_view.cpp
         workflow_app/resources/workflow_resources.qrc
         ../designer/workflow_shell.ui
         # AUTORCC compiles this into the Targeting Examples sub-tab's
