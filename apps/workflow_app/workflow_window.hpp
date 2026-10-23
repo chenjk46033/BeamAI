@@ -66,10 +66,13 @@ class TreatmentProtocolTableModel;
 }  // namespace beam::gui_qt
 
 namespace beam::serialcom {
+class SerialLink;
 class SerialPort;
 }  // namespace beam::serialcom
 
 namespace beam::app {
+
+class DeviceLinkPanel;
 
 // The 3D window this fills; defined in scene_3d_view.hpp.
 class Scene3DView;
@@ -397,7 +400,7 @@ private:
     // Treatment stage: the firing half of that tab, gated behind Safety
     // Review by the workflow model rather than by a button's enabled state.
     void buildTreatmentExecutionBody(const QString& acceptButtonStyle);
-    void setSerialConnectedLamp(bool connected);
+    void buildDeviceLinkPanel();
     void runSonication(bool sham);
     void startSonicationCountdown(int durationSeconds, bool sham);
     void abortSonication();
@@ -667,9 +670,11 @@ private:
     bool runningSham_ = false;
     bool sonicateEnabled_ = false;
     QPushButton* finishTreatmentButton_ = nullptr;
-    QComboBox* serialPortCombo_ = nullptr;
-    QPushButton* serialConnectButton_ = nullptr;
-    QLabel* serialConnectedLamp_ = nullptr;
+    // The panel owns the port, its polling thread and its own widgets.
+    DeviceLinkPanel* deviceLink_ = nullptr;
+    // The shell's header slot, so a link that drops during treatment is
+    // visible on whatever page the operator is on.
+    QLabel* serialHeaderLabel_ = nullptr;
     QComboBox* triggerModeCombo_ = nullptr;
     QLabel* sonicationCountdownLabel_ = nullptr;
     QTimer* sonicationCountdownTimer_ = nullptr;
@@ -677,7 +682,9 @@ private:
     // When the running sonication is due to end, as a wall clock. Counting
     // ticks instead let the run overshoot what the row asked for.
     qint64 sonicationDeadlineMs_ = 0;
-    std::unique_ptr<beam::serialcom::SerialPort> serialLink_;
+    // Once a pre-delivery check fails the button stays dead until the
+    // device answers again.
+    bool mcuConnectionInvalid_ = false;
     // The through-transmit amplitude the Correction stage measured.
     // prepareSonication compares it against kCouplingThreshold, so it has to
     // outlive that measurement rather than only its pass/fail verdict.

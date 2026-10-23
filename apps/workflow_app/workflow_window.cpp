@@ -1,3 +1,4 @@
+#include "device_link_panel.hpp"
 #include "workflow_window.hpp"
 
 #include <algorithm>
@@ -82,6 +83,7 @@
 #include <QtCharts/QAbstractAxis>
 #include <QtCharts/QLegend>
 #include "correction/signal.hpp"
+#include "serialcom/link_monitor.hpp"
 #include "serialcom/serial_port.hpp"
 
 namespace {
@@ -1077,6 +1079,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->placeholderLayout->addLayout(couplingActionRow);
     ui_->placeholderLayout->addWidget(acceptCouplingButton_);
 
+    // The device link panel. Its own unit: the link is not the Coupling
+    // stage's property -- correction sends over it, every sonication is
+    // gated on it, and the header shows it on every page.
+    buildDeviceLinkPanel();
     correctionTitleLabel_ = new QLabel(QStringLiteral("Correction"), ui_->placeholderPage);
     correctionTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
     correctionDescriptionLabel_ = new QLabel(
@@ -1305,18 +1311,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         double transmission = 0.0;
         bool simulated = true;
         const auto ports = beam::serialcom::listAvailableComPorts();
-        if (serialLink_ != nullptr || !ports.empty()) {
-            try {
-                // The connected link if there is one: a port opens once, and
-                // during treatment this one is already open. Opening it again
-                // throws, and the catch below would report that as a
-                // simulated measurement -- a made-up transmission feeding a
-                // safety gate.
-                std::unique_ptr<beam::serialcom::SerialPort> opened;
-                if (serialLink_ == nullptr)
-                    opened = std::make_unique<beam::serialcom::SerialPort>(ports.front());
-                beam::serialcom::SerialPort& link =
-                    serialLink_ != nullptr ? *serialLink_ : *opened;
+        const bool linked = deviceLink_ != nullptr && deviceLink_->isHealthy();
+        if (linked || !ports.empty()) {
+            // The port opens once, so during treatment the panel already
+            // holds it and opening it again would throw. Hence the panel's
+            // link first, our own only when there is none.
+            const auto measure = [&](beam::serialcom::SerialLink& link) {
                 beam::serialcom::sendSerialCommand(link, "Correction");
                 std::vector<double> raw;
                 for (int lineCount = 0; lineCount < 100000 && link.bytesAvailable() > 0; ++lineCount) {
@@ -1338,6 +1338,12 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                 couplingPeakToPeak_ =
                     std::max(beam::correction::txRxSignalAmplitude(couplingCh0Filtered_).peak2peak,
                              beam::correction::txRxSignalAmplitude(couplingCh1Filtered_).peak2peak);
+            };
+            try {
+                if (!linked || !deviceLink_->withLink(measure)) {
+                    beam::serialcom::SerialPort opened(ports.front());
+                    measure(opened);
+                }
                 simulated = false;
             } catch (const std::exception&) {
                 // A stale or unrelated COM port should not prevent offline

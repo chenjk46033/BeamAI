@@ -2,48 +2,40 @@
 
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
-// Cross-platform serial transport for Beam's ultrasound driver link, plus
-// the ported command flow from BeamV0/GUIMatlab/BEAM/SerialCom/
-// (connectSerial / sendSerialCommand / clearSerial / isSerialHealthy /
-// listAvailableCOMPorts), with the `app`-widget lines
-// (ConnectedLamp / uialert / CouplingStatusTextArea) dropped.
-//
-// Beam talks to its hardware over USB/serial -- this is the hardware layer.
-// It is NOT Verasonics (see docs/known_gaps_stimulation.md).
-
 namespace beam::serialcom {
 
-// Transport abstraction, so the ported command flow is testable without a
-// real device (tests use an in-memory fake). SerialPort is the OS-backed
-// implementation.
+enum class OpenFailure { InUse, NotFound, Other };
+
+// Typed so a caller can report the reason without parsing OS text.
+class SerialOpenError : public std::runtime_error {
+public:
+    SerialOpenError(const std::string& message, OpenFailure reason)
+        : std::runtime_error(message), reason_(reason) {}
+    OpenFailure reason() const { return reason_; }
+
+private:
+    OpenFailure reason_;
+};
+
 class SerialLink {
 public:
     virtual ~SerialLink() = default;
 
-    // Writes `data` followed by a single LF (0x0A) terminator -- MATLAB
-    // `configureTerminator(s,"LF")` + `writeline`.
+    // Appends a single LF (0x0A) terminator.
     virtual void writeLine(const std::string& data) = 0;
 
-    // Reads bytes up to and including the next LF; returns the line without
-    // the trailing LF (and without a trailing CR, if present). Returns ""
-    // if the read times out before a full line arrives -- the caller sees
-    // the same "no reply" it would from a timed-out MATLAB `readline`.
+    // Up to the next LF, without it; "" if the read times out first.
     virtual std::string readLine() = 0;
 
-    // Bytes buffered and readable without blocking -- MATLAB
-    // `NumBytesAvailable`.
     virtual std::size_t bytesAvailable() = 0;
-
     virtual bool isOpen() const = 0;
 };
 
-// OS-backed serial port. Opens on construction (throws std::runtime_error
-// on failure, like `serialport()` erroring), closes on destruction.
-// Defaults match connectSerial.m: 115200 baud, 8N1, LF terminator; read
-// timeout is this layer's own (MATLAB leaves it at the 10 s default).
+// Opens on construction, closes on destruction. 115200 baud, 8N1, LF.
 class SerialPort : public SerialLink {
 public:
     explicit SerialPort(const std::string& portName, int baudRate = 115200, int readTimeoutMs = 1000);
@@ -54,6 +46,8 @@ public:
 
     void writeLine(const std::string& data) override;
     std::string readLine() override;
+    // Bytes as they arrive, terminator or not: tells silence from a missing LF.
+    std::string readRaw(int windowMs);
     std::size_t bytesAvailable() override;
     bool isOpen() const override;
 
@@ -62,34 +56,28 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-// Port of listAvailableCOMPorts.m / `serialportlist("available")`: names of
-// serial ports that exist and are not currently open. Best-effort per
-// platform. Returns an empty vector when there are none -- the MATLAB
-// source's `{'No COM ports'}` placeholder is a UI concern, left to the
-// caller.
+// Ports that exist and can be opened right now.
 std::vector<std::string> listAvailableComPorts();
 
-// --- ported command flow (SerialCom/*.m) ---
+// Every port the OS knows, including one another program is holding.
+std::vector<std::string> listAllComPorts();
 
-// Port of sendSerialCommand.m: drains pending input (clearSerial), then
-// writes the command. Returns false and writes nothing if the link is
-// closed -- matching `~isempty(app.serial) && isvalid(app.serial)` and the
-// `rcv = 0` default.
-//
-// Faithful-port quirk: the source writes `[cmd,'\n']`, and `'\n'` in a
-// single-quoted MATLAB string is the two literal characters '\' and 'n',
-// not a newline; `writeline` then appends the real LF. So the bytes on the
-// wire are `<cmd>\nLF`. Reproduced as-is (the STM32 firmware is written to
-// this contract).
+// USB identity behind a port; fields are empty when the OS does not say.
+struct ComPortIdentity {
+    std::string vendorId;
+    std::string productId;
+    std::string serial;
+};
+ComPortIdentity identifyComPort(const std::string& portName);
+
+// Drains, then writes `<cmd>` plus a literal backslash and n, then LF. The
+// firmware was written to that form.
 bool sendSerialCommand(SerialLink& link, const std::string& cmd);
 
-// Port of clearSerial.m: `readLine()` while `bytesAvailable() > 1`. The
-// source's `> 1` (not `> 0`) is kept -- it can leave a trailing byte.
+// Drains while more than one byte is buffered, so it can leave one behind.
 void clearSerial(SerialLink& link);
 
-// Port of isSerialHealthy.m: sendSerialCommand("PING"), read one line, and
-// check it begins with "PONG" (case-insensitive, first 4 chars). A closed
-// link or any I/O error -> false.
+// PING; true when the reply starts with PONG.
 bool isSerialHealthy(SerialLink& link);
 
 }  // namespace beam::serialcom

@@ -9,7 +9,7 @@
 namespace beam::serialcom {
 
 // ---------------------------------------------------------------------------
-// Platform-independent command flow (SerialCom/*.m)
+// Platform-independent command flow
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -30,10 +30,8 @@ bool startsWithPong(const std::string& s) {
 }  // namespace
 
 void clearSerial(SerialLink& link) {
-    // clearSerial.m: `while NumBytesAvailable > 1: readline`. The source's
-    // `> 1` (not `> 0`) is preserved. Extra guard: stop if a read returns
-    // nothing, so a partial line with no terminator can't spin here forever
-    // (MATLAB's readline would block to timeout each pass).
+    // The `> 1` (not `> 0`) is deliberate. The empty-read guard stops a
+    // partial line with no terminator spinning here forever.
     while (link.bytesAvailable() > 1) {
         if (link.readLine().empty()) {
             break;
@@ -46,8 +44,8 @@ bool sendSerialCommand(SerialLink& link, const std::string& cmd) {
     if (!link.isOpen()) {
         return false;
     }
-    // See header: sendSerialCommand.m writes `[cmd,'\n']` -- two literal
-    // chars '\' and 'n' -- and writeLine then adds the real LF.
+    // The literal backslash and n are protocol, not a typo; writeLine adds
+    // the real LF after them. See the header.
     link.writeLine(cmd + "\\n");
     return true;
 }
@@ -74,7 +72,34 @@ bool isSerialHealthy(SerialLink& link) {
 
 #include <windows.h>
 
+#include <cfgmgr32.h>
+#include <devguid.h>
+#include <setupapi.h>
+
 namespace beam::serialcom {
+
+namespace {
+
+// The bare "cannot open" tells an operator nothing. 2 = no such port,
+// 5 = another program holds it; both are everyday bring-up answers.
+std::string describeLastError(DWORD code) {
+    char* text = nullptr;
+    const DWORD n = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, code, 0, reinterpret_cast<char*>(&text), 0, nullptr);
+    std::string message = "error " + std::to_string(code);
+    if (n > 0 && text != nullptr) {
+        std::string detail(text, n);
+        while (!detail.empty() && (detail.back() == '\r' || detail.back() == '\n' ||
+                                   detail.back() == ' ' || detail.back() == '.'))
+            detail.pop_back();
+        if (!detail.empty()) message += ": " + detail;
+    }
+    if (text != nullptr) LocalFree(text);
+    return message;
+}
+
+}  // namespace
 
 struct SerialPort::Impl {
     HANDLE handle = INVALID_HANDLE_VALUE;
@@ -94,7 +119,12 @@ SerialPort::SerialPort(const std::string& portName, int baudRate, int readTimeou
     impl_->handle = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0,
                                 nullptr);
     if (impl_->handle == INVALID_HANDLE_VALUE) {
-        throw std::runtime_error("SerialPort: cannot open " + portName);
+        const DWORD code = GetLastError();
+        const OpenFailure reason = code == ERROR_ACCESS_DENIED    ? OpenFailure::InUse
+                                   : code == ERROR_FILE_NOT_FOUND ? OpenFailure::NotFound
+                                                                  : OpenFailure::Other;
+        throw SerialOpenError("cannot open " + portName + ": " + describeLastError(code),
+                              reason);
     }
 
     DCB dcb{};
@@ -184,6 +214,23 @@ std::string SerialPort::readLine() {
     return line;
 }
 
+std::string SerialPort::readRaw(int windowMs) {
+    std::string out;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(windowMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        char buf[256];
+        DWORD got = 0;
+        if (!ReadFile(impl_->handle, buf, sizeof(buf), &got, nullptr)) break;
+        if (got > 0) {
+            out.append(buf, got);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+    return out;
+}
+
 std::size_t SerialPort::bytesAvailable() {
     if (impl_->handle == INVALID_HANDLE_VALUE) {
         return 0;
@@ -198,7 +245,11 @@ std::size_t SerialPort::bytesAvailable() {
 
 bool SerialPort::isOpen() const { return impl_->handle != INVALID_HANDLE_VALUE; }
 
-std::vector<std::string> listAvailableComPorts() {
+namespace {
+
+// Shared by the two listings: the registry names every port that exists;
+// `requireOpenable` is what makes it the "available" subset.
+std::vector<std::string> enumerateComPorts(bool requireOpenable) {
     std::vector<std::string> ports;
     HKEY key = nullptr;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\SERIALCOMM", 0, KEY_READ, &key) !=
@@ -220,19 +271,77 @@ std::vector<std::string> listAvailableComPorts() {
             continue;
         }
         const std::string com(data);
-        // "available" == openable right now.
-        const std::string path = "\\\\.\\" + com;
-        HANDLE h = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0,
-                               nullptr);
-        if (h != INVALID_HANDLE_VALUE) {
+        if (requireOpenable) {
+            const std::string path = "\\\\.\\" + com;
+            HANDLE h = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                   OPEN_EXISTING, 0, nullptr);
+            if (h == INVALID_HANDLE_VALUE) {
+                continue;
+            }
             CloseHandle(h);
-            ports.push_back(com);
         }
+        ports.push_back(com);
     }
     RegCloseKey(key);
     std::sort(ports.begin(), ports.end());
     return ports;
 }
+
+}  // namespace
+
+// The serial number lives on the parent composite device, not on the
+// interface that owns the COM name.
+ComPortIdentity identifyComPort(const std::string& portName) {
+    ComPortIdentity identity;
+    const HDEVINFO set = SetupDiGetClassDevsA(&GUID_DEVCLASS_PORTS, nullptr, nullptr, DIGCF_PRESENT);
+    if (set == INVALID_HANDLE_VALUE) {
+        return identity;
+    }
+
+    SP_DEVINFO_DATA info{};
+    info.cbSize = sizeof(info);
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(set, i, &info); ++i) {
+        const HKEY key = SetupDiOpenDevRegKey(set, &info, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
+        if (key == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        char name[64];
+        DWORD size = sizeof(name);
+        DWORD type = 0;
+        const LONG r = RegQueryValueExA(key, "PortName", nullptr, &type,
+                                        reinterpret_cast<BYTE*>(name), &size);
+        RegCloseKey(key);
+        if (r != ERROR_SUCCESS || type != REG_SZ || portName != name) {
+            continue;
+        }
+
+        DEVINST parent = 0;
+        if (CM_Get_Parent(&parent, info.DevInst, 0) != CR_SUCCESS) {
+            break;
+        }
+        char id[MAX_DEVICE_ID_LEN];
+        if (CM_Get_Device_IDA(parent, id, sizeof(id), 0) != CR_SUCCESS) {
+            break;
+        }
+        // USB\VID_0483&PID_374B\066FFF343433464757204334
+        const std::string text(id);
+        const std::size_t vid = text.find("VID_");
+        const std::size_t pid = text.find("PID_");
+        if (vid != std::string::npos) identity.vendorId = text.substr(vid + 4, 4);
+        if (pid != std::string::npos) identity.productId = text.substr(pid + 4, 4);
+        const std::size_t last = text.rfind('\\');
+        if (last != std::string::npos && last + 1 < text.size())
+            identity.serial = text.substr(last + 1);
+        break;
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+    return identity;
+}
+
+std::vector<std::string> listAvailableComPorts() { return enumerateComPorts(true); }
+
+std::vector<std::string> listAllComPorts() { return enumerateComPorts(false); }
 
 }  // namespace beam::serialcom
 
@@ -276,7 +385,11 @@ SerialPort::SerialPort(const std::string& portName, int baudRate, int readTimeou
 
     impl_->fd = ::open(portName.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (impl_->fd < 0) {
-        throw std::runtime_error("SerialPort: cannot open " + portName + ": " + std::strerror(errno));
+        const int code = errno;
+        const OpenFailure reason = (code == EACCES || code == EBUSY) ? OpenFailure::InUse
+                                   : code == ENOENT                 ? OpenFailure::NotFound
+                                                                    : OpenFailure::Other;
+        throw SerialOpenError("cannot open " + portName + ": " + std::strerror(code), reason);
     }
 
     const speed_t sp = toSpeed(baudRate);
@@ -380,6 +493,22 @@ std::string SerialPort::readLine() {
     return line;
 }
 
+std::string SerialPort::readRaw(int windowMs) {
+    std::string out;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(windowMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        char buf[256];
+        const ssize_t n = ::read(impl_->fd, buf, sizeof(buf));
+        if (n > 0) {
+            out.append(buf, static_cast<std::size_t>(n));
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+    return out;
+}
+
 std::size_t SerialPort::bytesAvailable() {
     if (impl_->fd < 0) {
         return 0;
@@ -393,7 +522,11 @@ std::size_t SerialPort::bytesAvailable() {
 
 bool SerialPort::isOpen() const { return impl_->fd >= 0; }
 
-std::vector<std::string> listAvailableComPorts() {
+namespace {
+
+// `requireOpenable` is what separates the "available" subset from every
+// port the system has.
+std::vector<std::string> enumerateComPorts(bool requireOpenable) {
     std::vector<std::string> ports;
     DIR* dir = ::opendir("/dev");
     if (dir == nullptr) {
@@ -407,16 +540,25 @@ std::vector<std::string> listAvailableComPorts() {
             continue;
         }
         const std::string path = "/dev/" + n;
-        const int fd = ::open(path.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-        if (fd >= 0) {
+        if (requireOpenable) {
+            const int fd = ::open(path.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+            if (fd < 0) {
+                continue;
+            }
             ::close(fd);
-            ports.push_back(path);
         }
+        ports.push_back(path);
     }
     ::closedir(dir);
     std::sort(ports.begin(), ports.end());
     return ports;
 }
+
+}  // namespace
+
+std::vector<std::string> listAvailableComPorts() { return enumerateComPorts(true); }
+
+std::vector<std::string> listAllComPorts() { return enumerateComPorts(false); }
 
 }  // namespace beam::serialcom
 
@@ -432,10 +574,13 @@ SerialPort::SerialPort(const std::string& portName, int, int) : impl_(nullptr) {
 SerialPort::~SerialPort() = default;
 void SerialPort::writeLine(const std::string&) { throw std::runtime_error("SerialPort: unsupported"); }
 std::string SerialPort::readLine() { throw std::runtime_error("SerialPort: unsupported"); }
+std::string SerialPort::readRaw(int) { throw std::runtime_error("SerialPort: unsupported"); }
 std::size_t SerialPort::bytesAvailable() { return 0; }
 bool SerialPort::isOpen() const { return false; }
 
 std::vector<std::string> listAvailableComPorts() { return {}; }
+
+std::vector<std::string> listAllComPorts() { return {}; }
 
 }  // namespace beam::serialcom
 

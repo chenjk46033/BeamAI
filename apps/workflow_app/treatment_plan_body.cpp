@@ -28,6 +28,7 @@
 #include <mmsystem.h>
 #endif
 
+#include "device_link_panel.hpp"
 #include "workflow_window.hpp"
 
 #include "treatment_library_dialog.hpp"
@@ -106,6 +107,7 @@
 #include "gui/top_targets.hpp"
 #include "gui/sonication_tab_presenter.hpp"
 #include "serialcom/command.hpp"
+#include "serialcom/link_monitor.hpp"
 #include "serialcom/serial_port.hpp"
 #include "gui_qt/pulse_waveform_view.hpp"
 #include "gui_qt/stim_param_table_model.hpp"
@@ -3505,20 +3507,11 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
         (sham ? inRowShamButton_ : inRowSonicateButton_) = button;
         return button;
     };
-    serialPortCombo_ = new QComboBox(controlPanel);
-    serialPortCombo_->setStyleSheet(QStringLiteral(
-        "QComboBox { background: #ffffff; color: #17313f; padding: 4px 8px; "
-        "border: 1px solid #7c9da8; border-radius: 4px; }"));
-    for (const std::string& port : beam::serialcom::listAvailableComPorts())
-        serialPortCombo_->addItem(QString::fromStdString(port));
-    if (serialPortCombo_->count() == 0) serialPortCombo_->addItem(QStringLiteral("(no port detected)"));
-    serialConnectButton_ = new QPushButton(QStringLiteral("Serial connect"), controlPanel);
-    serialConnectedLamp_ = new QLabel(controlPanel);
-    serialConnectedLamp_->setFixedSize(20, 20);
-    serialConnectedLamp_->setAutoFillBackground(true);
     triggerModeCombo_ = new QComboBox(controlPanel);
     triggerModeCombo_->addItems({QStringLiteral("Immediate"), QStringLiteral("External")});
-    triggerModeCombo_->setStyleSheet(serialPortCombo_->styleSheet());
+    triggerModeCombo_->setStyleSheet(QStringLiteral(
+        "QComboBox { background: #ffffff; color: #17313f; padding: 4px 8px; "
+        "border: 1px solid #7c9da8; border-radius: 4px; }"));
     // A plan holds many sonications and BeamV0 fires them one at a time, so
     // finishing the stage is a separate, deliberate action -- completing it
     // when the first countdown ends would skip the rest of the plan.
@@ -3529,20 +3522,9 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     finishTreatmentButton_->setMinimumHeight(40);
     finishTreatmentButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     finishTreatmentButton_->setEnabled(false);
-    for (QPushButton* button : {serialConnectButton_})
-        button->setStyleSheet(QString::fromLatin1(kPanelButtonStyle));
 
-    auto* connectedRow = new QHBoxLayout;
-    connectedRow->addWidget(columnLabel(QStringLiteral("Connected")));
-    connectedRow->addWidget(serialConnectedLamp_);
-    connectedRow->addStretch(1);
-    auto* serialHeading = new QLabel(QStringLiteral("Serial Port"), controlPanel);
-    serialHeading->setStyleSheet(QString::fromLatin1(kPaneHeadingStyle));
-    serialHeading->setFixedHeight(kHeadingHeight);
-    controlColumn->addWidget(serialHeading);
-    controlColumn->addWidget(serialPortCombo_);
-    controlColumn->addWidget(serialConnectButton_);
-    controlColumn->addLayout(connectedRow);
+    // The device link lives on the Coupling page: it has to be up before
+    // the correction measurement, which is a stage earlier than this one.
     controlColumn->addWidget(columnLabel(QStringLiteral("Trigger:")));
     controlColumn->addWidget(triggerModeCombo_);
     // The two deliveries, as words. Icons on a row of icons is how the wrong
@@ -3557,21 +3539,6 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     // No trailing stretch: the column is as tall as its controls now, and the
     // space below belongs to the page, not to an empty pane.
 
-    // One size for the whole column. Sonicate was taller than the rest and
-    // Finish a different shape again, which made the column read as four
-    // unrelated controls rather than one set.
-    for (QPushButton* button : {serialConnectButton_}) {
-        // Last, so it wins over whatever each button's own sheet set. The
-        // min-height matters most: Sonicate's sheet asks for 34px plus padding,
-        // and a stylesheet minimum beats any maximum set in code.
-        button->setStyleSheet(button->styleSheet() +
-                              QStringLiteral(" QPushButton { padding: 4px 10px; min-height: 28px; max-height: 28px; }"));
-        button->setMinimumHeight(kControlButtonHeight);
-        button->setMaximumHeight(kControlButtonHeight);
-        button->setMinimumWidth(0);
-        button->setMaximumWidth(QWIDGETSIZE_MAX);
-        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    }
     // Beside the plan rather than under it. Stacked below, this column began
     // around 1150 px down a maximised window -- off the bottom of a 1080p
     // screen, so the operator could not see Sonicate at all.
@@ -3602,8 +3569,6 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     // the progress bar with it. The plan above scrolls; this does not.
     treatmentExecutionBody_->setMinimumHeight(outer->sizeHint().height());
     treatmentExecutionBody_->setVisible(false);
-
-    setSerialConnectedLamp(false);
 
     // Not startStandaloneCountdown.m's 2 s tick arithmetic: that runs two
     // ticks past zero, so a 30 s sonication closed its log row at 34 s and the
@@ -3638,27 +3603,7 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
         }
     });
 
-    connect(serialConnectButton_, &QPushButton::clicked, this, [this] {
-        const QString port = serialPortCombo_->currentText();
-        setSerialConnectedLamp(false);
-        try {
-            serialLink_ = std::make_unique<beam::serialcom::SerialPort>(port.toStdString());
-            setSerialConnectedLamp(true);
-            setExecutionStatus(QStringLiteral("Connected to %1.").arg(port));
-        } catch (const std::exception& e) {
-            serialLink_.reset();
-            setExecutionStatus(
-                QStringLiteral("Connection failed: %1").arg(QString::fromStdString(e.what())), true);
-        }
-    });
     connect(finishTreatmentButton_, &QPushButton::clicked, this, [this] { finishTreatmentStage(); });
-}
-
-void WorkflowWindow::setSerialConnectedLamp(bool connected) {
-    if (!serialConnectedLamp_) return;
-    serialConnectedLamp_->setStyleSheet(
-        connected ? QStringLiteral("QLabel { background: #3fbf6f; border: 1px solid #2c8a50; border-radius: 10px; }")
-                  : QStringLiteral("QLabel { background: #7b8c93; border: 1px solid #55646a; border-radius: 10px; }"));
 }
 
 // generalSonicateMaster.m's decision path: build stimParams from the shown
@@ -4113,7 +4058,8 @@ void WorkflowWindow::setSonicateEnabled(bool enabled) {
         sonicationCountdownTimer_ != nullptr && sonicationCountdownTimer_->isActive();
     // checkSonicationSafety.m ends by enabling or disabling SonicateButton on
     // exactly this flag. Nothing goes out while the parameters are unsafe.
-    const bool live = !running && enabled && sonicationSafetyPass_ && currentSonicationIsPending();
+    const bool live = !running && enabled && sonicationSafetyPass_ &&
+                      currentSonicationIsPending() && !mcuConnectionInvalid_;
     inRowSonicateButton_->setEnabled(live);
     if (!running)
         inRowSonicateButton_->setIcon(makeSonicateIcon(18, live ? kInkOnBlue : kInkOnDead));
@@ -4634,6 +4580,21 @@ bool WorkflowWindow::selectScheduledTarget() {
 
 void WorkflowWindow::runSonication(bool sham) {
 
+    // Nothing goes out unless the MCU answers first. Sham is exempt: it
+    // delivers no ultrasound.
+    if (!sham && (deviceLink_ == nullptr || !deviceLink_->askDevice())) {
+        mcuConnectionInvalid_ = true;
+        setSonicateEnabled(sonicateEnabled_);
+        if (deviceLink_ != nullptr)
+            deviceLink_->appendHistory(
+                DeviceLinkPanel::Log::Lost,
+                QStringLiteral("pre-sonication check failed; delivery refused"));
+        setExecutionStatus(QStringLiteral("MCU Connection invalid. Please power off, unplug, "
+                                          "and reconnect to MCU."),
+                           true);
+        return;
+    }
+
     std::string reason;
     if (!workflow_.begin(beam::gui::WorkflowStage::Treatment, &reason)) {
         showMessage(QString::fromStdString(reason), true);
@@ -4717,19 +4678,21 @@ void WorkflowWindow::runSonication(bool sham) {
                          .arg(outcome.waitForTrigger ? QStringLiteral(" (waiting for external trigger)") : QString())
                          .arg(outcome.durationSeconds, 0, 'f', 1)
                          .arg(QString::fromStdString(command));
-    if (!serialLink_) {
-        status += QStringLiteral(" | No serial connection -- command not sent.");
-    } else {
-        try {
-            const bool sent = beam::serialcom::sendSerialCommand(*serialLink_, command);
-            const std::string reply = serialLink_->readLine();
-            beam::serialcom::clearSerial(*serialLink_);
-            status += sent ? QStringLiteral(" | Sent, reply: \"%1\"").arg(QString::fromStdString(reply))
-                           : QStringLiteral(" | Link closed before send.");
-        } catch (const std::exception& e) {
-            status += QStringLiteral(" | Send failed: %1").arg(QString::fromStdString(e.what()));
-        }
-    }
+    const bool sent = deviceLink_ != nullptr &&
+                      deviceLink_->withLink([&](beam::serialcom::SerialLink& link) {
+                          try {
+                              const bool wrote = beam::serialcom::sendSerialCommand(link, command);
+                              const std::string reply = link.readLine();
+                              beam::serialcom::clearSerial(link);
+                              status += wrote ? QStringLiteral(" | Sent, reply: \"%1\"")
+                                                    .arg(QString::fromStdString(reply))
+                                              : QStringLiteral(" | Link closed before send.");
+                          } catch (const std::exception& e) {
+                              status += QStringLiteral(" | Send failed: %1")
+                                            .arg(QString::fromStdString(e.what()));
+                          }
+                      });
+    if (!sent) status += QStringLiteral(" | No serial connection -- command not sent.");
     setExecutionStatus(status);
     recordSonicationStart(r, false, transmissionAmplitude_, outcome.dutyCycle);
     startSonicationCountdown(static_cast<int>(outcome.durationSeconds), /*sham=*/false);
@@ -4788,16 +4751,17 @@ void WorkflowWindow::abortSonication() {
     stopShamAudio();
     setSonicateEnabled(true);
     QString status = QStringLiteral("Sonication aborted by operator.");
-    if (serialLink_) {
-        try {
-            beam::serialcom::sendSerialCommand(*serialLink_, "Correction");
-            status += QStringLiteral(" Abort command sent.");
-        } catch (const std::exception& e) {
-            status += QStringLiteral(" Abort command failed: %1").arg(QString::fromStdString(e.what()));
-        }
-    } else {
-        status += QStringLiteral(" No serial connection -- no command sent.");
-    }
+    const bool sent = deviceLink_ != nullptr &&
+                      deviceLink_->withLink([&](beam::serialcom::SerialLink& link) {
+                          try {
+                              beam::serialcom::sendSerialCommand(link, "Correction");
+                              status += QStringLiteral(" Abort command sent.");
+                          } catch (const std::exception& e) {
+                              status += QStringLiteral(" Abort command failed: %1")
+                                            .arg(QString::fromStdString(e.what()));
+                          }
+                      });
+    if (!sent) status += QStringLiteral(" No serial connection -- no command sent.");
     workflow_.block(beam::gui::WorkflowStage::Treatment, status.toStdString());
     setExecutionStatus(status);
     showMessage(status, true);
@@ -4904,7 +4868,6 @@ void WorkflowWindow::writeTargetPointsToStore() {
         targetStore_.setTargetPoints(targetListName(item).toStdString(), std::move(points));
     }
 }
-
 
 // The Report stage: who was treated, what they were given this visit, and a
 // file that carries both off the device. BeamV0 ports the CRF metadata
@@ -5808,17 +5771,5 @@ void WorkflowWindow::loadTreatmentSessionFile(const beam::gui::TreatmentSessionF
                 false);
     Q_UNUSED(path);
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 }  // namespace beam::app

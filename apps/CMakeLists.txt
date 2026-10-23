@@ -48,6 +48,12 @@ target_link_libraries(parity_safety PRIVATE safety)
 add_executable(beam_mat_info beam_mat_info/main.cpp)
 target_link_libraries(beam_mat_info PRIVATE infra_mat)
 
+# Hardware bring-up: auto-detects the STM32 COM port and PING/PONGs it until
+# stopped. No Qt -- it is the same LinkMonitor the Treatment page Serial pane
+# drives, exercised from a console.
+add_executable(serial_ping serial_ping/main.cpp)
+target_link_libraries(serial_ping PRIVATE serialcom)
+
 # --- Qt demo apps (skipped cleanly when Qt6 isn't provisioned) ---
 find_package(Qt6 QUIET COMPONENTS Widgets Charts)
 if(Qt6_FOUND AND TARGET gui_qt)
@@ -94,6 +100,11 @@ if(Qt6_FOUND AND TARGET gui_qt)
         # "Open viewer in a new window": a larger, Escape-closable window for
         # one MRI plane, driving that pane's own slice controls.
         workflow_app/detached_viewer.cpp
+        # The link to the STM32. No stage owns the device, so it is not in
+        # any stage body.
+        workflow_app/device_link.cpp
+        workflow_app/device_link_panel.cpp
+        workflow_app/device_link_panel.hpp
         workflow_app/scene_3d_view.cpp
         workflow_app/resources/workflow_resources.qrc
         ../designer/workflow_shell.ui

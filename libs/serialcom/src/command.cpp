@@ -11,16 +11,14 @@ namespace beam::serialcom {
 
 namespace {
 
-// Approximates MATLAB num2str(x) (no format arg) for scalar doubles:
-// 5 significant digits, trailing zeros trimmed -- "%.5g".
+// 5 significant digits, trailing zeros trimmed.
 std::string num2str(double x) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.5g", x);
     return std::string(buf);
 }
 
-// str2double(s): trims, parses a double, or NaN if the whole token isn't a
-// number (matching MATLAB).
+// Trims, then parses; NaN when the whole token is not a number.
 double str2double(const std::string& s) {
     std::size_t start = s.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) {
