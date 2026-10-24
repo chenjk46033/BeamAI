@@ -50,6 +50,35 @@ bool sendSerialCommand(SerialLink& link, const std::string& cmd) {
     return true;
 }
 
+std::vector<std::string> sendAndCollect(SerialLink& link, const std::string& cmd, int maxLines,
+                                        int startQuietReads) {
+    std::vector<std::string> lines;
+    if (!sendSerialCommand(link, cmd)) {
+        return lines;
+    }
+    // Never gate this on bytesAvailable(): right after the write the buffer
+    // is empty because the device has not answered yet, not because it is
+    // finished.
+    int quiet = 0;
+    for (int i = 0; i < maxLines; ++i) {
+        const std::string line = link.readLine();
+        if (!line.empty()) {
+            quiet = 0;
+            lines.push_back(line);
+            continue;
+        }
+        // Patience is for the silence before the burst. Once it has
+        // started, one gap is the end of it.
+        if (!lines.empty() || ++quiet >= std::max(startQuietReads, 1)) {
+            break;
+        }
+    }
+    // Anything still arriving belongs to this command; left behind it would
+    // be read as the next command's reply.
+    clearSerial(link);
+    return lines;
+}
+
 bool isSerialHealthy(SerialLink& link) {
     if (!link.isOpen()) {
         return false;

@@ -361,3 +361,175 @@ TEST(PingOnce, KeepsAChattyDevicesFirstLineForDiagnosis) {
 TEST(VisibleBytes, EscapesControlCharacters) {
     EXPECT_EQ(visibleBytes(std::string("ab\r\x01")), "ab\\x0d\\x01");
 }
+
+// A device that answers a command with a burst but always reports an empty
+// buffer -- the shape that made the old read loop collect nothing.
+namespace {
+
+class StreamingDevice : public SerialLink {
+public:
+    explicit StreamingDevice(int lines) : lines_(lines) {}
+
+    void writeLine(const std::string& data) override {
+        if (data.rfind("Correction", 0) != 0) return;
+        for (int i = 0; i < lines_; ++i) inbound_.push_back("1.0,2.0");
+    }
+    std::string readLine() override {
+        if (inbound_.empty()) return std::string();
+        const std::string line = inbound_.front();
+        inbound_.pop_front();
+        return line;
+    }
+    // Lies the way a real port does in the gap before the device answers.
+    std::size_t bytesAvailable() override { return 0; }
+    bool isOpen() const override { return true; }
+
+private:
+    int lines_;
+    std::deque<std::string> inbound_;
+};
+
+}  // namespace
+
+TEST(SendAndCollect, ReadsTheWholeBurstWhenTheBufferLooksEmpty) {
+    StreamingDevice device(2048);
+    const std::vector<std::string> lines = sendAndCollect(device, "Correction");
+    EXPECT_EQ(lines.size(), 2048u);
+}
+
+TEST(SendAndCollect, StopsAtTheFirstSilence) {
+    StreamingDevice device(2);
+    const std::vector<std::string> lines = sendAndCollect(device, "Correction");
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[0], "1.0,2.0");
+}
+
+TEST(SendAndCollect, StaleInputIsClearedBeforeTheCommandGoesOut) {
+    FakeSerialLink link;
+    link.inbound.push_back("left over");
+    EXPECT_TRUE(sendAndCollect(link, "Correction").empty());
+}
+
+TEST(SendAndCollect, LeavesNothingForTheNextCommand) {
+    StreamingDevice device(16);
+    (void)sendAndCollect(device, "Correction");
+    EXPECT_TRUE(device.readLine().empty());
+}
+
+TEST(SendAndCollect, AClosedLinkCollectsNothing) {
+    FakeSerialLink link;
+    link.open = false;
+    EXPECT_TRUE(sendAndCollect(link, "Correction").empty());
+}
+
+// A device that says nothing for a while, then bursts -- BeamV0 waits 7 s
+// before reading, so the real one behaves this way.
+namespace {
+
+class SlowStartingDevice : public SerialLink {
+public:
+    SlowStartingDevice(int silentReads, int lines) : silent_(silentReads), lines_(lines) {}
+
+    void writeLine(const std::string& data) override {
+        if (data.rfind("Correction", 0) == 0) armed_ = true;
+    }
+    std::string readLine() override {
+        if (armed_ && silent_ > 0) {
+            --silent_;
+            return std::string();
+        }
+        if (armed_ && lines_ > 0) {
+            --lines_;
+            return "3.0,4.0";
+        }
+        ++afterBurst_;
+        return std::string();
+    }
+    int readsAfterBurst() const { return afterBurst_; }
+    std::size_t bytesAvailable() override { return 0; }
+    bool isOpen() const override { return true; }
+
+private:
+    int silent_;
+    int lines_;
+    int afterBurst_ = 0;
+    bool armed_ = false;
+};
+
+}  // namespace
+
+TEST(SendAndCollect, WaitsOutTheDevicesStartupSilence) {
+    SlowStartingDevice device(/*silentReads=*/6, /*lines=*/32);
+    const std::vector<std::string> lines =
+        sendAndCollect(device, "Correction", /*maxLines=*/100000, /*quietReads=*/10);
+    EXPECT_EQ(lines.size(), 32u);
+}
+
+TEST(SendAndCollect, GivesUpOnceThePatienceIsSpent) {
+    SlowStartingDevice device(/*silentReads=*/20, /*lines=*/32);
+    const std::vector<std::string> lines =
+        sendAndCollect(device, "Correction", /*maxLines=*/100000, /*startQuietReads=*/3);
+    EXPECT_TRUE(lines.empty());
+}
+
+// The patience must not become a tail: once the burst ends, stop.
+TEST(SendAndCollect, DoesNotWaitOutThePatienceAfterTheBurst) {
+    SlowStartingDevice device(/*silentReads=*/2, /*lines=*/8);
+    const std::vector<std::string> lines =
+        sendAndCollect(device, "Correction", /*maxLines=*/100000, /*startQuietReads=*/10);
+    ASSERT_EQ(lines.size(), 8u);
+    EXPECT_EQ(device.readsAfterBurst(), 1);
+}
+
+
+// The firmware converts before echoing: percent, 10 ticks per ms, and PI/BI
+// as off-times. These are the numbers it should send back.
+TEST(ExpectedStimEcho, MatchesTheFirmwaresConversion) {
+    SonicationTiming t;
+    t.pd = 0.001;   // 1 ms   -> 10 ticks
+    t.pi = 0.005;   // 5 ms   -> off 4 ms  -> 40 ticks
+    t.bd = 0.100;   // 100 ms -> 1000 ticks
+    t.bi = 0.500;   // 500 ms -> off 400 ms -> 4000 ticks
+    t.startTime = 0.0;
+    t.endTime = 30.0;  // 30 s -> 300000 ticks
+    EXPECT_EQ(expectedStimEcho(t, 0.30),
+              "PR:30.000 PD:10.000 PI:40.000 BD:1000.000 BI:4000.000 D:300000.000");
+}
+
+TEST(ExpectedStimEcho, DutyIsAPercentageNotAFraction) {
+    SonicationTiming t;
+    t.endTime = 1.0;
+    EXPECT_NE(expectedStimEcho(t, 0.9).find("PR:90.000"), std::string::npos);
+}
+
+TEST(NormaliseEcho, IgnoresSpacingAndTerminators) {
+    EXPECT_EQ(normaliseEcho("  PR:30.000   PD:10.000\r\n"), "PR:30.000 PD:10.000");
+    EXPECT_EQ(normaliseEcho("PR:1.000  PD:2.000"), normaliseEcho(" PR:1.000 PD:2.000 "));
+}
+
+TEST(StimEchoDifferences, AgreeingFieldsProduceNothing) {
+    EXPECT_TRUE(stimEchoDifferences("PR:67.000 PD:50.000", "PR:67.000 PD:50.000").empty());
+}
+
+// The device's timebase is a shade off the source we have, so D lands ~0.014%
+// out on a 30 s run. That must not read as a parameter error.
+TEST(StimEchoDifferences, ToleratesTheDevicesTimebaseDrift) {
+    EXPECT_TRUE(stimEchoDifferences("D:300000.000", "D:299958.000").empty());
+}
+
+TEST(StimEchoDifferences, NamesAFieldThatIsGenuinelyWrong) {
+    const auto diff = stimEchoDifferences("PR:67.000 BD:300.000", "PR:67.000 BD:600.000");
+    ASSERT_EQ(diff.size(), 1u);
+    EXPECT_NE(diff[0].find("BD"), std::string::npos);
+    EXPECT_NE(diff[0].find("300"), std::string::npos);
+    EXPECT_NE(diff[0].find("600"), std::string::npos);
+}
+
+TEST(ExpectedStimEcho, SubtractsInMillisecondsLikeTheDevice) {
+    SonicationTiming t;
+    t.pd = 0.005;  t.pi = 0.010;
+    t.bd = 0.030;  t.bi = 0.700;   // 700 - 30 = 670 ms -> 6700 ticks, not 6699
+    t.startTime = 0.0; t.endTime = 30.0;
+    EXPECT_EQ(expectedStimEcho(t, 0.6712),
+              "PR:67.000 PD:50.000 PI:50.000 BD:300.000 BI:6700.000 D:300000.000");
+}

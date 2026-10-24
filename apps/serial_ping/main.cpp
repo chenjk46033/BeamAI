@@ -1,6 +1,7 @@
 // Standalone hardware check: find the STM32, then PING/PONG it until
 // stopped, reconnecting on a drop.
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -29,6 +30,9 @@ struct Options {
     LinkMonitor::Config config;
     bool listOnly = false;
     bool rawOnly = false;
+    std::string command;  // --cmd NAME: send it once and time the reply
+    std::string savePath;
+    int startQuietReads = 10;
 };
 
 std::string nowStamp() {
@@ -60,7 +64,10 @@ void usage() {
         "  --form beamv0|plain   force the wire form instead of trying both\n"
         "  --list                list available ports and exit\n"
         "  --raw                 listen, then send each form and hex-dump the\n"
-        "                        bytes that come back; needs --port\n");
+        "                        bytes that come back; needs --port\n"
+        "  --cmd NAME            send one command, time it, report the reply\n"
+        "  --patience N          empty reads to tolerate before the first line\n"
+        "  --save FILE           write the reply lines to FILE\n");
 }
 
 bool parse(int argc, char** argv, Options* options) {
@@ -93,6 +100,12 @@ bool parse(int argc, char** argv, Options* options) {
             config.settleMs = std::atoi(value.c_str());
         } else if (arg == "--failures") {
             config.failuresBeforeRescan = std::atoi(value.c_str());
+        } else if (arg == "--cmd") {
+            options->command = value;
+        } else if (arg == "--save") {
+            options->savePath = value;
+        } else if (arg == "--patience") {
+            options->startQuietReads = std::atoi(value.c_str());
         } else if (arg == "--form") {
             config.autoDetectForm = false;
             if (value == "beamv0") {
@@ -156,6 +169,65 @@ int runRaw(const Options& options) {
     return 0;
 }
 
+// One command, timed, so the cost of a correction is a measurement and not
+// an estimate.
+int runCommandOnce(const Options& options) {
+    std::vector<std::string> ports;
+    if (!options.config.forcedPort.empty()) {
+        ports.push_back(options.config.forcedPort);
+    } else {
+        ports = beam::serialcom::listAvailableComPorts();
+    }
+    for (const std::string& name : ports) {
+        try {
+            beam::serialcom::SerialPort link(name, options.config.baudRate,
+                                             options.config.replyTimeoutMs);
+            // A device that will not answer PING will not answer anything.
+            if (!beam::serialcom::pingOnce(link, WireForm::BeamV0).pong &&
+                !beam::serialcom::pingOnce(link, WireForm::Plain).pong) {
+                continue;
+            }
+            std::printf("%s: sending %s\n", name.c_str(), options.command.c_str());
+            const auto started = std::chrono::steady_clock::now();
+            const std::vector<std::string> reply = beam::serialcom::sendAndCollect(
+                link, options.command, 1000000, options.startQuietReads);
+            const double ms = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() - started)
+                                  .count();
+
+            std::size_t bytes = 0;
+            std::size_t values = 0;
+            for (const std::string& line : reply) {
+                bytes += line.size();
+                values += 1 + std::count(line.begin(), line.end(), ',');
+            }
+            std::printf("  %zu lines, %zu values, %zu bytes in %.0f ms\n", reply.size(), values,
+                        bytes, ms);
+            if (!options.savePath.empty()) {
+                std::FILE* out = std::fopen(options.savePath.c_str(), "w");
+                if (out != nullptr) {
+                    for (const std::string& line : reply) std::fprintf(out, "%s\n", line.c_str());
+                    std::fclose(out);
+                    std::printf("  saved %zu lines to %s\n", reply.size(), options.savePath.c_str());
+                }
+            }
+            if (!reply.empty()) {
+                std::printf("  first: %s\n", reply.front().c_str());
+                std::printf("  last:  %s\n", reply.back().c_str());
+            }
+            // The link has to survive the command, which is the whole point.
+            const beam::serialcom::PingResult after =
+                beam::serialcom::pingOnce(link, WireForm::BeamV0);
+            std::printf("  ping after: %s\n", after.pong ? "PONG" : "no reply");
+            return reply.empty() ? 1 : 0;
+        } catch (const std::exception& e) {
+            std::printf("%s: %s\n", name.c_str(), e.what());
+        }
+    }
+    std::printf("no device answered\n");
+    return 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -176,6 +248,7 @@ int main(int argc, char** argv) {
     }
 
     if (options.rawOnly) return runRaw(options);
+    if (!options.command.empty()) return runCommandOnce(options);
 
     std::printf("serial_ping -- Ctrl+C to stop\n");
 

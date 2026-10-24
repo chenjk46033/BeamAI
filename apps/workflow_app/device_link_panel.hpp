@@ -7,7 +7,9 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include <QWidget>
 
@@ -42,26 +44,40 @@ public:
     // when there is no link, and then `use` is not called.
     bool withLink(const std::function<void(beam::serialcom::SerialLink&)>& use);
 
-    enum class Log { Connected, Lost, Health, Released, Polling };
+    // Sends `cmd` from a worker thread and calls `done` on the GUI thread
+    // with the reply. False when another command is still running.
+    bool runCommand(const std::string& cmd, int startQuietReads,
+                    std::function<void(std::vector<std::string>, bool)> done);
+
+    enum class Log { Connected, Lost, Health, Released, Polling, Sent };
     void appendHistory(Log kind, const QString& text);
 
     void startPolling();
     void releasePort();
 
+    // The device answers throughout a delivery, so checks keep running --
+    // they are the only evidence the MCU is alive while output goes out.
+    // This only makes a miss during one report louder.
+    void setDelivering(bool delivering);
+
 signals:
     // `text` is operator-facing: no port name, no round-trip figure.
     void linkStateChanged(bool healthy, const QString& text);
+    // A miss while ultrasound is going out, which Abort cannot stop.
+    void linkLostWhileDelivering(const QString& text);
 
 private:
     void buildWidgets();
     void onLinkEvent(const beam::serialcom::LinkEvent& event);
     void setLamp(bool connected);
+    void copyHistory(bool selectedOnly);
 
     QLabel* lamp_ = nullptr;
     QLabel* status_ = nullptr;
     QListWidget* history_ = nullptr;
     QPushButton* connectButton_ = nullptr;
     QPushButton* disconnectButton_ = nullptr;
+    QPushButton* clearButton_ = nullptr;
 
     // Polled off the GUI thread: a scan with no device blocks for seconds.
     // Everything touching the monitor takes mutex_.
@@ -69,6 +85,11 @@ private:
     mutable std::mutex mutex_;
     std::thread thread_;
     std::atomic<bool> stop_{false};
+    // A foreground command runs on its own thread so the window keeps
+    // painting while the device streams.
+    std::thread commandThread_;
+    std::atomic<bool> commandRunning_{false};
+    bool delivering_ = false;
 
     bool healthy_ = false;
     QString lastDownMessage_;

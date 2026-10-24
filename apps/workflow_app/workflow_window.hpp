@@ -8,6 +8,7 @@
 #include <QSet>
 #include <QSize>
 #include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -68,6 +69,7 @@ class TreatmentProtocolTableModel;
 namespace beam::serialcom {
 class SerialLink;
 class SerialPort;
+struct SonicationTiming;
 }  // namespace beam::serialcom
 
 namespace beam::app {
@@ -401,6 +403,10 @@ private:
     // Review by the workflow model rather than by a button's enabled state.
     void buildTreatmentExecutionBody(const QString& acceptButtonStyle);
     void buildDeviceLinkPanel();
+    void startCorrectionMeasurement(std::function<void()> then);
+    void applyCorrectionResult(const std::vector<std::string>& reply, bool fromDevice);
+    void reportStimEcho(const std::string& reply, const beam::serialcom::SonicationTiming& timing,
+                        double dutyCycle);
     void runSonication(bool sham);
     void startSonicationCountdown(int durationSeconds, bool sham);
     void abortSonication();

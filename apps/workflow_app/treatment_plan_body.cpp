@@ -2946,8 +2946,10 @@ void WorkflowWindow::remeasureCouplingIfDue(int delivered) {
         this,
         [this, delivered] {
             autoCouplingRecheck_ = true;
-            const auto done = qScopeGuard([this] { autoCouplingRecheck_ = false; });
-            runCorrectionButton_->click();
+            startCorrectionMeasurement([this, delivered] {
+            // Cleared here, not on the way out: applyCorrectionResult reads
+            // the flag, and it runs when the device answers.
+            autoCouplingRecheck_ = false;
             // The Coupling page owns the verdict; mirror it the way the page
             // does, so the operator sees the same conclusion from here.
             couplingCheckPassed_ = correctionCheckPassed_;
@@ -2973,6 +2975,7 @@ void WorkflowWindow::remeasureCouplingIfDue(int delivered) {
                             100)),
                     false);
             }
+            });
         },
         Qt::QueuedConnection);
 }
@@ -3592,6 +3595,7 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
             treatmentExecutionProgressBar_->setVisible(false);
             setSonicateEnabled(true);
             finishTreatmentButton_->setEnabled(true);
+            if (deviceLink_ != nullptr) deviceLink_->setDelivering(false);
             return;
         }
         sonicationCountdownLabel_->setText(
@@ -4578,6 +4582,37 @@ bool WorkflowWindow::selectScheduledTarget() {
     return false;
 }
 
+// The device echoes the parameters it parsed, in its own units. Comparing
+// them against what we expected is the only check that both ends agree.
+void WorkflowWindow::reportStimEcho(const std::string& reply, const beam::serialcom::SonicationTiming& timing,
+                                    double dutyCycle) {
+    if (deviceLink_ == nullptr) return;
+    if (reply.empty()) {
+        deviceLink_->appendHistory(DeviceLinkPanel::Log::Lost,
+                                   QStringLiteral("sent != ack   no ack received."));
+        return;
+    }
+    const std::string expected =
+        beam::serialcom::normaliseEcho(beam::serialcom::expectedStimEcho(timing, dutyCycle));
+    const std::string got = beam::serialcom::normaliseEcho(reply);
+    const std::vector<std::string> differences =
+        beam::serialcom::stimEchoDifferences(expected, got);
+    if (differences.empty()) {
+        deviceLink_->appendHistory(DeviceLinkPanel::Log::Health,
+                                   QStringLiteral("sent == ack   %1")
+                                       .arg(QString::fromStdString(got)));
+        return;
+    }
+    QStringList named;
+    for (const std::string& d : differences) named << QString::fromStdString(d);
+    deviceLink_->appendHistory(DeviceLinkPanel::Log::Lost,
+                               QStringLiteral("sent != ack   %1").arg(named.join(QStringLiteral(", "))));
+    showMessage(QStringLiteral("The device echoed different sonication parameters than were "
+                               "sent. Expected \"%1\", got \"%2\".")
+                    .arg(QString::fromStdString(expected), QString::fromStdString(got)),
+                true);
+}
+
 void WorkflowWindow::runSonication(bool sham) {
 
     // Nothing goes out unless the MCU answers first. Sham is exempt: it
@@ -4678,12 +4713,20 @@ void WorkflowWindow::runSonication(bool sham) {
                          .arg(outcome.waitForTrigger ? QStringLiteral(" (waiting for external trigger)") : QString())
                          .arg(outcome.durationSeconds, 0, 'f', 1)
                          .arg(QString::fromStdString(command));
+    if (deviceLink_ != nullptr)
+        deviceLink_->appendHistory(
+            DeviceLinkPanel::Log::Sent,
+            QStringLiteral("%1   expect %2")
+                .arg(QString::fromStdString(command),
+                     QString::fromStdString(beam::serialcom::expectedStimEcho(
+                         timing, outcome.dutyCycle))));
     const bool sent = deviceLink_ != nullptr &&
                       deviceLink_->withLink([&](beam::serialcom::SerialLink& link) {
                           try {
                               const bool wrote = beam::serialcom::sendSerialCommand(link, command);
                               const std::string reply = link.readLine();
                               beam::serialcom::clearSerial(link);
+                              reportStimEcho(reply, timing, outcome.dutyCycle);
                               status += wrote ? QStringLiteral(" | Sent, reply: \"%1\"")
                                                     .arg(QString::fromStdString(reply))
                                               : QStringLiteral(" | Link closed before send.");
@@ -4692,7 +4735,13 @@ void WorkflowWindow::runSonication(bool sham) {
                                             .arg(QString::fromStdString(e.what()));
                           }
                       });
-    if (!sent) status += QStringLiteral(" | No serial connection -- command not sent.");
+    if (!sent) {
+        status += QStringLiteral(" | No serial connection -- command not sent.");
+    } else if (deviceLink_ != nullptr) {
+        // Checks keep running: the device answers throughout, and a miss
+        // here is the only sign the MCU died mid-delivery.
+        deviceLink_->setDelivering(true);
+    }
     setExecutionStatus(status);
     recordSonicationStart(r, false, transmissionAmplitude_, outcome.dutyCycle);
     startSonicationCountdown(static_cast<int>(outcome.durationSeconds), /*sham=*/false);
@@ -4751,9 +4800,14 @@ void WorkflowWindow::abortSonication() {
     stopShamAudio();
     setSonicateEnabled(true);
     QString status = QStringLiteral("Sonication aborted by operator.");
+    if (deviceLink_ != nullptr)
+        deviceLink_->appendHistory(DeviceLinkPanel::Log::Sent,
+                                   QStringLiteral("Correction (abort)"));
     const bool sent = deviceLink_ != nullptr &&
                       deviceLink_->withLink([&](beam::serialcom::SerialLink& link) {
                           try {
+                              // Written, not waited on: the reply must not hold the
+                              // window, and the next check drains whatever arrives.
                               beam::serialcom::sendSerialCommand(link, "Correction");
                               status += QStringLiteral(" Abort command sent.");
                           } catch (const std::exception& e) {
@@ -4762,6 +4816,7 @@ void WorkflowWindow::abortSonication() {
                           }
                       });
     if (!sent) status += QStringLiteral(" No serial connection -- no command sent.");
+    if (deviceLink_ != nullptr) deviceLink_->setDelivering(false);
     workflow_.block(beam::gui::WorkflowStage::Treatment, status.toStdString());
     setExecutionStatus(status);
     showMessage(status, true);

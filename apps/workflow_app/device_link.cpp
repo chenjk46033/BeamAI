@@ -16,6 +16,14 @@ void WorkflowWindow::buildDeviceLinkPanel() {
     ui_->placeholderLayout->addWidget(deviceLink_);
 
     serialHeaderLabel_ = ui_->deviceHeader;
+    connect(deviceLink_, &DeviceLinkPanel::linkLostWhileDelivering, this,
+            [this](const QString& text) {
+                showMessage(QStringLiteral("Lost contact with the device while delivering: %1 "
+                                           "Ultrasound may still be going out -- Abort cannot "
+                                           "stop it.")
+                                .arg(text),
+                            true);
+            });
     connect(deviceLink_, &DeviceLinkPanel::linkStateChanged, this,
             [this](bool healthy, const QString& text) {
                 serialHeaderLabel_->setText(QString(QChar(0x25CF)) + QLatin1Char(' ') + text);

@@ -32,8 +32,6 @@ bool looksLikePong(const std::string& line) {
 std::size_t requestBytes(WireForm form) { return std::strlen(formPayload(form)); }
 
 // "time<1ms" below a millisecond, "time=5ms" above.
-const char* shortForm(WireForm form) { return form == WireForm::BeamV0 ? "BeamV0" : "plain"; }
-
 std::string deviceLabel(const std::string& port) {
     const ComPortIdentity who = identifyComPort(port);
     if (who.vendorId.empty()) return port;
@@ -222,8 +220,7 @@ bool LinkMonitor::findDevice() {
 std::string LinkMonitor::replyLine(double rttMs) const {
     return "Reply from " + portName_ +
            (deviceId_.empty() ? "" : " [deviceID " + deviceId_ + "]") +
-           ": bytes=" + std::to_string(lastReplyBytes_) + " " + pingTime(rttMs) + " form=" +
-           shortForm(form_);
+           ": bytes=" + std::to_string(lastReplyBytes_) + " " + pingTime(rttMs);
 }
 
 void LinkMonitor::step() {

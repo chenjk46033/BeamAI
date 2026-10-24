@@ -77,6 +77,12 @@ bool sendSerialCommand(SerialLink& link, const std::string& cmd);
 // Drains while more than one byte is buffered, so it can leave one behind.
 void clearSerial(SerialLink& link);
 
+// Sends `cmd` and collects the reply. `startQuietReads` is how many empty
+// reads to tolerate before the first line; once lines are flowing a single
+// empty read ends the burst, so a finished device is not waited on.
+std::vector<std::string> sendAndCollect(SerialLink& link, const std::string& cmd,
+                                        int maxLines = 100000, int startQuietReads = 1);
+
 // PING; true when the reply starts with PONG.
 bool isSerialHealthy(SerialLink& link);
 

@@ -4,6 +4,13 @@
 #include <chrono>
 
 #include <QColor>
+#include <QAction>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QKeySequence>
+#include <QMenu>
+#include <QShortcut>
+#include <QStringList>
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -18,6 +25,7 @@
 namespace beam::app {
 
 namespace {
+
 
 constexpr int kPollIntervalMs = 3000;
 constexpr int kStopSliceMs = 25;
@@ -35,6 +43,11 @@ constexpr char kButtonStyle[] =
     "QPushButton:hover:enabled { background: #2d6477; } "
     "QPushButton:disabled { color: #7d949c; background: #1b3a45; border-color: #2b5260; }";
 
+constexpr char kClearStyle[] =
+    "QPushButton { color: #eafaff; background: #2d6477; border: 1px solid #6ba7ba; "
+    "border-radius: 3px; padding: 1px 10px; font-size: 10px; } "
+    "QPushButton:hover { background: #3f8198; border-color: #9fd6e5; }";
+
 constexpr char kLampOn[] =
     "QLabel { background: #3fbf6f; border: 1px solid #2c8a50; border-radius: 8px; }";
 constexpr char kLampOff[] =
@@ -44,20 +57,23 @@ const char* label(DeviceLinkPanel::Log kind) {
     switch (kind) {
         case DeviceLinkPanel::Log::Connected: return "CONNECTED";
         case DeviceLinkPanel::Log::Lost: return "LOST";
-        case DeviceLinkPanel::Log::Released: return "RELEASED";
+        case DeviceLinkPanel::Log::Released: return "DISCONNECTED";
         case DeviceLinkPanel::Log::Polling: return "POLLING";
+        case DeviceLinkPanel::Log::Sent: return "SENT";
         case DeviceLinkPanel::Log::Health: break;
     }
     return "";
 }
 
+// Light on the panel's dark ground; the first set was picked for a white one.
 QColor colour(DeviceLinkPanel::Log kind) {
     switch (kind) {
-        case DeviceLinkPanel::Log::Connected: return QColor(0x1d, 0x7a, 0x44);
-        case DeviceLinkPanel::Log::Lost: return QColor(0xb3, 0x26, 0x2a);
+        case DeviceLinkPanel::Log::Connected: return QColor(0x6e, 0xe7, 0xa0);
+        case DeviceLinkPanel::Log::Lost: return QColor(0xff, 0x82, 0x90);
+        case DeviceLinkPanel::Log::Sent: return QColor(0xe0, 0xa0, 0x3f);
         default: break;
     }
-    return QColor(0x45, 0x5c, 0x66);
+    return QColor(0xcf, 0xe3, 0xe9);
 }
 
 }  // namespace
@@ -71,6 +87,7 @@ DeviceLinkPanel::DeviceLinkPanel(QWidget* parent) : QWidget(parent) {
 DeviceLinkPanel::~DeviceLinkPanel() {
     stop_.store(true);
     if (thread_.joinable()) thread_.join();
+    if (commandThread_.joinable()) commandThread_.join();
 }
 
 void DeviceLinkPanel::buildWidgets() {
@@ -86,7 +103,13 @@ void DeviceLinkPanel::buildWidgets() {
     disconnectButton_ = new QPushButton(QStringLiteral("Disconnect"), this);
     disconnectButton_->setToolTip(
         QStringLiteral("Close the port so another program can use it."));
-    for (QPushButton* button : {connectButton_, disconnectButton_}) {
+    clearButton_ = new QPushButton(QStringLiteral("Clear"), this);
+    clearButton_->setToolTip(QStringLiteral("Empty the list. The link is not touched."));
+    clearButton_->setCursor(Qt::PointingHandCursor);
+    clearButton_->setStyleSheet(QString::fromLatin1(kClearStyle));
+    connect(clearButton_, &QPushButton::clicked, this, [this] { history_->clear(); });
+
+    for (QPushButton* button : {connectButton_, disconnectButton_, clearButton_}) {
         button->setMinimumHeight(28);
         button->setStyleSheet(QString::fromLatin1(kButtonStyle));
     }
@@ -97,7 +120,24 @@ void DeviceLinkPanel::buildWidgets() {
     history_->setStyleSheet(QString::fromLatin1(kHistoryStyle));
     history_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     history_->setUniformItemSizes(true);
-    history_->setFixedHeight(76);
+    // So a line can be selected and pasted into a bug report.
+    history_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    history_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(history_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& at) {
+        QMenu menu(history_);
+        QAction* copySelected = menu.addAction(QStringLiteral("Copy selected"));
+        QAction* copyAll = menu.addAction(QStringLiteral("Copy all"));
+        menu.addSeparator();
+        QAction* clear = menu.addAction(QStringLiteral("Clear"));
+        const QAction* chosen = menu.exec(history_->viewport()->mapToGlobal(at));
+        if (chosen == copySelected) copyHistory(true);
+        else if (chosen == copyAll) copyHistory(false);
+        else if (chosen == clear) history_->clear();
+    });
+    auto* copyShortcut = new QShortcut(QKeySequence::Copy, history_);
+    copyShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(copyShortcut, &QShortcut::activated, this, [this] { copyHistory(true); });
+    history_->setFixedHeight(112);
 
     auto* heading = new QLabel(QStringLiteral("Device link"), this);
     heading->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
@@ -105,17 +145,34 @@ void DeviceLinkPanel::buildWidgets() {
     auto* row = new QHBoxLayout;
     row->setContentsMargins(0, 0, 0, 4);
     row->setSpacing(8);
+    // Left, not right: the page is wider than the screen, so anything
+    // pushed to its right edge is off the display.
     row->addWidget(lamp_);
     row->addWidget(status_);
-    row->addStretch(1);
+    row->addSpacing(16);
     row->addWidget(connectButton_);
     row->addWidget(disconnectButton_);
+    row->addWidget(clearButton_);
+    row->addStretch(1);
 
     auto* column = new QVBoxLayout(this);
     column->setContentsMargins(0, 0, 0, 0);
     column->addWidget(heading);
     column->addLayout(row);
     column->addWidget(history_);
+}
+
+// Selected lines, or all of them when nothing is selected.
+void DeviceLinkPanel::copyHistory(bool selectedOnly) {
+    QStringList lines;
+    const QList<QListWidgetItem*> chosen = history_->selectedItems();
+    if (selectedOnly && !chosen.isEmpty()) {
+        for (int row = 0; row < history_->count(); ++row)
+            if (history_->item(row)->isSelected()) lines << history_->item(row)->text();
+    } else {
+        for (int row = 0; row < history_->count(); ++row) lines << history_->item(row)->text();
+    }
+    QGuiApplication::clipboard()->setText(lines.join(QChar('\n')));
 }
 
 void DeviceLinkPanel::setLamp(bool connected) {
@@ -132,7 +189,6 @@ void DeviceLinkPanel::appendHistory(Log kind, const QString& text) {
     item->setForeground(colour(kind));
     history_->addItem(item);
     while (history_->count() > kHistoryLimit) delete history_->takeItem(0);
-    history_->setCurrentItem(item);
     history_->scrollToItem(item);
 }
 
@@ -154,6 +210,7 @@ void DeviceLinkPanel::onLinkEvent(const beam::serialcom::LinkEvent& event) {
     } else if (!up && healthy_) {
         appendHistory(Log::Lost, message);
         lastDownMessage_ = message;
+        if (delivering_) emit linkLostWhileDelivering(message);
     } else if (up) {
         appendHistory(Log::Health, message);
     } else if (event.state == beam::serialcom::LinkState::Down && message != lastDownMessage_) {
@@ -210,11 +267,57 @@ void DeviceLinkPanel::releasePort() {
     healthy_ = false;
     lastDownMessage_.clear();
     setLamp(false);
-    const QString plain = QStringLiteral("Link released");
+    const QString plain = QStringLiteral("Disconnected");
     status_->setText(plain);
-    appendHistory(Log::Released, QStringLiteral("port closed and polling stopped"));
+    appendHistory(Log::Released, QStringLiteral("port closed, checks stopped"));
     emit linkStateChanged(false, plain);
 }
+
+bool DeviceLinkPanel::runCommand(const std::string& cmd, int startQuietReads,
+                                 std::function<void(std::vector<std::string>, bool)> done) {
+    if (commandRunning_.exchange(true)) return false;
+    appendHistory(Log::Sent, QString::fromStdString(cmd));
+    if (commandThread_.joinable()) commandThread_.join();
+    commandThread_ = std::thread([this, cmd, startQuietReads, done = std::move(done)] {
+        std::vector<std::string> lines;
+        bool ok = false;
+        const auto started = std::chrono::steady_clock::now();
+        try {
+            // The lock keeps a health check from starting one of its own
+            // between this command and its reply.
+            ok = withLink([&](beam::serialcom::SerialLink& link) {
+                lines = beam::serialcom::sendAndCollect(link, cmd, 100000, startQuietReads);
+            });
+            if (!ok) {
+                const auto ports = beam::serialcom::listAvailableComPorts();
+                if (!ports.empty()) {
+                    beam::serialcom::SerialPort own(ports.front());
+                    lines = beam::serialcom::sendAndCollect(own, cmd, 100000, startQuietReads);
+                    ok = true;
+                }
+            }
+        } catch (const std::exception&) {
+            ok = false;
+        }
+        const double ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+                .count();
+        commandRunning_.store(false);
+        QMetaObject::invokeMethod(
+            this,
+            [this, done, lines, ok, cmd, ms] {
+                appendHistory(Log::Health, QStringLiteral("Reply to %1: lines=%2 time=%3ms")
+                                               .arg(QString::fromStdString(cmd))
+                                               .arg(lines.size())
+                                               .arg(static_cast<int>(ms)));
+                done(lines, ok);
+            },
+            Qt::QueuedConnection);
+    });
+    return true;
+}
+
+void DeviceLinkPanel::setDelivering(bool delivering) { delivering_ = delivering; }
 
 bool DeviceLinkPanel::askDevice() {
     std::lock_guard<std::mutex> guard(mutex_);

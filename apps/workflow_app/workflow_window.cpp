@@ -1307,115 +1307,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         refresh();
         goToNextStage();
     });
-    connect(runCorrectionButton_, &QPushButton::clicked, this, [this] {
-        double transmission = 0.0;
-        bool simulated = true;
-        const auto ports = beam::serialcom::listAvailableComPorts();
-        const bool linked = deviceLink_ != nullptr && deviceLink_->isHealthy();
-        if (linked || !ports.empty()) {
-            // The port opens once, so during treatment the panel already
-            // holds it and opening it again would throw. Hence the panel's
-            // link first, our own only when there is none.
-            const auto measure = [&](beam::serialcom::SerialLink& link) {
-                beam::serialcom::sendSerialCommand(link, "Correction");
-                std::vector<double> raw;
-                for (int lineCount = 0; lineCount < 100000 && link.bytesAvailable() > 0; ++lineCount) {
-                    const std::string line = link.readLine();
-                    if (line.empty()) break;
-                    const auto values = beam::correction::parseCorrectionWaveformLine(line);
-                    raw.insert(raw.end(), values.begin(), values.end());
-                }
-                const auto split = beam::correction::splitAndFilterReceiveWaveform(raw);
-                const auto measured = beam::correction::throughTransmitAmplitude(split.ch0rcv, split.ch1rcv);
-                transmission = measured.amp;
-                // Kept for the plots updateAttenuationPlots.m draws, and for
-                // the peak-to-peak setAvgTransmissionDataBars compares against
-                // the coupling threshold.
-                couplingCh0Raw_ = split.ch0rcv;
-                couplingCh1Raw_ = split.ch1rcv;
-                couplingCh0Filtered_ = beam::correction::filterTransmitSignal(split.ch0rcv).filtWave;
-                couplingCh1Filtered_ = beam::correction::filterTransmitSignal(split.ch1rcv).filtWave;
-                couplingPeakToPeak_ =
-                    std::max(beam::correction::txRxSignalAmplitude(couplingCh0Filtered_).peak2peak,
-                             beam::correction::txRxSignalAmplitude(couplingCh1Filtered_).peak2peak);
-            };
-            try {
-                if (!linked || !deviceLink_->withLink(measure)) {
-                    beam::serialcom::SerialPort opened(ports.front());
-                    measure(opened);
-                }
-                simulated = false;
-            } catch (const std::exception&) {
-                // A stale or unrelated COM port should not prevent offline
-                // workflow testing when no Beam device is connected.
-                simulated = true;
-            }
-        }
-        if (simulated) {
-            fillSimulatedCouplingWaveforms();
-            transmission = beam::correction::throughTransmitAmplitude(couplingCh0Raw_,
-                                                                      couplingCh1Raw_)
-                               .amp;
-        }
-        couplingSimulated_ = simulated;
-        const int percent = std::clamp(static_cast<int>(std::lround(transmission * 100.0)), 0, 100);
-        // checkCouplingSafety.m's own test, at its own 0.1 -- not a threshold
-        // of this application's choosing.
-        const beam::safety::SafetyReport coupling = beam::safety::checkCouplingSafety(transmission);
-        correctionCheckPassed_ = coupling.pass;
-        // Keep the measurement itself, not only its verdict: the Treatment
-        // stage feeds it to prepareSonication, which re-checks it against
-        // kCouplingThreshold before any command is sent.
-        transmissionAmplitude_ = transmission;
-        correctionProgressBar_->setValue(percent);
-        // checkCouplingSafety.m's own wording, including the line it appends
-        // when the report is not empty.
-        QStringList lines;
-        ++correctionRunCount_;
-        // Which run this is, and when: the numbers can come out identical two
-        // runs running, and without this the second press looks like a button
-        // that did nothing.
-        lines << QStringLiteral("Run %1 at %2 -- through-transmit %3: transmission %4%.")
-                     .arg(correctionRunCount_)
-                     .arg(QDateTime::currentDateTime().toString(
-                         QStringLiteral("HH:mm:ss.zzz")))
-                     .arg(simulated ? QStringLiteral("(simulated, no device connected)")
-                                    : QStringLiteral("measured"))
-                     .arg(percent);
-        if (coupling.pass) {
-            lines << QStringLiteral("Coupling Online");
-        } else {
-            for (const std::string& message : coupling.messages)
-                lines << QString::fromStdString(message);
-            lines << QStringLiteral("Readjust coupling or add coupling gel over uncoupled elements");
-        }
-        correctionStatusLabel_->setText(lines.join(QChar('\n')));
-        updateCouplingCharts(transmission);
-        // The through-transmit precondition just changed.
-        updateSonicationSafety();
-        // change() puts Correction back to in-progress and invalidates every
-        // stage after it -- which is right when the operator re-measures
-        // deliberately, and wrong for the check the treatment runs every
-        // fourth sonication: that invalidated Treatment itself, and the next
-        // press was refused with "Correction must be complete first".
-        //
-        // A failed re-check is different. Coupling has actually been lost, so
-        // the stage does re-open and has to be accepted again.
-        if (!autoCouplingRecheck_ || !correctionCheckPassed_) {
-            workflow_.change(beam::gui::WorkflowStage::Correction,
-                             "Correction measured; awaiting operator acceptance.");
-            acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
-        }
-        if (!autoCouplingRecheck_) {
-            showMessage(correctionCheckPassed_
-                            ? QStringLiteral("Correction measurement passed. Accept correction "
-                                             "to continue.")
-                            : QStringLiteral("Correction measurement failed the transmission "
-                                             "threshold."),
-                        !correctionCheckPassed_);
-        }
-        refresh();
-    });
+    connect(runCorrectionButton_, &QPushButton::clicked, this,
+            [this] { startCorrectionMeasurement({}); });
     connect(acceptCorrectionButton_, &QPushButton::clicked, this, [this] {
         if (!correctionCheckPassed_) {
             showMessage(QStringLiteral("Run the correction measurement before accepting it."), true);
@@ -4014,6 +3907,9 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
         widget->setVisible(isSafetyWidget ? safetyReviewPage
                                           : (isCorrectionWidget ? correctionPage : couplingPage));
     }
+    // The link panel shares placeholderPage with every other stage body,
+    // so it needs the same rule: only where the device is configured.
+    if (deviceLink_) deviceLink_->setVisible(couplingPage);
     // Report has a page of its own now, so it stops being "awaiting its
     // BeamV0 behavioral audit and native Qt implementation".
     if (ui_->placeholderText)
@@ -4479,6 +4375,123 @@ void WorkflowWindow::showMessage(const QString& text, bool error) {
     // warning styling left by the message before it.
     ui_->registrationResult->setStyleSheet(
         QStringLiteral("padding: 9px 10px; color: #17313f; background: #eef2f4; border-radius: 5px;"));
+}
+
+// `then` runs after the verdict has been applied, which is what the
+// automatic re-check needs: the measurement is no longer synchronous, so
+// reading correctionCheckPassed_ straight after the call would read the
+// previous run's answer.
+void WorkflowWindow::startCorrectionMeasurement(std::function<void()> then) {
+    if (deviceLink_ == nullptr) {
+        applyCorrectionResult({}, false);
+        if (then) then();
+        return;
+    }
+    runCorrectionButton_->setEnabled(false);
+    correctionStatusLabel_->setText(QStringLiteral("Measuring through-transmit..."));
+    // The device streams for seconds; off the GUI thread it does so without
+    // freezing the window.
+    const bool started = deviceLink_->runCommand(
+        "Correction", /*startQuietReads=*/10,
+        [this, then](std::vector<std::string> reply, bool ok) {
+            runCorrectionButton_->setEnabled(true);
+            applyCorrectionResult(reply, ok);
+            if (then) then();
+        });
+    if (!started) {
+        runCorrectionButton_->setEnabled(true);
+        showMessage(QStringLiteral("The device is busy with another command."), true);
+        if (then) then();
+    }
+}
+
+// Runs on the GUI thread once the device has answered, or straight away
+// when there is nothing to ask.
+void WorkflowWindow::applyCorrectionResult(const std::vector<std::string>& reply,
+                                           bool fromDevice) {
+    double transmission = 0.0;
+    bool simulated = !fromDevice || reply.empty();
+    if (!simulated) {
+        std::vector<double> raw;
+        for (const std::string& line : reply) {
+            const auto values = beam::correction::parseCorrectionWaveformLine(line);
+            raw.insert(raw.end(), values.begin(), values.end());
+        }
+        const auto split = beam::correction::splitAndFilterReceiveWaveform(raw);
+        transmission =
+            beam::correction::throughTransmitAmplitude(split.ch0rcv, split.ch1rcv).amp;
+        couplingCh0Raw_ = split.ch0rcv;
+        couplingCh1Raw_ = split.ch1rcv;
+        couplingCh0Filtered_ = beam::correction::filterTransmitSignal(split.ch0rcv).filtWave;
+        couplingCh1Filtered_ = beam::correction::filterTransmitSignal(split.ch1rcv).filtWave;
+        couplingPeakToPeak_ =
+            std::max(beam::correction::txRxSignalAmplitude(couplingCh0Filtered_).peak2peak,
+                     beam::correction::txRxSignalAmplitude(couplingCh1Filtered_).peak2peak);
+    }
+    if (simulated) {
+        fillSimulatedCouplingWaveforms();
+        transmission = beam::correction::throughTransmitAmplitude(couplingCh0Raw_,
+                                                                  couplingCh1Raw_)
+                           .amp;
+    }
+    couplingSimulated_ = simulated;
+    const int percent = std::clamp(static_cast<int>(std::lround(transmission * 100.0)), 0, 100);
+    // checkCouplingSafety.m's own test, at its own 0.1 -- not a threshold
+    // of this application's choosing.
+    const beam::safety::SafetyReport coupling = beam::safety::checkCouplingSafety(transmission);
+    correctionCheckPassed_ = coupling.pass;
+    // Keep the measurement itself, not only its verdict: the Treatment
+    // stage feeds it to prepareSonication, which re-checks it against
+    // kCouplingThreshold before any command is sent.
+    transmissionAmplitude_ = transmission;
+    correctionProgressBar_->setValue(percent);
+    // checkCouplingSafety.m's own wording, including the line it appends
+    // when the report is not empty.
+    QStringList lines;
+    ++correctionRunCount_;
+    // Which run this is, and when: the numbers can come out identical two
+    // runs running, and without this the second press looks like a button
+    // that did nothing.
+    lines << QStringLiteral("Run %1 at %2 -- through-transmit %3: transmission %4%.")
+                 .arg(correctionRunCount_)
+                 .arg(QDateTime::currentDateTime().toString(
+                     QStringLiteral("HH:mm:ss.zzz")))
+                 .arg(simulated ? QStringLiteral("(simulated, no device connected)")
+                                : QStringLiteral("measured"))
+                 .arg(percent);
+    if (coupling.pass) {
+        lines << QStringLiteral("Coupling Online");
+    } else {
+        for (const std::string& message : coupling.messages)
+            lines << QString::fromStdString(message);
+        lines << QStringLiteral("Readjust coupling or add coupling gel over uncoupled elements");
+    }
+    correctionStatusLabel_->setText(lines.join(QChar('\n')));
+    updateCouplingCharts(transmission);
+    // The through-transmit precondition just changed.
+    updateSonicationSafety();
+    // change() puts Correction back to in-progress and invalidates every
+    // stage after it -- which is right when the operator re-measures
+    // deliberately, and wrong for the check the treatment runs every
+    // fourth sonication: that invalidated Treatment itself, and the next
+    // press was refused with "Correction must be complete first".
+    //
+    // A failed re-check is different. Coupling has actually been lost, so
+    // the stage does re-open and has to be accepted again.
+    if (!autoCouplingRecheck_ || !correctionCheckPassed_) {
+        workflow_.change(beam::gui::WorkflowStage::Correction,
+                         "Correction measured; awaiting operator acceptance.");
+        acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
+    }
+    if (!autoCouplingRecheck_) {
+        showMessage(correctionCheckPassed_
+                        ? QStringLiteral("Correction measurement passed. Accept correction "
+                                         "to continue.")
+                        : QStringLiteral("Correction measurement failed the transmission "
+                                         "threshold."),
+                    !correctionCheckPassed_);
+    }
+    refresh();
 }
 
 }  // namespace beam::app
