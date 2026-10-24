@@ -5,6 +5,7 @@
 
 #include <QColor>
 #include <QAction>
+#include <utility>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QKeySequence>
@@ -43,6 +44,11 @@ constexpr char kButtonStyle[] =
     "QPushButton:hover:enabled { background: #2d6477; } "
     "QPushButton:disabled { color: #7d949c; background: #1b3a45; border-color: #2b5260; }";
 
+constexpr char kFieldLabelStyle[] = "QLabel { color: #8fb0bc; font-size: 11px; }";
+constexpr char kFieldValueStyle[] =
+    "QLabel { color: #dcebef; font-size: 11px; font-family: Consolas, 'Courier New', "
+    "monospace; }";
+
 constexpr char kClearStyle[] =
     "QPushButton { color: #eafaff; background: #2d6477; border: 1px solid #6ba7ba; "
     "border-radius: 3px; padding: 1px 10px; font-size: 10px; } "
@@ -60,6 +66,8 @@ const char* label(DeviceLinkPanel::Log kind) {
         case DeviceLinkPanel::Log::Released: return "DISCONNECTED";
         case DeviceLinkPanel::Log::Polling: return "POLLING";
         case DeviceLinkPanel::Log::Sent: return "SENT";
+        case DeviceLinkPanel::Log::Ack: return "ACK";
+        case DeviceLinkPanel::Log::AckDiffers: return "ACK";
         case DeviceLinkPanel::Log::Health: break;
     }
     return "";
@@ -71,6 +79,7 @@ QColor colour(DeviceLinkPanel::Log kind) {
         case DeviceLinkPanel::Log::Connected: return QColor(0x6e, 0xe7, 0xa0);
         case DeviceLinkPanel::Log::Lost: return QColor(0xff, 0x82, 0x90);
         case DeviceLinkPanel::Log::Sent: return QColor(0xe0, 0xa0, 0x3f);
+        case DeviceLinkPanel::Log::AckDiffers: return QColor(0xff, 0x82, 0x90);
         default: break;
     }
     return QColor(0xcf, 0xe3, 0xe9);
@@ -91,6 +100,9 @@ DeviceLinkPanel::~DeviceLinkPanel() {
 }
 
 void DeviceLinkPanel::buildWidgets() {
+    // Only as tall as its contents: given slack, the column layout pours it
+    // into the heading and the control row instead of leaving it below.
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     lamp_ = new QLabel(this);
     lamp_->setFixedSize(16, 16);
     lamp_->setAutoFillBackground(true);
@@ -140,10 +152,11 @@ void DeviceLinkPanel::buildWidgets() {
     history_->setFixedHeight(112);
 
     auto* heading = new QLabel(QStringLiteral("Device link"), this);
+    heading->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     heading->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
 
     auto* row = new QHBoxLayout;
-    row->setContentsMargins(0, 0, 0, 4);
+    row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(8);
     // Left, not right: the page is wider than the screen, so anything
     // pushed to its right edge is off the display.
@@ -153,10 +166,28 @@ void DeviceLinkPanel::buildWidgets() {
     row->addWidget(connectButton_);
     row->addWidget(disconnectButton_);
     row->addWidget(clearButton_);
+
+    const auto field = [this](const QString& caption, QLabel** value) {
+        auto* name = new QLabel(caption, this);
+        name->setStyleSheet(QString::fromLatin1(kFieldLabelStyle));
+        *value = new QLabel(QStringLiteral("--"), this);
+        (*value)->setStyleSheet(QString::fromLatin1(kFieldValueStyle));
+        (*value)->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        return std::pair<QLabel*, QLabel*>(name, *value);
+    };
+    const auto model = field(QStringLiteral("Model"), &modelValue_);
+    const auto serial = field(QStringLiteral("S/N"), &serialValue_);
+    row->addSpacing(24);
+    row->addWidget(model.first);
+    row->addWidget(model.second);
+    row->addSpacing(16);
+    row->addWidget(serial.first);
+    row->addWidget(serial.second);
     row->addStretch(1);
 
     auto* column = new QVBoxLayout(this);
     column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(2);
     column->addWidget(heading);
     column->addLayout(row);
     column->addWidget(history_);
@@ -220,6 +251,9 @@ void DeviceLinkPanel::onLinkEvent(const beam::serialcom::LinkEvent& event) {
     }
 
     healthy_ = up;
+    const QString none = QStringLiteral("--");
+    modelValue_->setText(event.board.empty() ? none : QString::fromStdString(event.board));
+    serialValue_->setText(event.serial.empty() ? none : QString::fromStdString(event.serial));
     status_->setText(plain);
     setLamp(up);
     emit linkStateChanged(up, plain);
@@ -266,6 +300,8 @@ void DeviceLinkPanel::releasePort() {
     }
     healthy_ = false;
     lastDownMessage_.clear();
+    modelValue_->setText(QStringLiteral("--"));
+    serialValue_->setText(QStringLiteral("--"));
     setLamp(false);
     const QString plain = QStringLiteral("Disconnected");
     status_->setText(plain);

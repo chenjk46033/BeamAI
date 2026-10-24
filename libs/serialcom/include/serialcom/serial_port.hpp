@@ -67,6 +67,7 @@ struct ComPortIdentity {
     std::string vendorId;
     std::string productId;
     std::string serial;
+    std::string board;  // "NUCLEO-F303RE" where the debugger says so
 };
 ComPortIdentity identifyComPort(const std::string& portName);
 

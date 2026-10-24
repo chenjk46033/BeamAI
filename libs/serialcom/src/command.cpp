@@ -129,7 +129,7 @@ std::vector<std::string> stimEchoDifferences(const std::string& expected, const 
         const double allowed = std::max(1.0, std::fabs(want[i].second) * relativeTolerance);
         if (std::fabs(want[i].second - got[i].second) <= allowed) continue;
         char buf[96];
-        std::snprintf(buf, sizeof(buf), "%s sent %.0f ack %.0f", want[i].first.c_str(),
+        std::snprintf(buf, sizeof(buf), "%s sent %.0f, acknowledged %.0f", want[i].first.c_str(),
                       want[i].second, got[i].second);
         differences.emplace_back(buf);
     }

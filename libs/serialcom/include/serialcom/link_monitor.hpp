@@ -35,6 +35,8 @@ struct LinkEvent {
     LinkState state = LinkState::Down;
     std::string message;  // already formatted for a reader
     std::string port;     // empty while searching
+    std::string board;    // "NUCLEO-F303RE", empty until connected
+    std::string serial;
     double rttMs = 0.0;
     bool pong = false;
 };
@@ -99,6 +101,8 @@ public:
     WireForm form() const { return form_; }
     // The board's USB serial, empty when the OS does not say.
     const std::string& deviceId() const { return deviceId_; }
+    // "NUCLEO-F303RE" where the debugger reports it.
+    const std::string& board() const { return board_; }
     double lastRttMs() const { return lastRttMs_; }
     int consecutiveMisses() const { return consecutiveMisses_; }
     Stats stats() const { return stats_; }
@@ -126,6 +130,7 @@ private:
     double lastRttMs_ = 0.0;
     std::size_t lastReplyBytes_ = 0;
     std::string deviceId_;
+    std::string board_;
     int consecutiveMisses_ = 0;
     bool scanFailed_ = false;
     Stats stats_;

@@ -49,7 +49,7 @@ public:
     bool runCommand(const std::string& cmd, int startQuietReads,
                     std::function<void(std::vector<std::string>, bool)> done);
 
-    enum class Log { Connected, Lost, Health, Released, Polling, Sent };
+    enum class Log { Connected, Lost, Health, Released, Polling, Sent, Ack, AckDiffers };
     void appendHistory(Log kind, const QString& text);
 
     void startPolling();
@@ -74,6 +74,8 @@ private:
 
     QLabel* lamp_ = nullptr;
     QLabel* status_ = nullptr;
+    QLabel* modelValue_ = nullptr;
+    QLabel* serialValue_ = nullptr;
     QListWidget* history_ = nullptr;
     QPushButton* connectButton_ = nullptr;
     QPushButton* disconnectButton_ = nullptr;

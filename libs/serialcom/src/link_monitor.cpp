@@ -32,10 +32,13 @@ bool looksLikePong(const std::string& line) {
 std::size_t requestBytes(WireForm form) { return std::strlen(formPayload(form)); }
 
 // "time<1ms" below a millisecond, "time=5ms" above.
+
+// What to call the thing on screen before anything has answered.
 std::string deviceLabel(const std::string& port) {
     const ComPortIdentity who = identifyComPort(port);
-    if (who.vendorId.empty()) return port;
-    return who.vendorId + ":" + who.productId + (who.serial.empty() ? "" : " " + who.serial);
+    if (!who.board.empty()) return who.board;
+    if (!who.vendorId.empty()) return who.vendorId + ":" + who.productId;
+    return port;
 }
 
 std::string pingTime(double ms) {
@@ -143,6 +146,8 @@ void LinkMonitor::report(LinkState state, const std::string& message, double rtt
     event.state = state;
     event.message = message;
     event.port = portName_;
+    event.board = board_;
+    event.serial = deviceId_;
     event.rttMs = rttMs;
     event.pong = pong;
     observer_(event);
@@ -188,9 +193,10 @@ bool LinkMonitor::probe(const std::string& name) {
                 consecutiveMisses_ = 0;
                 const ComPortIdentity who = identifyComPort(name);
                 deviceId_ = who.serial;
-                if (!who.vendorId.empty())
-                    deviceId_ = who.vendorId + ":" + who.productId +
-                                (who.serial.empty() ? "" : " " + who.serial);
+                board_ = who.board.empty() ? who.vendorId.empty()
+                                                 ? std::string()
+                                                 : who.vendorId + ":" + who.productId
+                                           : who.board;
                 return true;
             }
             if (!result.error.empty()) {
@@ -219,7 +225,7 @@ bool LinkMonitor::findDevice() {
 
 std::string LinkMonitor::replyLine(double rttMs) const {
     return "Reply from " + portName_ +
-           (deviceId_.empty() ? "" : " [deviceID " + deviceId_ + "]") +
+           (deviceId_.empty() ? "" : " [S/N " + deviceId_ + "]") +
            ": bytes=" + std::to_string(lastReplyBytes_) + " " + pingTime(rttMs);
 }
 
@@ -227,8 +233,11 @@ void LinkMonitor::step() {
     if (link_ == nullptr) {
         if (findDevice()) {
             scanFailed_ = false;
-            const std::string who =
-                deviceId_.empty() ? portName_ : "deviceID " + deviceId_;
+            std::string who;
+            if (!board_.empty()) who = "model: " + board_;
+            if (!deviceId_.empty())
+                who += (who.empty() ? "" : "   ") + std::string("S/N: ") + deviceId_;
+            if (who.empty()) who = portName_;
             report(LinkState::Up, who, lastRttMs_, true);
         } else {
             scanFailed_ = true;
@@ -268,6 +277,7 @@ void LinkMonitor::step() {
         link_.reset();
         portName_.clear();
         deviceId_.clear();
+        board_.clear();
         consecutiveMisses_ = 0;
         scanFailed_ = true;
         report(LinkState::Down, "Lost connection to " + dropped + ".");

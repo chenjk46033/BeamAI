@@ -4588,8 +4588,8 @@ void WorkflowWindow::reportStimEcho(const std::string& reply, const beam::serial
                                     double dutyCycle) {
     if (deviceLink_ == nullptr) return;
     if (reply.empty()) {
-        deviceLink_->appendHistory(DeviceLinkPanel::Log::Lost,
-                                   QStringLiteral("sent != ack   no ack received."));
+        deviceLink_->appendHistory(DeviceLinkPanel::Log::AckDiffers,
+                                   QStringLiteral("No acknowledgement arrived."));
         return;
     }
     const std::string expected =
@@ -4598,15 +4598,15 @@ void WorkflowWindow::reportStimEcho(const std::string& reply, const beam::serial
     const std::vector<std::string> differences =
         beam::serialcom::stimEchoDifferences(expected, got);
     if (differences.empty()) {
-        deviceLink_->appendHistory(DeviceLinkPanel::Log::Health,
-                                   QStringLiteral("sent == ack   %1")
+        deviceLink_->appendHistory(DeviceLinkPanel::Log::Ack,
+                                   QStringLiteral("The device echoed the same parameters that were sent.   %1")
                                        .arg(QString::fromStdString(got)));
         return;
     }
     QStringList named;
     for (const std::string& d : differences) named << QString::fromStdString(d);
-    deviceLink_->appendHistory(DeviceLinkPanel::Log::Lost,
-                               QStringLiteral("sent != ack   %1").arg(named.join(QStringLiteral(", "))));
+    deviceLink_->appendHistory(DeviceLinkPanel::Log::AckDiffers,
+                               QStringLiteral("The device echoed different parameters: %1.").arg(named.join(QStringLiteral(", "))));
     showMessage(QStringLiteral("The device echoed different sonication parameters than were "
                                "sent. Expected \"%1\", got \"%2\".")
                     .arg(QString::fromStdString(expected), QString::fromStdString(got)),

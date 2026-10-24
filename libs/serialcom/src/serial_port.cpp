@@ -318,6 +318,33 @@ std::vector<std::string> enumerateComPorts(bool requireOpenable) {
 
 }  // namespace
 
+// An ST-LINK also mounts a small drive whose volume label names the board:
+// "NOD_F303RE" for a NUCLEO-F303RE. Nothing else on the link reports it.
+std::string detectDebuggerBoard() {
+    const DWORD mask = GetLogicalDrives();
+    for (int i = 0; i < 26; ++i) {
+        if ((mask & (1u << i)) == 0) continue;
+        char root[4] = {static_cast<char>('A' + i), ':', '\\', 0};
+        if (GetDriveTypeA(root) != DRIVE_REMOVABLE) continue;
+        // The two files an ST-LINK drive always carries.
+        const std::string details = std::string(root) + "DETAILS.TXT";
+        const std::string mbed = std::string(root) + "MBED.HTM";
+        if (GetFileAttributesA(details.c_str()) == INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesA(mbed.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            continue;
+        }
+        char label[MAX_PATH + 1] = {0};
+        if (!GetVolumeInformationA(root, label, sizeof(label) - 1, nullptr, nullptr, nullptr,
+                                   nullptr, 0)) {
+            continue;
+        }
+        std::string name(label);
+        if (name.rfind("NOD_", 0) == 0) return "NUCLEO-" + name.substr(4);
+        if (!name.empty()) return name;
+    }
+    return std::string();
+}
+
 // The serial number lives on the parent composite device, not on the
 // interface that owns the COM name.
 ComPortIdentity identifyComPort(const std::string& portName) {
@@ -361,6 +388,9 @@ ComPortIdentity identifyComPort(const std::string& portName) {
         const std::size_t last = text.rfind('\\');
         if (last != std::string::npos && last + 1 < text.size())
             identity.serial = text.substr(last + 1);
+        // Only for an ST debugger: the drive scan is global, and without
+        // this every serial port on the machine inherits the board name.
+        if (identity.vendorId == "0483") identity.board = detectDebuggerBoard();
         break;
     }
 
