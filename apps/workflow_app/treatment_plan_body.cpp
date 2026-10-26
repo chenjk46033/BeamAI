@@ -4109,7 +4109,11 @@ void WorkflowWindow::setSonicateEnabled(bool enabled) {
         sonicationCountdownTimer_ != nullptr && sonicationCountdownTimer_->isActive();
     // checkSonicationSafety.m ends by enabling or disabling SonicateButton on
     // exactly this flag. Nothing goes out while the parameters are unsafe.
+    // The same question the page banner asks. Read from the workflow rather
+    // than from the cached flag, which survives a stage being invalidated and
+    // left the buttons live under a banner refusing the delivery.
     const bool live = !running && enabled && sonicationSafetyPass_ &&
+                      workflow_.canStartTreatment(nullptr) &&
                       currentSonicationIsPending() && !mcuConnectionInvalid_;
     inRowSonicateButton_->setEnabled(live);
     if (!running)
@@ -4830,13 +4834,6 @@ void WorkflowWindow::startSonicationCountdown(int durationSeconds, bool sham) {
     sonicationCountdownLabel_->setText(
         QString::fromStdString(beam::gui::countdownDisplayText(sonicationCountdownSeconds_)));
     treatmentExecutionProgressBar_->setVisible(true);
-    // The row sized itself while the bar was hidden, so without this the bar
-    // has no space until the window is resized.
-    treatmentExecutionProgressBar_->updateGeometry();
-    if (treatmentExecutionBody_ != nullptr) {
-        if (QLayout* row = treatmentExecutionBody_->layout()) row->activate();
-        treatmentExecutionBody_->updateGeometry();
-    }
     sonicationCountdownTimer_->start();
     // After the timer is running, so the button reads "Sonicating..." rather
     // than merely going grey.
