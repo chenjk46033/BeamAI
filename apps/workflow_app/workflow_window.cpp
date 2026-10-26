@@ -1710,8 +1710,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         abortSonication();
     });
     ui_->abortButton->setToolTip(
-        QStringLiteral("Stops a sonication or sham while it is going out. Dark when nothing "
-                       "is being delivered."));
+        QStringLiteral("Stops the countdown, the log row and any sham audio. It does not "
+                       "stop ultrasound: the device has no stop command. Dark when "
+                       "nothing is being delivered."));
 
     ui_->stageList->setCurrentRow(0);
     ui_->acceptCaseButton->setEnabled(true);

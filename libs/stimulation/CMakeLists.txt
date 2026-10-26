@@ -1,4 +1,5 @@
 add_library(stimulation
+    src/calibration_curve.cpp
     src/delays.cpp
     src/apodization.cpp
     src/interp.cpp

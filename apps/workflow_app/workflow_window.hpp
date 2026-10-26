@@ -25,6 +25,7 @@
 #include "mri/slice.hpp"
 #include "mri/ras_transform.hpp"
 #include "registration/array_transform.hpp"
+#include "stimulation/calibration_curve.hpp"
 // Needed complete, not forward-declared: targetSonications_ stores vectors of
 // StimParamRow by value.
 #include "gui_qt/stim_param_table_model.hpp"
@@ -403,6 +404,9 @@ private:
     // Review by the workflow model rather than by a button's enabled state.
     void buildTreatmentExecutionBody(const QString& acceptButtonStyle);
     void buildDeviceLinkPanel();
+    void loadCalibrationCurve();
+    std::string calibrationDutyText() const;
+    std::string calibrationPressureText() const;
     void startCorrectionMeasurement(std::function<void()> then);
     void applyCorrectionResult(const std::vector<std::string>& reply, bool fromDevice);
     void reportStimEcho(const std::string& reply, const beam::serialcom::SonicationTiming& timing,
@@ -678,6 +682,9 @@ private:
     QPushButton* finishTreatmentButton_ = nullptr;
     // The panel owns the port, its polling thread and its own widgets.
     DeviceLinkPanel* deviceLink_ = nullptr;
+    // Read from data/runtime once at startup; BeamV0 carried these inline.
+    beam::stimulation::CalibrationCurve calibration_;
+    bool calibrationFromFile_ = false;
     // The shell's header slot, so a link that drops during treatment is
     // visible on whatever page the operator is on.
     QLabel* serialHeaderLabel_ = nullptr;

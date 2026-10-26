@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include <QDateTime>
 #include <QWidget>
 
 namespace beam::serialcom {
@@ -36,6 +37,8 @@ public:
 
     // What the last poll saw, so up to one interval stale.
     bool isHealthy() const { return healthy_; }
+    const QString& board() const { return board_; }
+    const QString& serial() const { return serial_; }
 
     // Asks now rather than trusting the last poll. Use before delivering.
     bool askDevice();
@@ -94,6 +97,9 @@ private:
     bool delivering_ = false;
 
     bool healthy_ = false;
+    QDateTime connectedAt_;
+    QString board_;
+    QString serial_;
     QString lastDownMessage_;
 };
 

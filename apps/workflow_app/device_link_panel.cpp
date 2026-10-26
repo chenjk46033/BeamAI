@@ -230,10 +230,18 @@ void DeviceLinkPanel::onLinkEvent(const beam::serialcom::LinkEvent& event) {
     const bool up = event.state == beam::serialcom::LinkState::Up;
     const bool searching = event.state == beam::serialcom::LinkState::Searching;
     const QString message = QString::fromStdString(event.message);
+    if (up && !healthy_) connectedAt_ = QDateTime::currentDateTime();
+    if (!up) connectedAt_ = QDateTime();
     // No port name here: the history carries it, an operator does not want it.
     const QString plain = up         ? QStringLiteral("Device connected")
                           : searching ? QStringLiteral("Searching for device...")
                                       : QStringLiteral("Device not found");
+    // The panel has room to say how long it has held; the header does not.
+    const QString detail =
+        connectedAt_.isValid()
+            ? QStringLiteral("Connected since %1")
+                  .arg(connectedAt_.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")))
+            : plain;
 
     if (up && !healthy_) {
         appendHistory(Log::Connected, message);
@@ -252,9 +260,11 @@ void DeviceLinkPanel::onLinkEvent(const beam::serialcom::LinkEvent& event) {
 
     healthy_ = up;
     const QString none = QStringLiteral("--");
-    modelValue_->setText(event.board.empty() ? none : QString::fromStdString(event.board));
-    serialValue_->setText(event.serial.empty() ? none : QString::fromStdString(event.serial));
-    status_->setText(plain);
+    board_ = QString::fromStdString(event.board);
+    serial_ = QString::fromStdString(event.serial);
+    modelValue_->setText(board_.isEmpty() ? none : board_);
+    serialValue_->setText(serial_.isEmpty() ? none : serial_);
+    status_->setText(detail);
     setLamp(up);
     emit linkStateChanged(up, plain);
 }
@@ -299,6 +309,9 @@ void DeviceLinkPanel::releasePort() {
         monitor_.reset();  // closes the port
     }
     healthy_ = false;
+    connectedAt_ = QDateTime();
+    board_.clear();
+    serial_.clear();
     lastDownMessage_.clear();
     modelValue_->setText(QStringLiteral("--"));
     serialValue_->setText(QStringLiteral("--"));

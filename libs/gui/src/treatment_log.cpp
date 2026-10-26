@@ -464,6 +464,10 @@ void TreatmentLog::load(const std::string& path) {
             row.statusCode = std::atoi(status.c_str());
         else if (!row.startedAt.empty())
             row.statusCode = kCompleted;
+        row.deviceModel = text("DeviceModel");
+        row.deviceSerial = text("HardwareSerialNumber");
+        row.calDuty = text("CalDuty");
+        row.calPressure = text("CalPressure");
         const std::string fromPlan = text("FromPlan");
         row.fromPlan = fromPlan.empty() || fromPlan == "1" || fromPlan == "true";
         // The first row that names anybody names the file. Rows written before
@@ -513,7 +517,7 @@ void TreatmentLog::save(const std::string& path) const {
             "BEAMSerialNumber,"
             "Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,"
             "HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,"
-            "Protocol,FromPlan,StatusCode\n";
+            "Protocol,FromPlan,StatusCode,DeviceModel,CalDuty,CalPressure\n";
     for (const TreatmentLogRow& row : rows_) {
         file << row.sequence << ',' << quote(row.target) << ','
              << (row.endTimeSeconds - row.startTimeSeconds) << ',' << row.amplitude << ','
@@ -535,8 +539,8 @@ void TreatmentLog::save(const std::string& path) const {
              << ",,,,"
              // Region is BeamV0's own copy of Name.
              << ',' << quote(row.target)
-             // HardwareSerialNumber, which nothing here knows.
-             << ',';
+             // HardwareSerialNumber: the board the command went to.
+             << ',' << quote(row.deviceSerial);
         // setLogInfoToCSV.m fills these from app.sys.log{i}.att and .DC -- the
         // correction values the manual says are logged for every sonication.
         file << ',';
@@ -545,7 +549,9 @@ void TreatmentLog::save(const std::string& path) const {
         if (row.dutyCycle) file << *row.dutyCycle;
         file << ',' << quote(row.startedAt) << ',' << quote(row.endedAt) << ','
              << (row.sham ? 1 : 0) << ',' << quote(row.protocol) << ','
-             << (row.fromPlan ? 1 : 0) << ',' << row.statusCode << '\n';
+             << (row.fromPlan ? 1 : 0) << ',' << row.statusCode << ','
+             << quote(row.deviceModel) << ',' << quote(row.calDuty) << ','
+             << quote(row.calPressure) << '\n';
     }
     if (!file) throw std::runtime_error("failed while writing " + path);
 }

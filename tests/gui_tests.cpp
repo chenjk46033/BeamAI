@@ -1264,3 +1264,70 @@ TEST(PlanBlocks, ShorteningATreatmentRowMovesItIntoTheScreeningBlock) {
     EXPECT_EQ(after[1].first, 5);
     EXPECT_EQ(after[1].feedLast, 4);
 }
+
+// The calibration curve moved out of the source into a file; these pin the
+// reader and the fallback.
+#include "stimulation/calibration_curve.hpp"
+#include <cstdio>
+#include <fstream>
+
+namespace {
+
+std::string writeTempCurve(const char* body) {
+    const std::string path = std::string(std::tmpnam(nullptr)) + "_curve.csv";
+    std::ofstream out(path);
+    out << body;
+    return path;
+}
+
+}  // namespace
+
+TEST(CalibrationCurve, DefaultMatchesTheValuesBeamV0Carried) {
+    const auto& c = beam::stimulation::defaultCalibrationCurve();
+    ASSERT_EQ(c.dutyPercent.size(), 7);
+    EXPECT_DOUBLE_EQ(c.dutyPercent(0), 40.0);
+    EXPECT_DOUBLE_EQ(c.dutyPercent(6), 97.5);
+    EXPECT_DOUBLE_EQ(c.pressureMpa(0), 0.75);
+    EXPECT_DOUBLE_EQ(c.pressureMpa(6), 3.92);
+}
+
+TEST(CalibrationCurve, ReadsAFileWithAHeader) {
+    const std::string path = writeTempCurve("duty_percent,pressure_mpa\n40,0.75\n90,3.72\n");
+    const auto c = beam::stimulation::readCalibrationCurve(path);
+    ASSERT_EQ(c.dutyPercent.size(), 2);
+    EXPECT_DOUBLE_EQ(c.dutyPercent(1), 90.0);
+    EXPECT_DOUBLE_EQ(c.pressureMpa(1), 3.72);
+    std::remove(path.c_str());
+}
+
+TEST(CalibrationCurve, RoundTripsThroughWrite) {
+    const std::string path = writeTempCurve("");
+    beam::stimulation::writeCalibrationCurve(path, beam::stimulation::defaultCalibrationCurve());
+    const auto c = beam::stimulation::readCalibrationCurve(path);
+    EXPECT_EQ(c.dutyPercent.size(), 7);
+    EXPECT_DOUBLE_EQ(c.pressureMpa(3), 2.95);
+    std::remove(path.c_str());
+}
+
+TEST(CalibrationCurve, RefusesAFileWithTooFewPoints) {
+    const std::string path = writeTempCurve("duty_percent,pressure_mpa\n40,0.75\n");
+    EXPECT_THROW(beam::stimulation::readCalibrationCurve(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(CalibrationCurve, RefusesAMissingFile) {
+    EXPECT_THROW(beam::stimulation::readCalibrationCurve("no_such_curve_xyz.csv"),
+                 std::runtime_error);
+}
+
+// A different curve must change the duty cycle, or the file is decorative.
+TEST(PrepareSonication, UsesTheCurveItIsGiven) {
+    beam::stimulation::CalibrationCurve steep;
+    steep.dutyPercent.resize(2);
+    steep.pressureMpa.resize(2);
+    steep.dutyPercent << 10, 20;
+    steep.pressureMpa << 1.0, 2.0;
+    const auto standard = beam::gui::prepareSonication(sonicateableParams(), 0.30, 0.10, false);
+    const auto altered = beam::gui::prepareSonication(sonicateableParams(), 0.30, 0.10, false, steep);
+    EXPECT_NE(standard.dutyCycle, altered.dutyCycle);
+}

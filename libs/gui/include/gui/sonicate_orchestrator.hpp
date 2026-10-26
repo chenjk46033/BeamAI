@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "safety/intensity.hpp"
+#include "stimulation/calibration_curve.hpp"
 
 // Ported from the decision logic in
 // BeamV0/GUIMatlab/BEAM/Stimulation/GeneralSonication/generalSonicateMaster.m:
@@ -11,8 +12,8 @@
 // would be sent (transmission below the coupling threshold; the computed
 // duty cycle too high), the Immediate/External trigger toggle
 // (`app.TriggerSwitch.Value`), and the duty-cycle computation itself
-// (already-ported `pressureToDutyCycleGivenTransmission`, with the
-// source's hardcoded calibration curve).
+// (already-ported `pressureToDutyCycleGivenTransmission`, against a
+// calibration curve the caller supplies).
 //
 // Deliberately not ported here: `testModeFlag` (hardcoded 0 in the source
 // -- dead, its branch never runs); `startStandaloneCountdown` /
@@ -44,7 +45,9 @@ struct SonicateOutcome {
 // waitForExternalTrigger: the trigger-mode toggle's current value.
 SonicateOutcome prepareSonication(const beam::safety::SonicationSafetyParams& params,
                                    double transmissionPeak2Peak, double couplingThreshold,
-                                   bool waitForExternalTrigger);
+                                   bool waitForExternalTrigger,
+                                   const beam::stimulation::CalibrationCurve& calibration =
+                                       beam::stimulation::defaultCalibrationCurve());
 
 // Port of setStimParamsFromApp.m's per-row field copy (PD/PI/BD/BI/
 // Amplitude/startTime/endTime, plus the hardcoded centerFrequencyMHz =

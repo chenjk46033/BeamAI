@@ -3890,6 +3890,13 @@ void WorkflowWindow::recordSonicationStart(const beam::gui_qt::StimParamRow& row
     entry.sham = sham;
     entry.attenuation = attenuation;
     entry.dutyCycle = dutyCycle;
+    // What produced it: the board, and the curve that set the duty cycle.
+    if (deviceLink_ != nullptr) {
+        entry.deviceModel = deviceLink_->board().toStdString();
+        entry.deviceSerial = deviceLink_->serial().toStdString();
+    }
+    entry.calDuty = calibrationDutyText();
+    entry.calPressure = calibrationPressureText();
     entry.startedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs).toStdString();
     entry.statusCode = beam::gui::TreatmentLog::kRunning;
     // BeamV0 writes into treatmentProtocolTable row i, where i is the Current
@@ -4692,7 +4699,8 @@ void WorkflowWindow::runSonication(bool sham) {
     }
 
     const beam::gui::SonicateOutcome outcome = beam::gui::prepareSonication(
-        params, transmissionAmplitude_, kCouplingThreshold, triggerModeCombo_->currentIndex() == 1);
+        params, transmissionAmplitude_, kCouplingThreshold,
+        triggerModeCombo_->currentIndex() == 1, calibration_);
     if (!outcome.started) {
         QString message = QStringLiteral("Not started: ");
         for (std::size_t i = 0; i < outcome.messages.size(); ++i) {
@@ -4788,8 +4796,8 @@ void WorkflowWindow::startSonicationCountdown(int durationSeconds, bool sham) {
     setSonicateEnabled(false);
 }
 
-// Port of the Abort Sonication action: the source sends the same
-// "Correction" command the correction measurement uses, which stops output.
+// Stops everything this application controls. The device is not asked to
+// stop, because it has no command that would.
 void WorkflowWindow::abortSonication() {
     sonicationCountdownTimer_->stop();
     if (runningFlashTimer_ != nullptr) runningFlashTimer_->stop();
@@ -4799,24 +4807,21 @@ void WorkflowWindow::abortSonication() {
     closeOpenLogRow(/*aborted=*/true);
     stopShamAudio();
     setSonicateEnabled(true);
-    QString status = QStringLiteral("Sonication aborted by operator.");
-    if (deviceLink_ != nullptr)
-        deviceLink_->appendHistory(DeviceLinkPanel::Log::Sent,
-                                   QStringLiteral("Correction (abort)"));
-    const bool sent = deviceLink_ != nullptr &&
-                      deviceLink_->withLink([&](beam::serialcom::SerialLink& link) {
-                          try {
-                              // Written, not waited on: the reply must not hold the
-                              // window, and the next check drains whatever arrives.
-                              beam::serialcom::sendSerialCommand(link, "Correction");
-                              status += QStringLiteral(" Abort command sent.");
-                          } catch (const std::exception& e) {
-                              status += QStringLiteral(" Abort command failed: %1")
-                                            .arg(QString::fromStdString(e.what()));
-                          }
-                      });
-    if (!sent) status += QStringLiteral(" No serial connection -- no command sent.");
-    if (deviceLink_ != nullptr) deviceLink_->setDelivering(false);
+    // No command goes out. The firmware has no branch that reaches
+    // stopUltrasoundSequence(), and the one BeamV0 sent here -- "Correction" --
+    // runs its own pulse and ADC sequence while the burst timers keep firing.
+    QString status =
+        QStringLiteral("Sonication aborted by operator. The countdown, the log row and any "
+                       "sham audio have stopped, but ultrasound continues for the rest of its "
+                       "programmed duration: this device has no stop command. Press RESET on "
+                       "the board, or unplug it, to end output now.");
+    if (deviceLink_ != nullptr) {
+        deviceLink_->appendHistory(
+            DeviceLinkPanel::Log::Lost,
+            QStringLiteral("Aborted in the application. No stop command exists; output "
+                           "continues until the programmed duration ends."));
+        deviceLink_->setDelivering(false);
+    }
     workflow_.block(beam::gui::WorkflowStage::Treatment, status.toStdString());
     setExecutionStatus(status);
     showMessage(status, true);
@@ -5243,6 +5248,23 @@ void WorkflowWindow::exportCaseReport() {
     pair("Transducer1SerialNumber", QString::fromStdString(crf.snTransducer1));
     pair("Transducer2SerialNumber", QString::fromStdString(crf.snTransducer2));
     pair("SoftwareVersion", QString::fromStdString(crf.softwareVersion));
+    // From the visit's own rows, not from what is plugged in now: an export
+    // of an old visit has to say what drove it then.
+    const auto recorded = [&](std::string beam::gui::TreatmentLogRow::*field,
+                              const QString& fallback) {
+        for (const beam::gui::TreatmentLogRow& row :
+             treatmentLog_.rowsFor(currentProtocolName().toStdString(), visit))
+            if (!(row.*field).empty()) return QString::fromStdString(row.*field);
+        return fallback;
+    };
+    pair("MCUModel", recorded(&beam::gui::TreatmentLogRow::deviceModel,
+                              deviceLink_ != nullptr ? deviceLink_->board() : QString()));
+    pair("MCUSerialNumber", recorded(&beam::gui::TreatmentLogRow::deviceSerial,
+                                     deviceLink_ != nullptr ? deviceLink_->serial() : QString()));
+    pair("CalDuty", recorded(&beam::gui::TreatmentLogRow::calDuty,
+                             QString::fromStdString(calibrationDutyText())));
+    pair("CalPressure", recorded(&beam::gui::TreatmentLogRow::calPressure,
+                                 QString::fromStdString(calibrationPressureText())));
     pair("ExportedAt", QDateTime::currentDateTime().toString(Qt::ISODate));
     out << '\n';
     out << "Number,Target,Started,Ended,DurationSeconds,Amplitude,BD,BI,PD,PI,Sham,Outcome,"

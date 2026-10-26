@@ -6,39 +6,15 @@
 
 namespace beam::gui {
 
-namespace {
-
-// generalSonicateMaster.m's hardcoded calibration curve (duty-cycle % vs.
-// pressure, MPa) -- not app-configurable in the source, so not exposed as
-// a parameter here either.
-const Eigen::VectorXd& calDutyCurve() {
-    static const Eigen::VectorXd v = [] {
-        Eigen::VectorXd x(7);
-        x << 40, 45, 56, 75, 80, 90, 97.5;
-        return x;
-    }();
-    return v;
-}
-
-const Eigen::VectorXd& calPressureCurve() {
-    static const Eigen::VectorXd v = [] {
-        Eigen::VectorXd x(7);
-        x << 0.75, 1.12, 1.72, 2.95, 3.1, 3.72, 3.92;
-        return x;
-    }();
-    return v;
-}
-
-}  // namespace
-
 SonicateOutcome prepareSonication(const beam::safety::SonicationSafetyParams& params,
                                    double transmissionPeak2Peak, double couplingThreshold,
-                                   bool waitForExternalTrigger) {
+                                   bool waitForExternalTrigger,
+                                   const beam::stimulation::CalibrationCurve& calibration) {
     SonicateOutcome out;
     out.waitForTrigger = waitForExternalTrigger;
     out.durationSeconds = params.endTime - params.startTime;
     out.dutyCycle = beam::stimulation::pressureToDutyCycleGivenTransmission(
-        params.amplitudeMPa, transmissionPeak2Peak, calDutyCurve(), calPressureCurve());
+        params.amplitudeMPa, transmissionPeak2Peak, calibration.dutyPercent, calibration.pressureMpa);
 
     bool finalCheck = true;
     if (transmissionPeak2Peak < couplingThreshold) {

@@ -64,6 +64,12 @@ struct TreatmentLogRow {
     // app.sys.log{i}. Empty for a sham, which sends nothing.
     std::optional<double> attenuation;
     std::optional<double> dutyCycle;
+    // What produced this delivery: the board it went to, and the calibration
+    // curve that set the duty cycle. Semicolon-separated, one CSV cell each.
+    std::string deviceModel;
+    std::string deviceSerial;
+    std::string calDuty;
+    std::string calPressure;
     // Operator-entered, filled in after the fact.
     std::optional<double> responsePain;
     std::optional<double> responseMood;
