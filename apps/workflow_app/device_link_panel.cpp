@@ -100,8 +100,7 @@ DeviceLinkPanel::~DeviceLinkPanel() {
 }
 
 void DeviceLinkPanel::buildWidgets() {
-    // Only as tall as its contents: given slack, the column layout pours it
-    // into the heading and the control row instead of leaving it below.
+    // Only as tall as its contents: given slack, the column layout pours it into the heading
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     lamp_ = new QLabel(this);
     lamp_->setFixedSize(16, 16);
@@ -158,8 +157,7 @@ void DeviceLinkPanel::buildWidgets() {
     auto* row = new QHBoxLayout;
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(8);
-    // Left, not right: the page is wider than the screen, so anything
-    // pushed to its right edge is off the display.
+    // Left, not right: the page is wider than the screen, so anything pushed to its right edge
     row->addWidget(lamp_);
     row->addWidget(status_);
     row->addSpacing(16);
@@ -332,8 +330,7 @@ bool DeviceLinkPanel::runCommand(const std::string& cmd, int startQuietReads,
         bool ok = false;
         const auto started = std::chrono::steady_clock::now();
         try {
-            // The lock keeps a health check from starting one of its own
-            // between this command and its reply.
+            // The lock keeps a health check from starting one of its own between this command
             ok = withLink([&](beam::serialcom::SerialLink& link) {
                 lines = beam::serialcom::sendAndCollect(link, cmd, 100000, startQuietReads);
             });

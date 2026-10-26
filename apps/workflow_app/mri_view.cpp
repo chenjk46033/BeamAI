@@ -166,8 +166,7 @@ void WorkflowMriView::resetView() {
 void WorkflowMriView::centreOn(QPointF normalizedPosition, double minimumZoom) {
     if (image_.isNull()) return;
     zoom_ = std::max(zoom_, std::clamp(minimumZoom, 1.0, 10.0));
-    // From no pan, so the point's position is read off the freshly zoomed
-    // image rather than the one the previous pan was describing.
+    // From no pan, so the point's position is read off the freshly zoomed image rather than the
     pan_ = {};
     const QRectF shown = imageRect();
     const QPointF point(shown.left() + normalizedPosition.x() * shown.width(),
@@ -272,22 +271,15 @@ void WorkflowMriView::mirrorFrom(const WorkflowMriView& source) {
     reverseHorizontal_ = source.reverseHorizontal_;
     reverseVertical_ = source.reverseVertical_;
 
-    // The interaction wiring comes across too, so a detached viewer is a full
-    // peer of its pane rather than a picture of it: fiducials can be dragged
-    // in it, and its context menu offers the same "Move fiducial ... to mouse
-    // point". These are copied on every mirror, not once at creation, because
-    // coordinatePasteOptions_ is refilled with the current marker names each
-    // time showMriPreviews runs.
+    // The interaction wiring comes across too, so a detached viewer is a full peer of its pane
     pointPlacementEnabled_ = source.pointPlacementEnabled_;
     pointPickedHandler_ = source.pointPickedHandler_;
     pointMovedHandler_ = source.pointMovedHandler_;
     markerPickedHandler_ = source.markerPickedHandler_;
     coordinatePasteOptions_ = source.coordinatePasteOptions_;
-    // openViewerHandler_ is deliberately not copied: a detached viewer should
-    // not offer to open another copy of itself.
+    // openViewerHandler_ is deliberately not copied: a detached viewer should not offer to open
 
-    // Zoom and pan stay the detached window's own: it exists to show the
-    // slice larger, so inheriting the pane's framing would defeat that.
+    // Zoom and pan stay the detached window's own: it exists to show the slice larger, so
     update();
 }
 
@@ -299,9 +291,7 @@ void WorkflowMriView::rebuildImage() {
         return;
     }
     const double range = std::max(dataMax_ - dataMin_, 1e-12);
-    // Brightness is an output-level offset centered at 1.0. Therefore moving
-    // the slider right always raises displayed gray levels. Contrast remains
-    // centered around mid-gray and grows as its slider moves right.
+    // Brightness is an output-level offset centered at 1.0.
     const double brightnessOffset = (brightness_ - 1.0) * 0.5;
     QImage result(static_cast<int>(slice_.cols()), static_cast<int>(slice_.rows()), QImage::Format_Grayscale8);
     for (int y = 0; y < result.height(); ++y) {
@@ -340,8 +330,7 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
     if (navigationCrosshairVisible_) {
         const double x = displayed.left() + crosshair_.x() * displayed.width();
         const double y = displayed.top() + crosshair_.y() * displayed.height();
-        // The same green as the target marker, hairline and aliased: it has
-        // to say where the target is without covering the anatomy under it.
+        // The same green as the target marker, hairline and aliased: it has to say where the
         painter.setPen(QPen(QColor(65, 235, 100, 235), 0.0));
         painter.drawLine(QPointF(x, displayed.top()), QPointF(x, displayed.bottom()));
         painter.drawLine(QPointF(displayed.left(), y), QPointF(displayed.right(), y));
@@ -361,13 +350,11 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
         } else {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(marker.color, 1.5));
-            // draggable does not change the drawing: the grab radius below is
-            // a fixed 14 px, and a wider ring hid the donut underneath it.
+            // draggable does not change the drawing: the grab radius below is a fixed 14 px,
             painter.drawEllipse(point, marker.radius, marker.radius);
             if (!marker.label.isEmpty()) {
                 QRectF labelRect(point + QPointF(7, -17), QSizeF(105, 18));
-                // Inside the view: a marker near the right edge would otherwise
-                // have its label clipped away.
+                // Inside the view: a marker near the right edge would otherwise have its label
                 if (labelRect.right() > width() - 2) labelRect.moveRight(point.x() - 7);
                 painter.fillRect(labelRect, QColor(150, 25, 35, 205));
                 painter.setPen(Qt::white);
@@ -412,9 +399,7 @@ void WorkflowMriView::wheelEvent(QWheelEvent* event) {
 }
 
 void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
-    // Placing a point wins over grabbing a handle: measurements are often
-    // started from a corner of an existing one, and grabbing there would
-    // silently drag that instead of beginning the new shape.
+    // Placing a point wins over grabbing a handle: measurements are often started from a corner
     if (measurementInProgress() && event->button() == Qt::LeftButton) {
         if (addMeasurementPoint(event->position())) {
             event->accept();
@@ -426,8 +411,7 @@ void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (event->button() == Qt::LeftButton && pointPlacementEnabled_ && !image_.isNull()) {
-        // Decide on release: a drag pans, a click places. Placing on press
-        // consumed every left press, which left these views unpannable.
+        // Decide on release: a drag pans, a click places.
         pendingPlacement_ = true;
         panning_ = true;
         lastMousePosition_ = event->pos();
@@ -485,8 +469,7 @@ void WorkflowMriView::mouseMoveEvent(QMouseEvent* event) {
     update();
 }
 
-// Hovering a marker names it and gives its position and confidence, so the
-// operator can identify one without going back to the table.
+// Hovering a marker names it and gives its position and confidence, so the operator can
 void WorkflowMriView::showMarkerTooltipAt(const QPointF& widgetPosition,
                                            const QPoint& globalPosition) {
     if (image_.isNull()) return;
@@ -538,9 +521,7 @@ void WorkflowMriView::leaveEvent(QEvent*) {
 
 void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
     updateMouseCoordinate(event->pos());
-    // Capture the point before the menu opens.  Opening a popup can cause
-    // the view to receive leaveEvent(), so reading mouseRasMm_ later would
-    // otherwise produce an empty or changed coordinate.
+    // Capture the point before the menu opens.
     const auto coordinateAtContext = rasAtWidgetPosition(event->pos());
     QMenu menu(this);
     if (contextWidgetFactory_) {
@@ -558,8 +539,6 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
                   .arg(coordinateAtContext->z(), 0, 'f', 3)
             : QStringLiteral("Mouse point is outside the MRI image");
         // Use the same embedded-widget margins as the Marker selector below.
-        // A normal QAction receives Qt's extra menu indentation, which made
-        // this coordinate line start noticeably farther to the right.
         auto* coordinateWidget = new QWidget(&menu);
         auto* coordinateLayout = new QHBoxLayout(coordinateWidget);
         coordinateLayout->setContentsMargins(10, 5, 10, 5);
@@ -593,11 +572,7 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
             connect(moveButton, &QPushButton::clicked, this, [this, targetCombo, coordinateAtContext, &menu] {
                 if (!coordinateAtContext || !pointPickedHandler_) return;
                 if (markerPickedHandler_) markerPickedHandler_(targetCombo->currentIndex());
-                // Explicit relocation: the operator pointed at a place and
-                // named a fiducial, so it belongs at that place -- including
-                // on this view's own slice. Routing it through the drag
-                // handler instead kept the fiducial's old out-of-plane value
-                // and dropped it on a different slice than the one clicked.
+                // Explicit relocation: the operator pointed at a place and named a fiducial, so
                 if (pointMovedHandler_)
                     pointMovedHandler_(*coordinateAtContext);
                 else
@@ -624,8 +599,7 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
     }
     if (lockOverlayHandler_) {
         menu.addSeparator();
-        // Here as well as on the Registration page, so a detached viewer -- the
-        // bigger view the sixteen are easiest to read in -- can turn them off.
+        // Here as well as on the Registration page, so a detached viewer -- the bigger view the
         QAction* overlay = menu.addAction(lockOverlayShown_
                                               ? QStringLiteral("Hide all lock-position targets")
                                               : QStringLiteral("Overlay all lock-position targets"));
@@ -687,8 +661,7 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
     auto* controlsAction = new QWidgetAction(&menu);
     controlsAction->setDefaultWidget(container);
     menu.addAction(controlsAction);
-    // Brightness and contrast belong to the pane, like measurements do, so a
-    // change made in a detached window shows in both.
+    // Brightness and contrast belong to the pane, like measurements do, so a change made in a
     WorkflowMriView* const display = measurementOwner();
     const auto redraw = [this, display] { if (display != this) mirrorFrom(*display); };
     connect(brightnessDown, &QToolButton::clicked, this, [display, redraw] {
@@ -724,10 +697,7 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
 
 void WorkflowMriView::clampPan() {
     const QRectF shown = imageRect();
-    // At fit zoom the full image is visible, but the operator may still
-    // reposition it for comparison with another plane. Retain a bounded
-    // quarter-viewport travel area; once zoomed, expand the bound to cover
-    // the portion of the image extending beyond the viewport.
+    // At fit zoom the full image is visible, but the operator may still reposition it for
     const double maxX = std::max(width() * 0.25, std::abs(shown.width() - width()) / 2.0);
     const double maxY = std::max(height() * 0.25, std::abs(shown.height() - height()) / 2.0);
     pan_.setX(std::clamp(pan_.x(), -maxX, maxX));
@@ -759,9 +729,7 @@ std::optional<Eigen::Vector3d> WorkflowMriView::rasAtWidgetPosition(const QPoint
         return Eigen::Vector3d(horizontalMm, verticalMm, fixedCoordinateMm_);
     return std::nullopt;
 }
-// A detached viewer shows the same plane as its pane, so it shares the pane's
-// measurements rather than keeping its own: one owner, drawn in both windows,
-// editable from either.
+// A detached viewer shows the same plane as its pane, so it shares the pane's measurements
 void WorkflowMriView::setMeasurementPeer(WorkflowMriView* peer) { measurementPeer_ = peer; }
 
 WorkflowMriView* WorkflowMriView::measurementOwner() {
@@ -837,8 +805,7 @@ QPointF WorkflowMriView::normalizedAtWidgetPosition(const QPointF& widgetPositio
                    (widgetPosition.y() - displayed.top()) / displayed.height());
 }
 
-// A measurement belongs to the slice it was drawn on; showing it over any
-// other slice would imply the structure is there too.
+// A measurement belongs to the slice it was drawn on; showing it over any other slice would
 bool WorkflowMriView::measurementShownHere(const Measurement& measurement) const {
     return !measurement.normalized.empty() && measurement.plane == plane_ &&
            std::abs(measurement.sliceMm - fixedCoordinateMm_) < 1e-6;
@@ -938,8 +905,7 @@ void WorkflowMriView::releaseMeasurementVertex() {
     owner->dragVertex_ = -1;
 }
 
-// The placed points, plus the one under the cursor while still drawing, so
-// the number updates as the shape is pulled out.
+// The placed points, plus the one under the cursor while still drawing, so the number updates
 std::vector<Eigen::Vector3d> WorkflowMriView::pointsForSummary(const Measurement& measurement) const {
     const WorkflowMriView* owner = measurementOwner();
     std::vector<Eigen::Vector3d> points = measurement.rasMm;
@@ -970,8 +936,7 @@ QString WorkflowMriView::summaryFor(const Measurement& measurement) const {
     if (points.size() < 3)
         return QStringLiteral("%1 mm").arg((points[1] - points[0]).norm(), 0, 'f', 1);
 
-    // Shoelace over the plane's two varying axes; the third is constant, so
-    // the in-plane projection loses nothing.
+    // Shoelace over the plane's two varying axes; the third is constant, so the in-plane
     const int a = plane_ == QStringLiteral("sagittal") ? 1 : 0;
     const int b = plane_ == QStringLiteral("axial") ? 1 : 2;
     double twiceArea = 0.0;
@@ -1037,9 +1002,7 @@ void WorkflowMriView::paintMeasurement(QPainter& painter, const QRectF& displaye
 
         const QString summary = summaryFor(measurement);
         if (summary.isEmpty()) continue;
-        // While drawing the number rides with the cursor; once finished it
-        // settles on the measurement's own anchor so it stops moving. An angle
-        // labels its vertex, which is where the reader looks.
+        // While drawing the number rides with the cursor; once finished it settles on the
         QPointF anchorPoint = points.front();
         if (drawing) {
             anchorPoint = points.back();
@@ -1057,8 +1020,7 @@ void WorkflowMriView::paintMeasurement(QPainter& painter, const QRectF& displaye
 }
 
 void WorkflowMriView::keyPressEvent(QKeyEvent* event) {
-    // Escape abandons what is being drawn. Finished measurements persist until
-    // "Clear measurements", so Escape never silently discards them.
+    // Escape abandons what is being drawn.
     if (event->key() == Qt::Key_Escape && measurementInProgress()) {
         cancelMeasurementInProgress();
         event->accept();

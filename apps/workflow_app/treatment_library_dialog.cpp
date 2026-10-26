@@ -23,11 +23,7 @@
 namespace beam::app {
 namespace {
 
-// QTableWidget's InternalMove moves ITEMS, not rows: Qt writes the dragged
-// cells over the ones under the cursor and emits no rowsMoved, which left the
-// schedule with duplicated and blanked rows and the store untouched. This
-// table performs no move at all -- it reports which row went where, and the
-// dialog reorders the store and rebuilds the table from it.
+// QTableWidget's InternalMove moves ITEMS, not rows: Qt writes the dragged cells over the ones
 class ScheduleTable final : public QTableWidget {
 public:
     using QTableWidget::QTableWidget;
@@ -75,8 +71,7 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
     resize(targetsPage ? 900 : 1180, 620);
 
     auto* layout = new QVBoxLayout(this);
-    // Whose list this is, above everything it edits. Hidden until the owner
-    // says -- the Protocols page has no such distinction to make.
+    // Whose list this is, above everything it edits.
     scopeBanner_ = new QLabel(this);
     scopeBanner_->setWordWrap(true);
     scopeBanner_->setVisible(false);
@@ -97,10 +92,7 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
     savedNotice_->setStyleSheet(QStringLiteral("QLabel { color: #5fcb96; }"));
     footer->addWidget(savedNotice_);
     footer->addStretch(1);
-    // Three, because this dialog edits a copy and only Save hands it over:
-    // Save writes and stays open for the next edit, Exit writes and leaves,
-    // Cancel leaves without writing, so anything since the last Save is
-    // dropped.
+    // Three, because this dialog edits a copy and only Save hands it over: Save writes and
     auto* buttons = new QDialogButtonBox(this);
     auto* save = buttons->addButton(QDialogButtonBox::Save);
     auto* leave = buttons->addButton(QStringLiteral("Exit"), QDialogButtonBox::AcceptRole);
@@ -122,23 +114,15 @@ TreatmentLibraryDialog::TreatmentLibraryDialog(beam::gui::TreatmentTargetStore s
 }
 
 
-// The points table belongs to the Target List page. A protocol holds no points
-// of its own, so there is nothing of this kind to edit on the Protocols page.
+// The points table belongs to the Target List page.
 
 
 
 
 
-// Reads the table back rather than tracking single cells: the table is small,
-// and a partial write would leave the store disagreeing with what is shown.
+// Reads the table back rather than tracking single cells: the table is small, and a partial
 
-// One pane: the protocol is chosen above, and everything it schedules is one
-// table. A row names a target and says how long it runs for -- the parameters
-// are the target's own and are edited on the Target List page. Rows drag to
-// reorder.
-// One pane, like the schedule: every target in the Target List and every point
-// it defines, in one table, editable in place. A target with several points
-// contributes several rows and repeats its name.
+// One pane: the protocol is chosen above, and everything it schedules is one table.
 void TreatmentLibraryDialog::setSaveHandler(
     std::function<void(const beam::gui::TreatmentTargetStore&)> handler) {
     saveHandler_ = std::move(handler);
@@ -207,10 +191,7 @@ void TreatmentLibraryDialog::buildTargetsTab(QWidget* page) {
          QStringLiteral("End Time (s)"), QStringLiteral("Burst Duration (s)"),
          QStringLiteral("Burst Interval (s)"), QStringLiteral("Pulse Duration (s)"),
          QStringLiteral("Pulse Interval (s)")});
-    // Every column sized to its own label, and none stretched: whichever column
-    // takes the slack ends up several times wider than the numbers in it.
-    // Show decides which row a target fires on, not anything the Target List
-    // edits; the column only invited an edit with no visible effect.
+    // Every column sized to its own label, and none stretched: whichever column takes the slack
     targetTable_->setColumnHidden(2, true);
     targetTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     targetTable_->horizontalHeader()->setStretchLastSection(false);
@@ -278,9 +259,7 @@ void TreatmentLibraryDialog::deleteTarget(const QString& name) {
     for (const auto& protocol : store_.protocols())
         for (const auto& entry : protocol.entries)
             if (entry.target == name.toStdString()) ++scheduled;
-    // A protocol holds only the name, so deleting the target it refers to
-    // leaves that entry with nothing to sonicate. Say so, with the count,
-    // rather than removing the entries silently.
+    // A protocol holds only the name, so deleting the target it refers to leaves that entry
     const QString question =
         scheduled > 0
             ? QStringLiteral("Delete \"%1\"? %2 schedule entr%3 still name it and will have "
@@ -344,8 +323,7 @@ void TreatmentLibraryDialog::reloadTargets(const QString& select) {
     reloadEntries();
 }
 
-// One edited cell belongs to one point of one target; the rest of that target's
-// points are carried through untouched.
+// One edited cell belongs to one point of one target; the rest of that target's points are
 void TreatmentLibraryDialog::commitTargetRow(int row) {
     if (row < 0 || row >= static_cast<int>(targetRows_.size())) return;
     const auto [targetIndex, pointIndex] = targetRows_[static_cast<std::size_t>(row)];
@@ -401,9 +379,6 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
     outer->addLayout(top);
 
     // Number, Name, Duration, Amplitude -- the columns BeamV0's
-    // treatmentProtocolTables(i).blank.Data actually carries. Burst and pulse
-    // values are not here because a protocol does not own them: they live on
-    // the target, in protocolTables, and are edited on the Target List page.
     auto* schedule = new ScheduleTable(0, 4, page);
     entryTable_ = schedule;
     entryTable_->setHorizontalHeaderLabels({QStringLiteral("#"), QStringLiteral("Target"),
@@ -413,8 +388,7 @@ void TreatmentLibraryDialog::buildProtocolsTab(QWidget* page) {
     entryTable_->verticalHeader()->setVisible(false);
     entryTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     entryTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    // Drag a row to reorder the schedule. The drop is handled by ScheduleTable
-    // above, which reorders the store rather than the widget.
+    // Drag a row to reorder the schedule.
     entryTable_->setDragEnabled(true);
     entryTable_->setAcceptDrops(true);
     entryTable_->setDragDropMode(QAbstractItemView::InternalMove);
@@ -530,10 +504,7 @@ void TreatmentLibraryDialog::deleteScheduleEntry(int row) {
     reloadEntries();
 }
 
-// Fills the one table: the entry's own duration, then this protocol's copy of
-// that target's first point. A target scheduled twice shares one copy, so the
-// parameter columns of both its rows move together -- only the duration is
-// per-entry, which is what BeamV0's schedule varies.
+// Fills the one table: the entry's own duration, then this protocol's copy of that target's
 void TreatmentLibraryDialog::reloadEntries() {
     if (entryTable_ == nullptr) return;
     reloadingPoints_ = true;
@@ -550,9 +521,7 @@ void TreatmentLibraryDialog::reloadEntries() {
             order->setFlags(order->flags() & ~Qt::ItemIsEditable);
             entryTable_->setItem(row, 0, order);
 
-            // Editable: changing which target a row schedules is the main edit
-            // this table exists for. commitScheduleRow refuses a name the
-            // Target List does not define rather than storing a dangling one.
+            // Editable: changing which target a row schedules is the main edit this table
             auto* name = new QTableWidgetItem(target);
             name->setToolTip(QStringLiteral("A name from the Target List"));
             entryTable_->setItem(row, 1, name);
@@ -569,9 +538,7 @@ void TreatmentLibraryDialog::reloadEntries() {
     reloadingPoints_ = false;
 }
 
-// One edited cell: the duration belongs to that entry, every other column to
-// the protocol's copy of the target. Points past the first are preserved --
-// the row shows only the first, and must not delete the rest.
+// One edited cell: the duration belongs to that entry, every other column to the protocol's
 void TreatmentLibraryDialog::commitScheduleRow(int row) {
     const QString protocol = selectedProtocol();
     const auto* definition = store_.findProtocol(protocol.toStdString());
@@ -586,8 +553,7 @@ void TreatmentLibraryDialog::commitScheduleRow(int row) {
         if (store_.findTarget(typed.toStdString()) != nullptr) {
             entry.target = typed.toStdString();
         } else if (typed != QString::fromStdString(entry.target)) {
-            // Storing it would leave the protocol naming something that cannot
-            // be sonicated, which only shows up later as a dangling warning.
+            // Storing it would leave the protocol naming something that cannot be sonicated,
             QMessageBox::warning(this, QStringLiteral("Unknown target"),
                                  QStringLiteral("\"%1\" is not in the Target List. Add it there "
                                                 "first, or use one of its names.")
@@ -610,10 +576,6 @@ void TreatmentLibraryDialog::commitScheduleRow(int row) {
 }
 
 // After a drag: the table's row order is the schedule's new order.
-// By index, not by reading the table back: the old version matched rows to
-// stored entries by target name and duration, which cannot tell two identical
-// sonications apart -- and a protocol that schedules the same target twice is
-// ordinary.
 void TreatmentLibraryDialog::moveScheduleEntry(int from, int to) {
     const QString protocol = selectedProtocol();
     const auto* definition = store_.findProtocol(protocol.toStdString());

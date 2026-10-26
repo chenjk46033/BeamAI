@@ -54,8 +54,7 @@ void Scene3DView::setCentreMm(const Eigen::Vector3d& centreMm) {
 Eigen::Matrix3d Scene3DView::basis() const {
     const double a = azimuthDeg_ * kDegToRad;
     const double e = elevationDeg_ * kDegToRad;
-    // Toward the viewer, from the two angles. IS is up, so elevation tilts
-    // out of the LR/AP plane.
+    // Toward the viewer, from the two angles.
     const Eigen::Vector3d toward(std::cos(e) * std::sin(a), -std::cos(e) * std::cos(a),
                                  std::sin(e));
     const Eigen::Vector3d worldUp(0.0, 0.0, 1.0);
@@ -115,9 +114,7 @@ void Scene3DView::paintEvent(QPaintEvent*) {
     std::sort(order.begin(), order.end(),
               [](const Drawable& a, const Drawable& b) { return a.depth < b.depth; });
 
-    // Markers go in a pass of their own, over everything: a slice is a sheet
-    // the width of the head, and depth-sorting would bury every target behind
-    // it.
+    // Markers go in a pass of their own, over everything: a slice is a sheet the width of the
     for (std::size_t i = 0; i < points_.size(); ++i)
         order.push_back({depthOf(points_[i].positionMm, m), 2, i});
 
@@ -128,8 +125,7 @@ void Scene3DView::paintEvent(QPaintEvent*) {
             const QPointF tl = project(plane.cornersMm[0], m);
             const QPointF tr = project(plane.cornersMm[1], m);
             const QPointF bl = project(plane.cornersMm[3], m);
-            // Orthographic: the plane's map to the screen is affine, so three
-            // corners fix it exactly and QTransform carries the image there.
+            // Orthographic: the plane's map to the screen is affine, so three corners fix it
             const double w = std::max(1, plane.image.width());
             const double h = std::max(1, plane.image.height());
             const QTransform to(

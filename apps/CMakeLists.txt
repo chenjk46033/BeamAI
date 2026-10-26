@@ -80,6 +80,7 @@ if(Qt6_FOUND AND TARGET gui_qt)
     target_link_libraries(beam_app PRIVATE gui gui_qt correction safety serialcom infra_dicom Qt6::Widgets Qt6::Charts)
     beam_deploy_qt_platform(beam_app)
 
+
     # New workflow-first application. Its layout is maintained in Qt Designer
     # XML; this remains separate from beam_app while BeamV0 behavior is audited.
     add_executable(workflow_app
@@ -90,6 +91,14 @@ if(Qt6_FOUND AND TARGET gui_qt)
         workflow_app/registration_fiducial_layout.hpp
         workflow_app/workflow_window.cpp
         workflow_app/workflow_window.hpp
+        workflow_app/workflow_internal.hpp
+        workflow_app/workflow_viewers.cpp
+        workflow_app/workflow_imaging.cpp
+        workflow_app/workflow_registration.cpp
+        workflow_app/fiducials.cpp
+        workflow_app/registration_page.cpp
+        workflow_app/workflow_stages.cpp
+        workflow_app/workflow_correction.cpp
         # The Treatment plan and Treatment stage bodies (BeamV0's Sonicate tab,
         # re-homed into this workflow's stage model). Its own translation unit
         # so the shell's constructor does not grow another several hundred
@@ -97,6 +106,14 @@ if(Qt6_FOUND AND TARGET gui_qt)
         workflow_app/treatment_library_dialog.cpp
         workflow_app/treatment_library_dialog.hpp
         workflow_app/treatment_plan_body.cpp
+        workflow_app/treatment_internal.hpp
+        workflow_app/patient_management.cpp
+        workflow_app/target_store.cpp
+        workflow_app/plan_grid.cpp
+        workflow_app/visit_state.cpp
+        workflow_app/sonication_delivery.cpp
+        workflow_app/case_report.cpp
+        workflow_app/session_file.cpp
         # "Open viewer in a new window": a larger, Escape-closable window for
         # one MRI plane, driving that pane's own slice controls.
         workflow_app/detached_viewer.cpp

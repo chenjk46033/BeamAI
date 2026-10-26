@@ -58,8 +58,7 @@ std::string joinValues(const Eigen::VectorXd& values) {
 
 namespace beam::app {
 
-// The curve that turns a wanted pressure into a duty cycle. A file, so the
-// value delivered can be traced to the calibration in force at the time.
+// The curve that turns a wanted pressure into a duty cycle.
 void WorkflowWindow::loadCalibrationCurve() {
     calibration_ = beam::stimulation::defaultCalibrationCurve();
     calibrationFromFile_ = false;
@@ -83,8 +82,6 @@ std::string WorkflowWindow::calibrationPressureText() const { return joinValues(
 namespace beam::app {
 
 // The fiducials the registration was solved from, in MRI RAS millimetres.
-// Stored rather than the transform: the transform is a deterministic
-// function of these, and these are what an operator can check.
 QString WorkflowWindow::fiducialsAsText() const {
     QStringList parts;
     for (const beam::registration::FiducialMarker& marker : fiducials_) {

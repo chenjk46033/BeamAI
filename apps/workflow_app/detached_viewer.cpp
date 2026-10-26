@@ -1,17 +1,4 @@
-// "Open viewer in a new window" -- a larger, resizable window showing one
-// MRI plane, with the same controls as the pane it came from.
-//
-// Modelled on Beam's own construct (libs/gui_qt/src/mri_slice_view.cpp's
-// openStandaloneViewer: a separate top-level window holding a second view,
-// sized a multiple of the pane's, closed by Escape). Two differences follow
-// from how this application is built:
-//
-//   * The slice controls live in the Designer form next to each pane, not
-//     inside the view. Rather than give the window its own slice state, its
-//     buttons and slider drive the pane's own widgets -- so the two can never
-//     disagree, and closing the window loses nothing.
-//   * The view is refreshed by mirroring the pane (WorkflowMriView::mirrorFrom)
-//     each time showMriPreviews runs, instead of re-deriving the slice here.
+// "Open viewer in a new window" -- a larger, resizable window showing one MRI plane, with the
 
 #include "workflow_window.hpp"
 
@@ -46,8 +33,7 @@ constexpr int kMinViewerSide = 520;
 }  // namespace
 
 
-// The scene the 3D window shows: the three slices where they really sit, the
-// transducer around them, and every point worth seeing in depth.
+// The scene the 3D window shows: the three slices where they really sit, the transducer around
 void WorkflowWindow::buildScene(Scene3DView* view) {
     if (view == nullptr || !mriLoaded_) return;
     const auto& lr = mriAxes_.dimLR;
@@ -133,8 +119,7 @@ void WorkflowWindow::buildScene(Scene3DView* view) {
 }
 
 
-// Its own top-level window, never a fourth pane: a pane would take width from
-// the three MRI views, and those are the instrument.
+// Its own top-level window, never a fourth pane: a pane would take width from the three MRI
 void WorkflowWindow::openSceneWindow() {
     if (!mriLoaded_) {
         showMessage(QStringLiteral("Load the patient MRI before opening the 3D view."), true);
@@ -165,8 +150,7 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
         showMessage(QStringLiteral("Load the patient MRI before opening a separate viewer."), true);
         return;
     }
-    // One window per plane: re-triggering raises the existing one rather than
-    // stacking duplicates that would all mirror the same pane.
+    // One window per plane: re-triggering raises the existing one rather than stacking
     for (const DetachedViewer& open : detachedViewers_) {
         if (open.source == source) {
             open.window->raise();
@@ -195,8 +179,7 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
     view->setContextWidgetFactory(source->contextWidgetFactory());
     layout->addWidget(view, 1);
 
-    // The control row drives the pane's own widgets, so this window never
-    // holds slice state of its own.
+    // The control row drives the pane's own widgets, so this window never holds slice state of
     auto* controls = new QHBoxLayout;
     const auto mirrorButton = [&](QToolButton* origin, const QString& fallbackText) {
         auto* button = new QToolButton(window);
@@ -249,7 +232,6 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
     auto* closeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), window);
     connect(closeShortcut, &QShortcut::activated, window, [window, view] {
         // Same rule as the panes: abandon a half-drawn shape, otherwise close.
-        // Finished measurements go only through "Clear measurements".
         if (view->measurementInProgress()) {
             view->cancelMeasurementInProgress();
             return;
@@ -274,9 +256,7 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
     window->activateWindow();
 }
 
-// Called at the end of showMriPreviews: every open viewer re-copies its
-// source pane, so slice changes, overlays, markers and brightness all follow
-// without this file knowing how any of them are assembled.
+// Called at the end of showMriPreviews: every open viewer re-copies its source pane, so slice
 void WorkflowWindow::refreshDetachedViewers() {
     for (const DetachedViewer& open : detachedViewers_) {
         open.view->mirrorFrom(*open.source);
@@ -284,9 +264,7 @@ void WorkflowWindow::refreshDetachedViewers() {
     }
 }
 
-// Every pane offers the same context-menu entry. The window it opens drives
-// that pane's own slider and buttons, so the plane has one source of truth
-// whether or not a viewer is open.
+// Every pane offers the same context-menu entry.
 void WorkflowWindow::wireDetachedViewerMenus() {
     struct Pane {
         WorkflowMriView* view;
@@ -329,8 +307,7 @@ void WorkflowWindow::wireDetachedViewerMenus() {
             openDetachedViewer(captured.view, QString::fromLatin1(captured.title), captured.slider,
                                captured.previous, captured.next, captured.reset, captured.label);
         });
-        // Only the Registration panes carry the overlay, which is what their
-        // lock position is for.
+        // Only the Registration panes carry the overlay, which is what their lock position is
         if (pane.view == ui_->registrationSagittalPreview ||
             pane.view == ui_->registrationCoronalPreview ||
             pane.view == ui_->registrationAxialPreview) {

@@ -10,9 +10,7 @@
 #include <utility>
 
 RegistrationFiducialLayout::RegistrationFiducialLayout(QWidget* parent) : QWidget(parent) {
-    // The registration window controls the pane height; do not impose the
-    // old 190-pixel minimum, which leaves an empty band above the Restore
-    // button when the compact layout is used.
+    // The registration window controls the pane height; do not impose the old 190-pixel
     setMinimumSize(300, 0);
     setCursor(Qt::PointingHandCursor);
     setToolTip(QStringLiteral("Select a fiducial from the left or right array layout"));
@@ -51,8 +49,7 @@ std::array<QPointF, 6> RegistrationFiducialLayout::markerCenters() const {
     const double midY = height() / 2.0 - 2.0;
 
     if (hasPositions_) {
-        // Screen axes against patient axes: x grows as AP shrinks (anterior to
-        // the left of the panel), y grows as IS shrinks (superior at the top).
+        // Screen axes against patient axes: x grows as AP shrinks (anterior to the left of the
         std::array<QPointF, 6> offset{};
         for (int i = 0; i < 6; ++i)
             offset[i] = QPointF(-positionsApIsMm_[i].x(), -positionsApIsMm_[i].y());
@@ -73,9 +70,7 @@ std::array<QPointF, 6> RegistrationFiducialLayout::markerCenters() const {
             spanY = std::max(spanY, hiY - loY);
         }
 
-        // One isotropic scale for both sides: anything else would distort the
-        // angles, which is the whole point of drawing the measured shape, and
-        // would stop the two triangles being comparable to each other.
+        // One isotropic scale for both sides: anything else would distort the angles, which is
         if (spanX > 1e-6 && spanY > 1e-6) {
             const double scale = std::min(budgetWidth / spanX, budgetHeight / spanY);
             std::array<QPointF, 6> points{};
@@ -91,8 +86,7 @@ std::array<QPointF, 6> RegistrationFiducialLayout::markerCenters() const {
         }
     }
 
-    // Fallback: the nominal shape, which is a right triangle with a 22.5 mm
-    // front-to-back arm and a 20.0 mm top-to-bottom one.
+    // Fallback: the nominal shape, which is a right triangle with a 22.5 mm front-to-back arm
     constexpr double kArmRatio = 20.0 / 22.5;
     const double triangleWidth = budgetWidth;
     const double triangleHeight = std::min(triangleWidth * kArmRatio, budgetHeight);
@@ -151,8 +145,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         painter.drawPath(triangle);
     }
 
-    // Kept so the name labels below can treat them as obstacles: at a narrow
-    // pane width an edge midpoint lands right where a name wants to sit.
+    // Kept so the name labels below can treat them as obstacles: at a narrow pane width an edge
     std::array<QRectF, 6> lengthBoxes{};
     {
         QFont lengthFont = painter.font();
@@ -182,9 +175,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         }
     }
 
-    // The corner angles, drawn just inside each vertex. Worth showing because
-    // the nominal array is a right triangle and a measured one is not: the
-    // number is where that difference becomes readable.
+    // The corner angles, drawn just inside each vertex.
     {
         QFont angleFont = painter.font();
         angleFont.setPointSizeF(std::max(7.5, angleFont.pointSizeF() - 1.5));
@@ -205,8 +196,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
                 constexpr double kPi = 3.14159265358979323846;
                 const QString text =
                     QStringLiteral("%1°").arg(std::acos(cosine) * 180.0 / kPi, 0, 'f', 0);
-                // Step in from the vertex towards the centre, so the number sits
-                // inside the corner it belongs to and clear of the name label.
+                // Step in from the vertex towards the centre, so the number sits inside the
                 QPointF inward = centroid - at;
                 const double reach = std::hypot(inward.x(), inward.y());
                 if (reach > 1.0) inward *= 24.0 / reach;
@@ -229,10 +219,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
     const QFontMetricsF coordinateMetrics(coordinateFont);
     painter.setFont(labelFont);
 
-    // Place every label before drawing any, so overlaps can be resolved. Each
-    // one starts outward from its own triangle's centre and inside that
-    // triangle's half of the pane; without the half, the two inner vertices
-    // both write into the gap between the triangles.
+    // Place every label before drawing any, so overlaps can be resolved.
     struct Placement {
         QRectF box;
         Qt::Alignment alignment = Qt::AlignVCenter;
@@ -266,11 +253,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
                              nameHeight};
     }
 
-    // Two vertices at nearly the same height -- markers 5 and 6 are 2 mm apart
-    // on some scans -- would otherwise land in one strip. Compared across both
-    // triangles, since labels are no longer confined to one half. Move the later block
-    // clear of the earlier, below it when the pane has room and above it when
-    // it does not.
+    // Two vertices at nearly the same height -- markers 5 and 6 are 2 mm apart on some scans --
     for (int index = 1; index < 6; ++index) {
         for (int pass = 0; pass < 3; ++pass) {
             bool moved = false;
@@ -284,8 +267,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
                     placements[index].box.moveBottom(blocker.top() - 2.0);
                 return true;
             };
-            // The red side lengths are drawn already and do not move, so a name
-            // that lands on one steps aside rather than overprinting it.
+            // The red side lengths are drawn already and do not move, so a name that lands on
             for (const QRectF& length : lengthBoxes) moved = clearOf(length) || moved;
             for (int other = 0; other < index; ++other) {
                 if (!placements[index].box.intersects(placements[other].box)) continue;
@@ -300,8 +282,7 @@ void RegistrationFiducialLayout::paintEvent(QPaintEvent*) {
         }
     }
 
-    // Every label, marker 1 included: it is the top vertex, so its block is
-    // placed above the point and would otherwise sit on the pane border.
+    // Every label, marker 1 included: it is the top vertex, so its block is placed above the
     for (Placement& at : placements) {
         constexpr double kInset = 10.0;
         at.box.moveTop(std::clamp(at.box.top(), kInset,

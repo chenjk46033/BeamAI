@@ -26,8 +26,7 @@
 #include "mri/ras_transform.hpp"
 #include "registration/array_transform.hpp"
 #include "stimulation/calibration_curve.hpp"
-// Needed complete, not forward-declared: targetSonications_ stores vectors of
-// StimParamRow by value.
+// Needed complete, not forward-declared: targetSonications_ stores vectors of StimParamRow by
 #include "gui_qt/stim_param_table_model.hpp"
 
 QT_BEGIN_NAMESPACE
@@ -58,8 +57,7 @@ class QWidget;
 class QGroupBox;
 QT_END_NAMESPACE
 
-// The Treatment plan and Treatment stages reuse BeamV0's own Sonicate-tab
-// models and plots; see treatment_plan_body.cpp.
+// The Treatment plan and Treatment stages reuse BeamV0's own Sonicate-tab models and plots; see
 namespace beam::gui_qt {
 class PulseWaveformView;
 class StimParamTableModel;
@@ -97,16 +95,13 @@ private:
     bool registrationFitApplied() const;
     bool registrationLockPositionRegistered() const;
     void setRegistrationPhase(RegistrationPhase phase);
-    // Dark text on a light field. Anything built after the constructor has to
-    // ask for this, or it is typed into invisibly.
+    // Dark text on a light field.
     static void styleInputField(QLineEdit* edit);
     void selectStage(beam::gui::WorkflowStage stage);
-    // Navigates to workflow_.nextStage() by a row the list actually shows:
-    // four stages are folded into other tabs and their rows are hidden.
+    // Navigates to workflow_.nextStage() by a row the list actually shows: four stages are
     void goToNextStage();
     void completeCurrentStage();
-    // Where the three imaging dialogs open: the last place one was used,
-    // falling back to the MRI library.
+    // Where the three imaging dialogs open: the last place one was used, falling back to the
     QString imagingStartDirectory() const;
     void rememberImagingDirectory(const QString& path);
 
@@ -127,10 +122,7 @@ private:
     void initializeRegistrationGeometry();
     void populateRegistrationTable();
     void navigateToRegistrationFiducial(int row);
-    // Not focusTreatmentViewsOn: that writes targetMm_, and looking at a
-    // marker must not edit the planned target.
-    // announce: the operator picked it, so say so. Entering the stage moves
-    // here on its own and should not narrate it.
+    // Not focusTreatmentViewsOn: that writes targetMm_, and looking at a marker must not edit
     void navigateToFiducialOnTreatment(int index, bool announce = true);
     // False when fewer than six fiducials exist.
     bool fiducialDiagramData(std::array<QString, 6>* labels,
@@ -141,8 +133,7 @@ private:
     void performCurrentPositionRegistration();
     void acceptFiducialRegistration();
     void applyRegistrationResult(beam::registration::AffineArrayResult result);
-    // heldAxis is the axis the clicked plane cannot measure (0=LR, 1=AP,
-    // 2=IS); it keeps its current value. -1 writes all three.
+    // heldAxis is the axis the clicked plane cannot measure (0=LR, 1=AP, 2=IS); it keeps its
     void placeSelectedFiducial(const Eigen::Vector3d& positionMm, int heldAxis = -1);
     void confirmSelectedFiducial();
     QString currentMriGeometry() const;
@@ -166,50 +157,33 @@ private:
     void refresh();
     void setMriPathDisplay(const QString& path);
     void updateCouplingCharts(double transmissionAmp);
-    // Throws the measurement away -- the plots, the numbers and the reading
-    // treatment would have used -- so the next Run starts from nothing.
+    // Throws the measurement away -- the plots, the numbers and the reading treatment would
     void clearCouplingMeasurement();
-    // The top-bar ABORT follows one thing only: whether something is being
-    // delivered right now. It is on every page, so it is the one control that
-    // has to mean the same thing everywhere.
+    // The top-bar ABORT follows one thing only: whether something is being delivered right now.
     void updateAbortButton();
-    // checkSonicationSafety.m: re-run every time a parameter is typed, and
-    // the gate on whether anything may be sent.
+    // checkSonicationSafety.m: re-run every time a parameter is typed, and the gate on whether
     void updateSonicationSafety();
-    // updateSonicateSettingsForCurrentSonication.m: the schedule's Duration
-    // goes onto the grid when a sonication becomes the current one.
+    // updateSonicateSettingsForCurrentSonication.m: the schedule's Duration goes onto the grid
     void applyScheduledDurationToGrid();
-    // The same rules over every sonication still to run, so one that cannot
-    // be delivered is visible before the visit reaches it. Advisory: what
-    // stops a delivery is still the check against the grid at fire time.
+    // The same rules over every sonication still to run, so one that cannot be delivered is
     void precheckPendingSonications();
     // It rewrites the rows it read, so it must not answer its own change.
     bool prechecking_ = false;
     // Writes a refused attempt into the row's notes.
     void recordRefusedSonication(bool sham);
-    // SonicateButtonPushed ends with `if mod(i,4)==0 RunCorrectionButtonPushed`:
-    // coupling is re-measured every fourth delivery, because gel dries and
-    // the subject moves and the figure taken at the start of the visit goes
-    // stale. `delivered` is the sonication number that just ran.
+    // SonicateButtonPushed ends with `if mod(i,4)==0 RunCorrectionButtonPushed`: coupling is
     void remeasureCouplingIfDue(int delivered);
     static constexpr int kCouplingRecheckEvery = 4;
-    // Set while the periodic re-measurement is running. A measurement the
-    // operator asked for re-opens the Correction stage for acceptance; one
-    // the treatment takes on its own must not, or every fourth sonication
-    // would tear down the workflow it is part of.
+    // Set while the periodic re-measurement is running.
     bool autoCouplingRecheck_ = false;
-    // The shipped Target List, as installed. Never written to, so it is what
-    // "the original value" means: a parameter edited past recognition has
-    // somewhere to come back from.
+    // The shipped Target List, as installed.
     beam::gui::TreatmentTargetStore shippedTargets_;
     void loadShippedTargetStore();
     // Puts the selected target's parameters back to the shipped ones.
     void restoreShippedParameters();
-    // The shipped value of one grid cell, or nothing when there is no
-    // shipped target behind it.
+    // The shipped value of one grid cell, or nothing when there is no shipped target behind it.
     std::optional<double> shippedValueFor(int column) const;
-    // "Shipped value: 0.03 (now 0.5)", or nothing for a cell the install has
-    // no value for.
+    // "Shipped value: 0.03 (now 0.5)", or nothing for a cell the install has no value for.
     QString shippedTooltip(const QModelIndex& cell) const;
     bool deliveryRunning() const;
     void setExecutionStatus(const QString& text, bool isError = false);
@@ -217,8 +191,7 @@ private:
     void syncMriViewerHeights();
     void capWindowToScreen();
 
-    // "Open viewer in a new window" -- detached_viewer.cpp. One window per
-    // pane, driving that pane's own slice controls rather than holding state.
+    // "Open viewer in a new window" -- detached_viewer.cpp.
     struct DetachedViewer {
         QWidget* window = nullptr;
         WorkflowMriView* view = nullptr;
@@ -242,9 +215,7 @@ private:
     void updateStimGridHeight();
     void loadTreatmentProtocol(const QString& protocolName);
     QString treatmentDataDirectory() const;
-    // The install's own files -- the protocol/target library and the list of
-    // people treated on it -- live in treatmentDataDirectory(). What belongs
-    // to one person lives here, under them.
+    // The install's own files -- the protocol/target library and the list of people treated on
     QString patientDataDirectory() const;
     QString patientsPath() const;
     // The operator's device-wide copy of a data file, else the shipped seed.
@@ -254,31 +225,24 @@ private:
     QString patientTargetsPath() const;
     void loadPatientRegistry();
     void savePatientRegistry();
-    // The list of people on this device, on the Case page. Typing the exact
-    // Participant ID was the only way in, with nothing on screen to say who
-    // was already on file.
+    // The list of people on this device, on the Case page.
     void buildPatientChooser();
     void refreshPatientChooser();
-    // The registry id on one chooser row. Rows are filtered and sorted, so
-    // their position no longer says which patient they are.
+    // The registry id on one chooser row.
     int patientIdAtRow(int row) const;
     // Builds the Case page demographics fields; fills them from a patient.
-    // The Report stage: the case report for one visit, and the file that
-    // carries it off the device.
     void buildReportBody();
     void refreshReport();
     void exportCaseReport();
     void exportCaseReportPdf();
-    // The portable session: one subject plus the imaging and registration
-    // needed to resume. See gui/treatment_session.hpp.
+    // The portable session: one subject plus the imaging and registration needed to resume.
     void saveTreatmentSessionFile();
     void chooseTreatmentSession();
     void loadTreatmentSessionFile(const beam::gui::TreatmentSessionFile& session,
                                   const QString& path);
     QString patientFileText(const QString& name) const;
     QString caseReportHtml(int visit) const;
-    // What an exported report is called: BeamV0's computeCrfAutoSaveFilename,
-    // sanitised for the filesystem. One place, so the format is one edit.
+    // What an exported report is called: BeamV0's computeCrfAutoSaveFilename, sanitised for the
     QString caseReportFileStem(const beam::gui::Patient& patient,
                                const beam::gui::CaseReportForm& crf, int visit) const;
     // Where this patient's reports are kept, and what is already in there.
@@ -289,53 +253,37 @@ private:
     void showCaseDemographics(const beam::gui::Patient& patient);
     // What the Case page currently says about who is being treated.
     beam::gui::Patient caseDemographics() const;
-    // Blank, or YYYY-MM-DD. False for anything else, so a typo is reported
-    // rather than quietly dropped.
+    // Blank, or YYYY-MM-DD.
     static bool readDateOfBirth(const QString& text, std::string* out);
     // Edit, or delete, the patient on one row of the chooser.
     void showPatientMenu(int row, const QPoint& globalPosition);
     void editPatient(int patientId);
     void deletePatient(int patientId, int plannedRows);
-    // How many sonications this patient has had. Zero is the gate on deleting
-    // them. plannedRows, when given, counts the rows that never fired.
+    // How many sonications this patient has had.
     int patientDeliveryCount(int patientId, int* plannedRows) const;
-    // Opens the record of whoever the Case page names, writing out whoever was
-    // open before. Adds them if this device has not treated them.
-    // advancing: the caller is leaving the Case page, so the message says to
-    // load an MRI next. Otherwise it points at the list, which has just
-    // changed and is the reason to have stayed.
+    // Opens the record of whoever the Case page names, writing out whoever was open before.
     void selectPatient(const beam::gui::Patient& details, bool advancing);
     // Both Case buttons agree about what is acceptable by asking this.
     bool caseFieldsUsable();
-    // Reads this patient's log and visit state in place of whoever was there,
-    // and puts the treatment plan on their visits.
+    // Reads this patient's log and visit state in place of whoever was there, and puts the
     void loadPatientData();
     void savePatientData();
-    // Moves a pre-patient install's record under the first patient identified
-    // on it. Idempotent: it moves what is there and nothing else.
+    // Moves a pre-patient install's record under the first patient identified on it.
     void adoptLegacyPatientData(int patientId);
-    // Throws away everything measured on a person -- their MRI, the fiducials
-    // found in it, the registration fitted to them and the array position it
-    // placed -- putting those pages back to the state the application starts
-    // in. A different patient's head must not be on screen.
+    // Throws away everything measured on a person -- their MRI, the fiducials found in it, the
     void clearPatientImagingAndRegistration();
     QString currentProtocolName() const;
     void loadTreatmentTargetStore();
     void refreshProtocolCombo(const QString& select);
     void writeProtocolGridToStore();
-    // announce: the "log updated at ..." confirmation. The log saves itself on
-    // every change with no button to press, so normally the operator has to be
-    // told it happened. A save the application takes on its own -- closing one
-    // patient to open another -- is not something they asked for, and saying so
-    // buries what they did ask about.
+    // announce: the "log updated at ..." confirmation.
     void saveTreatmentTargetStore(bool announce = true);
     int currentVisitNumber() const;
     void recordSonicationStart(const beam::gui_qt::StimParamRow& row, bool sham,
                                std::optional<double> attenuation,
                                std::optional<double> dutyCycle);
     void closeOpenLogRow(bool aborted = false);
-    // Sonicate always runs the treatment table row for the current sonication
-    // number; this puts the Target List back on it before firing.
+    // Sonicate always runs the treatment table row for the current sonication number; this puts
     bool selectScheduledTarget();
     static QByteArray wavFromSamples(const std::vector<double>& samples, int sampleRate);
     void playShamAudio(const std::vector<double>& samples, int sampleRate);
@@ -350,40 +298,31 @@ private:
     void refreshVisitCombo();
     // Selects a visit by number, whatever the item happens to read.
     void selectVisit(int visit);
-    // Whether that visit has been created: it has rows, or it was created
-    // empty and is remembered as such.
+    // Whether that visit has been created: it has rows, or it was created empty and is
     bool visitExists(const QString& protocol, int visit) const;
     // Creates the next empty visit of the current protocol and goes to it.
     void startNewVisit();
     // Drops a visit that has delivered nothing, and goes to whatever is left.
     void deleteVisit(int visit);
-    // Points the treatment sonications still to come at whichever screened
-    // targets scored best. BeamV0 does this after every delivery.
+    // Points the treatment sonications still to come at whichever screened targets scored best.
     void applyTargetRanking(bool quiet = false);
     // The same, skipped when the operator has turned ranking off.
     void applyTargetRankingIfAutomatic();
     bool automaticRankingOn() const;
-    // Says which rows the plan screens with and which it treats with, read
-    // off the durations by the same scan the ranking uses.
+    // Says which rows the plan screens with and which it treats with, read off the durations by
     void updatePlanBlocksLabel();
-    // Opens the note on one sonication for editing. A note is a running
-    // record, so the box opens on a fresh stamped line.
+    // Opens the note on one sonication for editing.
     void editRowNotes(int sequence);
-    // Which visit a protocol should open on: visits belong to a protocol, so
-    // the number showing for the last one means nothing here.
+    // Which visit a protocol should open on: visits belong to a protocol, so the number showing
     int visitForProtocol(const std::string& protocol) const;
-    // visitSonication_ outlives the session: the operator sets where a visit is
-    // and expects to find it there after a restart.
+    // visitSonication_ outlives the session: the operator sets where a visit is and expects to
     void loadVisitState();
     void saveVisitState() const;
     void markVisitEdited(const QString& protocol, int visit);
-    // One scheduled sonication, as the row a visit holds: the target's own
-    // parameters, with the schedule contributing only the duration.
+    // One scheduled sonication, as the row a visit holds: the target's own parameters, with the
     beam::gui::TreatmentLogRow rowForTarget(const std::string& target,
                                             std::optional<double> durationSeconds) const;
     // Appends every sonication of the chosen protocol to the current visit.
-    // Puts every sonication of a chosen protocol into this visit, after the
-    // given row. Zero, or a row nothing may follow, puts them at the end.
     void addProtocolToVisit(int afterSequence);
     // Appends one sonication, the target chosen by the operator.
     void addRowToVisit();
@@ -400,13 +339,13 @@ private:
     void updateBestTargets();
     void updateExampleTargetImage();
 
-    // Treatment stage: the firing half of that tab, gated behind Safety
-    // Review by the workflow model rather than by a button's enabled state.
+    // Treatment stage: the firing half of that tab, gated behind Safety Review by the workflow
     void buildTreatmentExecutionBody(const QString& acceptButtonStyle);
     void buildDeviceLinkPanel();
     void loadCalibrationCurve();
     QString mriGeometryFingerprint() const;
     QString fiducialsAsText() const;
+    void buildRegistrationPage();
     std::string calibrationDutyText() const;
     std::string calibrationPressureText() const;
     void startCorrectionMeasurement(std::function<void()> then);
@@ -420,21 +359,9 @@ private:
 
     // app.sys.RTT(1).couplingThreshold. beam_app's port uses the same value.
     static constexpr double kCouplingThreshold = 0.10;
-    // Height the Treatment plan body is guaranteed under the MRI viewers; it
-    // scrolls below that rather than squeezing them. syncMriViewerHeights
-    // reserves it so the viewers stay the same size as on the other stages.
-    // Raised in step with the Treatment viewers shrinking: the page is at its
-    // minimum height, so the plan body can only grow by taking from them.
+    // Height the Treatment plan body is guaranteed under the MRI viewers; it scrolls below that
     static constexpr int kTreatmentBodyMinHeight = 360;
-    // Fixed viewer height for the Treatment plan stage, which shares its page
-    // with the whole Sonicate body. Small enough that the body fits under it
-    // on an ordinary screen, large enough to place a target in.
-    // A fixed ceiling, not one derived from the page: these viewers are
-    // Fixed, so a page that asks for more than the window holds grows the
-    // window, which raises the budget, which asks for more again.
-    // 80% of the shared Imaging/Registration height: the Treatment page also
-    // carries the plan body and the execution controls below these viewers, and
-    // at the full height the Sonicate row fell off the bottom of a 1080p screen.
+    // Fixed viewer height for the Treatment plan stage, which shares its page with the whole
     static constexpr int kTreatmentViewerHeight = 420;
     // The Treatment page's viewers may not squeeze the plan below this.
     static constexpr int kMinTreatmentViewerHeight = 240;
@@ -442,8 +369,7 @@ private:
     static constexpr int kTreatmentControlsHeight = 54;
     // treatmentProtocolTables(i).sessions is 15 long in BeamV0.
     static constexpr int kMaxTreatmentVisits = 15;
-    // Every action button on the Registration page stands this tall, so the two
-    // step rows line up across the page.
+    // Every action button on the Registration page stands this tall, so the two step rows line
     static constexpr int kRegistrationButtonHeight = 30;
     // The visit list's last item, which makes a visit rather than being one.
     static constexpr int kNewVisitItem = -1;
@@ -475,8 +401,7 @@ private:
     bool deviceCheckPassed_ = false;
     bool mriLoaded_ = false;
     bool lockOverlayShown_ = false;
-    // Sixteen registrations is most of a second, so they are computed when the
-    // fit changes rather than on every toggle.
+    // Sixteen registrations is most of a second, so they are computed when the fit changes
     std::vector<beam::registration::LockPositionTarget> lockOverlayTargets_;
     QWidget* sceneWindow_ = nullptr;
     Scene3DView* sceneView_ = nullptr;
@@ -486,8 +411,7 @@ private:
     bool correctionCheckPassed_ = false;
     int registrationStartFiducialRow_ = -1;
     QString mriPath_;
-    // Dimensions and affine of the loaded scan, so a delivery can name the
-    // image its RAS coordinates came from.
+    // Dimensions and affine of the loaded scan, so a delivery can name the image its RAS
     QString mriFingerprint_;
     QHash<QString, QString> sliceSliderTips_;
     QSlider* leftHorizontalPositionSlider_ = nullptr;
@@ -521,18 +445,14 @@ private:
     QTabWidget* treatmentTabs_ = nullptr;
     QWidget* treatmentMriPage_ = nullptr;
     int mriHeightSyncPasses_ = 0;
-    // app.sys.protocolTables: each target's own stimParamTable data, keyed by
-    // the target row's stable id so a rename or insert cannot orphan it.
+    // app.sys.protocolTables: each target's own stimParamTable data, keyed by the target row's
     QHash<int, std::vector<beam::gui_qt::StimParamRow>> targetSonications_;
     int currentTargetId_ = -1;
-    // Which target the sonication grid is actually showing. Only equal to
-    // currentTargetId_ once the grid has been refilled for it; caching while
-    // they differ writes one target's parameters onto another.
+    // Which target the sonication grid is actually showing.
     int gridTargetId_ = -1;
     int nextTargetId_ = 0;
     QSize lastMriSyncWindowSize_;
-    // The stack height this window can afford, learned before any page has
-    // forced the window past the screen. Relearned when the operator resizes.
+    // The stack height this window can afford, learned before any page has forced the window
     int maxStackHeight_ = 0;
     QSpacerItem* placeholderTailSpacer_ = nullptr;
     std::vector<DetachedViewer> detachedViewers_;
@@ -541,12 +461,9 @@ private:
     QWidget* treatmentPlanBody_ = nullptr;
     beam::gui_qt::StimParamTableModel* stimParamModel_ = nullptr;
     beam::gui_qt::TreatmentProtocolTableModel* protocolModel_ = nullptr;
-    // BeamAI's own protocol/target library. Seeded from data/*.csv in the
-    // install, saved to the user's own copy -- see treatmentDataDirectory().
+    // BeamAI's own protocol/target library.
     beam::gui::TreatmentTargetStore targetStore_;
-    // What was actually delivered, per visit. The store above is the plan.
-    // Holds ONE patient's rows: the switch writes them out and reads the next
-    // patient's in, so there is never a second patient's row in here to leak.
+    // What was actually delivered, per visit.
     beam::gui::TreatmentLog treatmentLog_;
     // Everybody this device has treated.
     beam::gui::PatientRegistry patients_;
@@ -556,8 +473,6 @@ private:
     QLineEdit* patientFilterEdit_ = nullptr;
     QLabel* patientCountLabel_ = nullptr;
     // Demographics, on the Case page beside the Participant and Site IDs.
-    // All three may be left blank: somebody can be enrolled and treated
-    // before their details are to hand.
     QLineEdit* lastNameEdit_ = nullptr;
     QLineEdit* firstNameEdit_ = nullptr;
     QLineEdit* dateOfBirthEdit_ = nullptr;
@@ -574,32 +489,24 @@ private:
     QPushButton* overlayAllTargetsButton_ = nullptr;
     QPushButton* saveSessionOnTreatmentButton_ = nullptr;
     QListWidget* pastReportsList_ = nullptr;
-    // Whose record is open. Zero until the Case page names somebody -- and on
-    // a device that has never named anybody, that is where a pre-patient
-    // install's single record still is.
+    // Whose record is open.
     int currentPatientId_ = 0;
     // The row runSonication opened, so the countdown can stamp its end.
     int openLogSequence_ = 0;
     // Held while PlaySound is reading from it.
     QByteArray shamAudioBuffer_;
-    // Which protocol the schedule table currently holds, so a reload of the
-    // same one does not throw away the visit's position.
+    // Which protocol the schedule table currently holds, so a reload of the same one does not
     QString lastLoadedProtocol_;
     int lastLoadedVisit_ = 0;
     // Where each visit of each protocol had got to, keyed by visitKey().
-    // Written to treatment_visit_state.csv on every change.
     QHash<QString, int> visitSonication_;
-    // Visits whose row list the operator has changed by hand. Kept because a
-    // visit emptied of every row is indistinguishable from one never opened --
-    // both have no rows -- and seeding the second must not refill the first.
+    // Visits whose row list the operator has changed by hand.
     QSet<QString> editedVisits_;
     QCheckBox* autoRankCheckBox_ = nullptr;
     QLabel* planBlocksLabel_ = nullptr;
-    // Visits the operator has turned ranking off for. Absent means on, so a
-    // visit written before this existed keeps BeamV0's always-on behaviour.
+    // Visits the operator has turned ranking off for.
     QSet<QString> rankingOffVisits_;
-    // Set while the ranking is rewriting the plan, so the reload it ends with
-    // does not send it round again.
+    // Set while the ranking is rewriting the plan, so the reload it ends with does not send it
     bool applyingRanking_ = false;
     QPushButton* manageLibraryButton_ = nullptr;
     QTableView* stimParamView_ = nullptr;
@@ -618,31 +525,26 @@ private:
     double couplingPeakToPeak_ = 0.0;
     QWidget* couplingChartsRow_ = nullptr;
     QLabel* couplingChartsPlaceholder_ = nullptr;
-    // What the measurement came out as, in numbers: the bars say pass or
-    // fail, the numbers say by how much.
+    // What the measurement came out as, in numbers: the bars say pass or fail, the numbers say
     QLabel* couplingNumbersLabel_ = nullptr;
     // Whether what is on the plots came off a device or was stood in for.
     bool couplingSimulated_ = false;
-    // What checkSonicationSafety.m concluded about the parameters now in the
-    // grid, and why. Sonicate and Sham are off while this is false.
+    // What checkSonicationSafety.m concluded about the parameters now in the grid, and why.
     bool sonicationSafetyPass_ = true;
-    // Marking the unsafe cells changes the grid, which is what calls this in
-    // the first place.
+    // Marking the unsafe cells changes the grid, which is what calls this in the first place.
     bool checkingSonicationSafety_ = false;
     QStringList sonicationSafetyMessages_;
     QLabel* sonicationSafetyLabel_ = nullptr;
     QLabel* sonicationPrecheckLabel_ = nullptr;
     // How many measurements this session has taken, so a repeat says so.
     int correctionRunCount_ = 0;
-    // A stand-in through-transmit pair, so the page can be read and the
-    // workflow walked without a Beam device on the bench.
+    // A stand-in through-transmit pair, so the page can be read and the workflow walked without
     void fillSimulatedCouplingWaveforms();
     QChartView* couplingCh0ChartView_ = nullptr;
     QChartView* couplingCh1ChartView_ = nullptr;
     QChartView* couplingBarChartView_ = nullptr;
     QComboBox* hydrogelSizeCombo_ = nullptr;
-    // Shown, not typed: sonicating out of order is not something the
-    // operator chooses, so the number is a readout and the schedule moves it.
+    // Shown, not typed: sonicating out of order is not something the operator chooses, so the
     QLabel* currentSonicationNumberLabel_ = nullptr;
     int currentSonication_ = 1;
     QComboBox* accFlagCombo_ = nullptr;
@@ -667,19 +569,12 @@ private:
     QLabel* treatmentExecutionDescriptionLabel_ = nullptr;
     QProgressBar* treatmentExecutionProgressBar_ = nullptr;
     // Sonicate lives on the current row of the treatment log, not in a pane.
-    // placeSonicateButton owns it; sonicateEnabled_ is the gate it is built
-    // with, since the row it sits on comes and goes.
-    // QPointer, not a raw pointer: setIndexWidget destroys whatever widget it
-    // replaces, so this can be left naming a button Qt has already deleted. It
-    // nulls itself instead.
     QPointer<QPushButton> inRowSonicateButton_;
     QPointer<QPushButton> inRowShamButton_;
     QPointer<QPushButton> inRowStopButton_;
     // Not a control: the panel lamp that says the row is live.
     QPointer<QLabel> inRowOnLamp_;
-    // While a sonication runs the row button pulses, so a glance at the table
-    // says something is going out without reading the countdown. Which colour
-    // it pulses in says whether ultrasound or only the mask is going out.
+    // While a sonication runs the row button pulses, so a glance at the table says something is
     QTimer* runningFlashTimer_ = nullptr;
     bool runningFlashOn_ = false;
     bool runningSham_ = false;
@@ -690,22 +585,17 @@ private:
     // Read from data/runtime once at startup; BeamV0 carried these inline.
     beam::stimulation::CalibrationCurve calibration_;
     bool calibrationFromFile_ = false;
-    // The shell's header slot, so a link that drops during treatment is
-    // visible on whatever page the operator is on.
+    // The shell's header slot, so a link that drops during treatment is visible on whatever
     QLabel* serialHeaderLabel_ = nullptr;
     QComboBox* triggerModeCombo_ = nullptr;
     QLabel* sonicationCountdownLabel_ = nullptr;
     QTimer* sonicationCountdownTimer_ = nullptr;
     int sonicationCountdownSeconds_ = 0;
-    // When the running sonication is due to end, as a wall clock. Counting
-    // ticks instead let the run overshoot what the row asked for.
+    // When the running sonication is due to end, as a wall clock.
     qint64 sonicationDeadlineMs_ = 0;
-    // Once a pre-delivery check fails the button stays dead until the
-    // device answers again.
+    // Once a pre-delivery check fails the button stays dead until the device answers again.
     bool mcuConnectionInvalid_ = false;
     // The through-transmit amplitude the Correction stage measured.
-    // prepareSonication compares it against kCouplingThreshold, so it has to
-    // outlive that measurement rather than only its pass/fail verdict.
     double transmissionAmplitude_ = 0.0;
     QLabel* safetyReviewTitleLabel_ = nullptr;
     QLabel* safetyReviewDescriptionLabel_ = nullptr;
