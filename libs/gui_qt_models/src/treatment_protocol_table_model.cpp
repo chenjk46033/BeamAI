@@ -151,9 +151,12 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         return shown.toString().isEmpty() ? QVariant() : shown;
     }
     if (role == Qt::ForegroundRole) {
+        const bool onCurrentFill = current && !r.delivered;
         // Anything but 200 is worth seeing without reading the number.
         if (index.column() == kStatus && r.statusCode != 0 && r.statusCode != 200)
-            return QColor(0xb1, 0x1c, 0x1c);
+            return onCurrentFill ? QColor(0xff, 0x8a, 0x80) : QColor(0xb1, 0x1c, 0x1c);
+        // The dark fill above swallows the default ink.
+        if (onCurrentFill) return QColor(0xff, 0xff, 0xff);
         return QVariant();
     }
     if (role == Qt::BackgroundRole) {
@@ -163,7 +166,7 @@ QVariant TreatmentProtocolTableModel::data(const QModelIndex& index, int role) c
         // stay apart, and white text on it reads where grey did not.
         // Only a row still to run: BeamV0 greys the current row over its
         // response, but its number always points past what has been delivered.
-        if (current && !r.delivered) return QColor(0xa0, 0xa0, 0xa0);
+        if (current && !r.delivered) return QColor(0x14, 0x45, 0x5a);
         // Delivered only: a row must not change colour as a score is typed.
         if (r.delivered) {
             const QColor fill = responseFill(
@@ -276,8 +279,10 @@ QVariant TreatmentProtocolTableModel::headerData(int section, Qt::Orientation or
                                                  int role) const {
     if (role == Qt::ToolTipRole && orientation == Qt::Horizontal) {
         // The scale, which the name alone does not give.
-        if (section == kResponsePain || section == kResponseMood)
-            return QStringLiteral("-2 to 2");
+        if (section == kResponsePain) return QStringLiteral("Response Pain, -2 to 2");
+        if (section == kResponseMood) return QStringLiteral("Response Mood, -2 to 2");
+        if (section == kDuration) return QStringLiteral("Duration (s)");
+        if (section == kParameters) return QStringLiteral("Parameters");
         if (section == kNotes) return QStringLiteral("Double-click a cell to add a note");
         return QVariant();
     }
@@ -292,11 +297,11 @@ QVariant TreatmentProtocolTableModel::headerData(int section, Qt::Orientation or
         case kAction: return QString();
         case kNumber: return QStringLiteral("#");
         case kTarget: return QStringLiteral("Target");
-        case kDuration: return QStringLiteral("Duration (s)");
+        case kDuration: return QStringLiteral("Dur (s)");
         case kAmplitude: return QStringLiteral("Amplitude");
-        case kParameters: return QStringLiteral("Parameters");
-        case kResponsePain: return QStringLiteral("Response Pain");
-        case kResponseMood: return QStringLiteral("Response Mood");
+        case kParameters: return QStringLiteral("Params");
+        case kResponsePain: return QStringLiteral("Pain");
+        case kResponseMood: return QStringLiteral("Mood");
         case kStart: return QStringLiteral("Start");
         case kEnd: return QStringLiteral("End");
         case kStatus: return QStringLiteral("Status");

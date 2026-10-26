@@ -263,6 +263,28 @@ double normalizedAxisPosition(const Eigen::VectorXd& axis, double mm) {
 constexpr double kTargetViewZoom = 4.0;
 
 constexpr int kMinMriViewerHeight = 300;
+
+// A default slider is a hairline with a small hollow box on it, which on
+// these grounds reads as a divider rather than a control. Dark track, bright
+// fill, round white handle -- 6px groove plus a 12px handle inside a 2px
+// border is the 16px the unstyled slider already took, so nothing moves.
+const char* const kSliderStyle =
+    "QSlider::groove:horizontal { height: 6px; border-radius: 3px; background: #55727f; } "
+    "QSlider::add-page:horizontal { background: #55727f; border-radius: 3px; } "
+    "QSlider::sub-page:horizontal { background: #45c8ea; border-radius: 3px; } "
+    "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0; "
+    "background: #ffffff; border: 2px solid #1b3b47; border-radius: 8px; } "
+    "QSlider::handle:horizontal:hover { border-color: #45c8ea; } "
+    "QSlider::groove:vertical { width: 6px; border-radius: 3px; background: #55727f; } "
+    "QSlider::sub-page:vertical { background: #55727f; border-radius: 3px; } "
+    "QSlider::add-page:vertical { background: #45c8ea; border-radius: 3px; } "
+    "QSlider::handle:vertical { width: 12px; height: 12px; margin: 0 -5px; "
+    "background: #ffffff; border: 2px solid #1b3b47; border-radius: 8px; } "
+    "QSlider::handle:vertical:hover { border-color: #45c8ea; } "
+    "QSlider::groove:disabled { background: #44565e; } "
+    "QSlider::sub-page:horizontal:disabled { background: #7e8f96; } "
+    "QSlider::add-page:vertical:disabled { background: #7e8f96; } "
+    "QSlider::handle:disabled { background: #d7dee1; border-color: #7e8f96; }";
 constexpr int kMaxMriViewerHeight = 900;
 
 // The two Registration columns are the same height above their next step: the
@@ -411,6 +433,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                                 ui_->registrationBrightnessDownButton,
                                 ui_->registrationResetAllMriViewsButton})
         button->setStyleSheet(QStringLiteral("QToolButton { color: #f2f7f8; }"));
+    for (QSlider* slider : findChildren<QSlider*>())
+        slider->setStyleSheet(QString::fromLatin1(kSliderStyle));
     // The generic case subtitle consumes vertical space on every workflow
     // page; Registration needs that space for its review and acceptance
     // controls.
@@ -638,17 +662,7 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         slider->setPageStep(1);
         slider->setTickPosition(QSlider::NoTicks);
         slider->setToolTip(QStringLiteral("Array lock position; each step is 7.5 mm horizontal or 10 mm vertical"));
-        slider->setStyleSheet(QStringLiteral(
-            "QSlider::groove:horizontal { height: 7px; background: #24495a; border: 1px solid #39758e; border-radius: 3px; } "
-            "QSlider::handle:horizontal { width: 11px; margin: -6px 0; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 2px; } "
-            "QSlider::sub-page:horizontal { background: #1686a8; border-radius: 3px; } "
-            "QSlider::groove:vertical { width: 7px; background: #24495a; border: 1px solid #39758e; border-radius: 3px; } "
-            "QSlider::handle:vertical { height: 11px; margin: 0 -6px; background: #58d9f2; border: 1px solid #b9f3ff; border-radius: 2px; } "
-            "QSlider::add-page:vertical { background: #1686a8; border-radius: 3px; } "
-            "QSlider::groove:disabled { background: #2b3338; border-color: #46525a; } "
-            "QSlider::handle:disabled { background: #5a656b; border-color: #78848a; } "
-            "QSlider::sub-page:disabled { background: #3b474e; } "
-            "QSlider::add-page:disabled { background: #3b474e; }"));
+        slider->setStyleSheet(QString::fromLatin1(kSliderStyle));
         // After setStyleSheet: a stylesheet installs QStyleSheetStyle and would
         // otherwise discard this proxy.
         slider->setStyle(new ClickToPositionStyle(slider->style()));
@@ -3809,6 +3823,16 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
     ui_->pageTitle->setText(QString::fromUtf8(beam::gui::workflowStageName(stage).data()));
     const int stageIndex = static_cast<int>(stage);
     ui_->pageStack->setCurrentIndex(stageIndex <= 3 ? stageIndex : 4);
+    // A QStackedWidget takes its minimum height from its tallest page, so
+    // Registration's viewers set the window's minimum on every other stage too.
+    for (int i = 0; i < ui_->pageStack->count(); ++i) {
+        QWidget* page = ui_->pageStack->widget(i);
+        QSizePolicy policy = page->sizePolicy();
+        policy.setVerticalPolicy(i == ui_->pageStack->currentIndex()
+                                     ? QSizePolicy::Preferred
+                                     : QSizePolicy::Ignored);
+        page->setSizePolicy(policy);
+    }
     // Once the page is actually up, so centring reads real geometry.
     QTimer::singleShot(0, this, [this] { centreViewsOnTarget(); });
     // Not on Treatment either: that page carries its own status line, and a
@@ -4102,6 +4126,10 @@ void WorkflowWindow::refresh() {
                     : QStringLiteral("Ends the visit and opens its case report."));
     }
     if (selectedStage_ == beam::gui::WorkflowStage::Treatment && !ready) showMessage(QString::fromStdString(reason), true);
+    // Rules 310 and 320 read stage status and the through-transmit, both of
+    // which change on paths that never switch page -- accepting a stage, or
+    // the recheck the treatment runs itself.
+    updateSonicationSafety();
 }
 
 // updateAttenuationPlots.m's two RF plots and setAvgTransmissionDataBars.m's

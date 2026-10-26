@@ -685,14 +685,43 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     stimParamView_->setModel(stimParamModel_);
     configureModelTable(stimParamView_);
     stimParamView_->setItemDelegate(new StimParamDelegate(stimParamView_));
-    // Show is how getCurrentShownSonication.m picks the row to fire, so the
-    // flag stays and only the column goes: with one row per target there is
-    // nothing to choose between, and a checkbox implying otherwise misleads.
-    stimParamView_->setColumnHidden(beam::gui_qt::StimParamTableModel::kShow, true);
-    // Order numbers a column of one: every BeamV0 target carries exactly one
-    // stimParamTable row (createStimParamTable.m's own N = 1), so the number is
-    // always 1 and says nothing.
-    stimParamView_->setColumnHidden(beam::gui_qt::StimParamTableModel::kOrder, true);
+    // Stretch gave a coordinate the same width as "Burst Duration", which put
+    // the grid's own minimum past the page and pushed Sonicate off the edge.
+    {
+        using Stim = beam::gui_qt::StimParamTableModel;
+        QHeaderView* header = stimParamView_->horizontalHeader();
+        header->setSectionResizeMode(QHeaderView::Interactive);
+        header->setMinimumSectionSize(40);
+        header->setStretchLastSection(false);
+        static constexpr struct { int column; int width; } kStimWidths[] = {
+            {Stim::kTarget, 78},         {Stim::kX, 46},
+            {Stim::kY, 46},              {Stim::kZ, 46},
+            {Stim::kAmplitude, 76},      {Stim::kStartTime, 78},
+            {Stim::kEndTime, 72},        {Stim::kBurstDuration, 104},
+            {Stim::kBurstInterval, 100}, {Stim::kPulseDuration, 104},
+            {Stim::kPulseInterval, 100},
+        };
+        int total = 0;
+        for (const auto& entry : kStimWidths) {
+            stimParamView_->setColumnWidth(entry.column, entry.width);
+            total += entry.width;
+        }
+        // Exactly its columns wide: nothing absorbs the slack as a stretched
+        // column did, and the page cannot inherit a minimum wider than itself.
+        stimParamView_->setMaximumWidth(total + 2 * stimParamView_->frameWidth() + 2);
+        stimParamView_->setSizePolicy(QSizePolicy::Ignored,
+                                      stimParamView_->sizePolicy().verticalPolicy());
+        // Hidden last: setSectionResizeMode above hands a hidden section its
+        // default size back, which opened a 200px gap between Target and X.
+        // Show is how getCurrentShownSonication.m picks the row to fire, so the
+        // flag stays and only the column goes: with one row per target there is
+        // nothing to choose between, and a checkbox implying otherwise misleads.
+        stimParamView_->setColumnHidden(Stim::kShow, true);
+        // Order numbers a column of one: every BeamV0 target carries exactly one
+        // stimParamTable row (createStimParamTable.m's own N = 1), so the number is
+        // always 1 and says nothing.
+        stimParamView_->setColumnHidden(Stim::kOrder, true);
+    }
     // The sonication being fired is read off this one row, so it reads on
     // paper rather than in the dark palette the rest of the page uses.
     // The same paper the log table beside it uses, zebra stripe included, so
@@ -804,7 +833,7 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     visitNumberCombo_->setMaxVisibleItems(kMaxTreatmentVisits);
     // Wide enough for "Visit 12 -- 3 of 24 delivered" and fixed there, so the
     // buttons beside it cannot squeeze it until its text is unreadable.
-    visitNumberCombo_->setMinimumWidth(188);
+    visitNumberCombo_->setMinimumWidth(150);
     visitNumberCombo_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     // Nothing but the create item until a visit exists: an item reading
     // "Visit 1" says a visit 1 has been created. refreshVisitCombo fills in
@@ -822,7 +851,7 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         return button;
     };
     manageLibraryButton_ = makeProtocolButton(
-        QStringLiteral("Manage Protocols..."),
+        QStringLiteral("Protocols..."),
         QStringLiteral("Add, rename, delete protocols and the targets each one schedules"));
     manageTargetsButton_->setParent(protocolTab);
     manageTargetsButton_->setVisible(true);
@@ -831,7 +860,8 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // HydrogelSizeButtonGroup, as a combo rather than BeamV0's three radios:
     // this row now also carries the protocol selector, and three radios plus
     // their labels did not fit beside it.
-    auto* hydrogelLabel = new QLabel(QStringLiteral("Hydrogel size:"), protocolTab);
+    auto* hydrogelLabel = new QLabel(QStringLiteral("Hydrogel:"), protocolTab);
+    hydrogelLabel->setToolTip(QStringLiteral("Hydrogel size"));
     hydrogelSizeCombo_ = new QComboBox(protocolTab);
     hydrogelSizeCombo_->addItems({QStringLiteral("Small"), QStringLiteral("Medium"),
                                   QStringLiteral("Large")});
@@ -839,7 +869,7 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     applyItemViewPalette(hydrogelSizeCombo_);
     // BeamV0 ranks after every delivery and offers no way out. The box is
     // the way out: ticked is BeamV0, unticked leaves the plan alone.
-    autoRankCheckBox_ = new QCheckBox(QStringLiteral("Rank targets automatically"), protocolTab);
+    autoRankCheckBox_ = new QCheckBox(QStringLiteral("Auto-rank targets"), protocolTab);
     autoRankCheckBox_->setObjectName(QStringLiteral("autoRankCheckBox"));
     autoRankCheckBox_->setChecked(true);
     autoRankCheckBox_->setStyleSheet(QStringLiteral("QCheckBox { color: #dcebef; }"));
@@ -847,7 +877,8 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         QStringLiteral("After each sonication, point the treatment rows still to come at "
                        "whichever targets scored best in the screening rows above them. "
                        "Delivered rows are never changed. Untick to edit the plan yourself."));
-    auto* sonicationNumberLabel = new QLabel(QStringLiteral("Current Sonication Number:"), protocolTab);
+    auto* sonicationNumberLabel = new QLabel(QStringLiteral("Sonication:"), protocolTab);
+    sonicationNumberLabel->setToolTip(QStringLiteral("Current sonication number"));
     currentSonicationNumberLabel_ = new QLabel(protocolTab);
     currentSonicationNumberLabel_->setStyleSheet(QStringLiteral(
         "QLabel { color: #ffffff; background: #1f4e79; border: 1px solid #163c5e; "
@@ -920,7 +951,9 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         // Each the width of what it holds: Parameters fits its whole string
         // (X, Y, Z and the four timings) and stops there, the two response
         // columns fit their full names, and # fits two digits.
-        const int widths[] = {112, 28, 78, 68, 72, 300, 100, 106, 86, 86, 56, 200};
+        // action, #, target, duration, amplitude, parameters, pain, mood,
+        // start, end, status, notes
+        const int widths[] = {112, 28, 62, 68, 72, 300, 50, 54, 86, 86, 56, 200};
         for (int column = 0; column < static_cast<int>(std::size(widths)); ++column)
             protocolView_->setColumnWidth(column, widths[column]);
     }
@@ -4797,6 +4830,13 @@ void WorkflowWindow::startSonicationCountdown(int durationSeconds, bool sham) {
     sonicationCountdownLabel_->setText(
         QString::fromStdString(beam::gui::countdownDisplayText(sonicationCountdownSeconds_)));
     treatmentExecutionProgressBar_->setVisible(true);
+    // The row sized itself while the bar was hidden, so without this the bar
+    // has no space until the window is resized.
+    treatmentExecutionProgressBar_->updateGeometry();
+    if (treatmentExecutionBody_ != nullptr) {
+        if (QLayout* row = treatmentExecutionBody_->layout()) row->activate();
+        treatmentExecutionBody_->updateGeometry();
+    }
     sonicationCountdownTimer_->start();
     // After the timer is running, so the button reads "Sonicating..." rather
     // than merely going grey.
