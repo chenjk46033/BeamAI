@@ -64,13 +64,10 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                                          stage != beam::gui::WorkflowStage::Treatment);
     const bool couplingPage = stage == beam::gui::WorkflowStage::Coupling ||
                               stage == beam::gui::WorkflowStage::Correction;
-    const bool correctionPage = false;
     if (couplingPage) {
         // Acceptance disables the action buttons, but the combined Correction/Coupling page is
         runCouplingCheckButton_->setEnabled(true);
-        runCorrectionButton_->setEnabled(true);
         acceptCouplingButton_->setEnabled(couplingCheckPassed_);
-        acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
     }
     const bool treatmentPlanPage = stage == beam::gui::WorkflowStage::TreatmentPlan;
     const bool treatmentExecutionPage = stage == beam::gui::WorkflowStage::Treatment ||
@@ -105,12 +102,6 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                             static_cast<QWidget*>(acceptCouplingButton_),
                             static_cast<QWidget*>(couplingChartsRow_),
                             static_cast<QWidget*>(couplingNumbersLabel_),
-                            static_cast<QWidget*>(correctionTitleLabel_),
-                            static_cast<QWidget*>(correctionDescriptionLabel_),
-                            static_cast<QWidget*>(correctionStatusLabel_),
-                            static_cast<QWidget*>(correctionProgressBar_),
-                            static_cast<QWidget*>(runCorrectionButton_),
-                            static_cast<QWidget*>(acceptCorrectionButton_),
                             static_cast<QWidget*>(safetyReviewTitleLabel_),
                             static_cast<QWidget*>(safetyReviewDescriptionLabel_),
                             static_cast<QWidget*>(safetyReviewStatusLabel_),
@@ -119,21 +110,17 @@ void WorkflowWindow::selectStage(beam::gui::WorkflowStage stage) {
                             static_cast<QWidget*>(safetyPlanCheckBox_),
                             static_cast<QWidget*>(acceptSafetyReviewButton_)}) {
         if (!widget) continue;
-        const bool isCorrectionWidget = widget == correctionTitleLabel_ || widget == correctionDescriptionLabel_ ||
-                                        widget == correctionStatusLabel_ || widget == correctionProgressBar_ ||
-                                        widget == runCorrectionButton_ || widget == acceptCorrectionButton_;
         const bool isSafetyWidget = widget == safetyReviewTitleLabel_ || widget == safetyReviewDescriptionLabel_ ||
                                     widget == safetyReviewStatusLabel_ || widget == safetyRegistrationCheckBox_ ||
                                     widget == safetyCorrectionCheckBox_ || widget == safetyPlanCheckBox_ ||
                                     widget == acceptSafetyReviewButton_;
-        widget->setVisible(isSafetyWidget ? safetyReviewPage
-                                          : (isCorrectionWidget ? correctionPage : couplingPage));
+        widget->setVisible(isSafetyWidget ? safetyReviewPage : couplingPage);
     }
     // The link panel shares placeholderPage with every other stage body, so it needs the same
     if (deviceLink_) deviceLink_->setVisible(couplingPage);
     // Report has a page of its own now, so it stops being "awaiting its BeamV0 behavioral audit
     if (ui_->placeholderText)
-        ui_->placeholderText->setVisible(!couplingPage && !correctionPage && !treatmentPlanPage &&
+        ui_->placeholderText->setVisible(!couplingPage && !treatmentPlanPage &&
                                          !treatmentExecutionPage && !safetyReviewPage &&
                                          !reportStage);
     if (ui_->placeholderLayout) {

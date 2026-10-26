@@ -373,7 +373,7 @@ void WorkflowWindow::recordRefusedSonication(bool sham) {
 // Port of SonicateButtonPushed.m's last act: if mod(i,4)==0 RunCorrectionButtonPushed(app,
 void WorkflowWindow::remeasureCouplingIfDue(int delivered) {
     if (delivered <= 0 || delivered % kCouplingRecheckEvery != 0) return;
-    if (runCorrectionButton_ == nullptr) return;
+    if (runCouplingCheckButton_ == nullptr) return;
     showMessage(QStringLiteral("Sonication %1 delivered. Re-measuring coupling, as every %2 "
                                "sonications.")
                     .arg(delivered)

@@ -428,16 +428,10 @@ private:
     QLabel* couplingStatusLabel_ = nullptr;
     QLabel* couplingTitleLabel_ = nullptr;
     QLabel* couplingDescriptionLabel_ = nullptr;
-    QLabel* correctionTitleLabel_ = nullptr;
-    QLabel* correctionDescriptionLabel_ = nullptr;
-    QLabel* correctionStatusLabel_ = nullptr;
     QProgressBar* couplingProgressBar_ = nullptr;
-    QProgressBar* correctionProgressBar_ = nullptr;
     QPushButton* runCouplingCheckButton_ = nullptr;
     QPushButton* clearCouplingButton_ = nullptr;
     QPushButton* acceptCouplingButton_ = nullptr;
-    QPushButton* runCorrectionButton_ = nullptr;
-    QPushButton* acceptCorrectionButton_ = nullptr;
     QLabel* treatmentPlanTitleLabel_ = nullptr;
     QLabel* treatmentPlanDescriptionLabel_ = nullptr;
     QLabel* treatmentProtocolLabel_ = nullptr;

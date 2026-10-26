@@ -81,6 +81,8 @@ if(Qt6_FOUND AND TARGET gui_qt)
     beam_deploy_qt_platform(beam_app)
 
 
+
+
     # New workflow-first application. Its layout is maintained in Qt Designer
     # XML; this remains separate from beam_app while BeamV0 behavior is audited.
     add_executable(workflow_app

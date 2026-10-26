@@ -292,39 +292,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
 
     // The device link panel.
     buildDeviceLinkPanel();
-    correctionTitleLabel_ = new QLabel(QStringLiteral("Correction"), ui_->placeholderPage);
-    correctionTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
-    correctionDescriptionLabel_ = new QLabel(
-        QStringLiteral("Run the BeamV0 through-transmit correction measurement, review the transmission level, and accept the correction before treatment planning."),
-        ui_->placeholderPage);
-    correctionDescriptionLabel_->setWordWrap(true);
-    correctionDescriptionLabel_->setStyleSheet(QStringLiteral("QLabel { color: #c8d9de; padding: 4px 0 10px 0; }"));
-    correctionStatusLabel_ = new QLabel(QStringLiteral("No correction measurement has been run."), ui_->placeholderPage);
-    correctionStatusLabel_->setWordWrap(true);
-    correctionStatusLabel_->setStyleSheet(QStringLiteral(
-        "QLabel { color: #dcebef; background: #183944; border: 1px solid #2b6172; border-radius: 5px; padding: 12px; }"));
-    correctionProgressBar_ = new QProgressBar(ui_->placeholderPage);
-    correctionProgressBar_->setRange(0, 100);
-    correctionProgressBar_->setValue(0);
-    correctionProgressBar_->setFormat(QStringLiteral("Current transmission: %p%"));
-    correctionProgressBar_->setMinimumHeight(24);
-    correctionProgressBar_->setStyleSheet(QStringLiteral(
-        "QProgressBar { color: #eafaff; background: #263a42; border: 1px solid #416b78; border-radius: 4px; text-align: center; } "
-        "QProgressBar::chunk { background: #43b581; border-radius: 3px; }"));
-    runCorrectionButton_ = new QPushButton(QStringLiteral("Run correction measurement"), ui_->placeholderPage);
-    runCorrectionButton_->setMinimumHeight(38);
-    runCorrectionButton_->setStyleSheet(acceptButtonStyle);
-    acceptCorrectionButton_ = new QPushButton(QStringLiteral("Accept correction and continue →"), ui_->placeholderPage);
-    acceptCorrectionButton_->setMinimumHeight(40);
-    acceptCorrectionButton_->setEnabled(false);
-    acceptCorrectionButton_->setStyleSheet(acceptButtonStyle);
-    ui_->placeholderLayout->addWidget(correctionTitleLabel_);
-    ui_->placeholderLayout->addWidget(correctionDescriptionLabel_);
-    correctionStatusLabel_->setContentsMargins(0, 12, 0, 0);
-    ui_->placeholderLayout->addWidget(correctionStatusLabel_);
-    ui_->placeholderLayout->addWidget(correctionProgressBar_);
-    ui_->placeholderLayout->addWidget(runCorrectionButton_);
-    ui_->placeholderLayout->addWidget(acceptCorrectionButton_);
 
     treatmentPlanTitleLabel_ = new QLabel(QStringLiteral("Treatment plan"), ui_->placeholderPage);
     treatmentPlanTitleLabel_->setStyleSheet(QStringLiteral("QLabel { color: #f2f7f8; font-size: 20px; font-weight: 700; }"));
@@ -474,8 +441,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             couplingCheckPassed_ = correctionCheckPassed_;
             workflow_.change(beam::gui::WorkflowStage::Coupling,
                              "Correction/through-transmit measured; awaiting operator acceptance.");
-            couplingProgressBar_->setValue(correctionProgressBar_->value());
-            couplingStatusLabel_->setText(correctionStatusLabel_->text());
             acceptCouplingButton_->setEnabled(couplingCheckPassed_);
             clearCouplingButton_->setEnabled(true);
             refresh();
@@ -513,21 +478,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
             return;
         }
         // Both stay live: the stage is accepted, not closed.
-        refresh();
-        goToNextStage();
-    });
-    connect(runCorrectionButton_, &QPushButton::clicked, this,
-            [this] { startCorrectionMeasurement({}); });
-    connect(acceptCorrectionButton_, &QPushButton::clicked, this, [this] {
-        if (!correctionCheckPassed_) {
-            showMessage(QStringLiteral("Run the correction measurement before accepting it."), true);
-            return;
-        }
-        std::string reason;
-        if (!workflow_.complete(beam::gui::WorkflowStage::Correction, &reason)) {
-            showMessage(QString::fromStdString(reason), true);
-            return;
-        }
         refresh();
         goToNextStage();
     });

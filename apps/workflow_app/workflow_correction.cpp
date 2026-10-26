@@ -96,11 +96,8 @@ void WorkflowWindow::clearCouplingMeasurement() {
     couplingCheckPassed_ = false;
     correctionCheckPassed_ = false;
     couplingProgressBar_->setValue(0);
-    correctionProgressBar_->setValue(0);
     couplingStatusLabel_->setText(QStringLiteral("No coupling measurement has been run."));
-    correctionStatusLabel_->setText(QStringLiteral("No correction measurement has been run."));
     acceptCouplingButton_->setEnabled(false);
-    acceptCorrectionButton_->setEnabled(false);
     clearCouplingButton_->setEnabled(false);
     updateCouplingCharts(0.0);
     // Clearing the measurement puts the through-transmit precondition back into failure, which
@@ -243,18 +240,18 @@ void WorkflowWindow::startCorrectionMeasurement(std::function<void()> then) {
         if (then) then();
         return;
     }
-    runCorrectionButton_->setEnabled(false);
-    correctionStatusLabel_->setText(QStringLiteral("Measuring through-transmit..."));
+    runCouplingCheckButton_->setEnabled(false);
+    couplingStatusLabel_->setText(QStringLiteral("Measuring through-transmit..."));
     // The device streams for seconds; off the GUI thread it does so without freezing the
     const bool started = deviceLink_->runCommand(
         "Correction", /*startQuietReads=*/10,
         [this, then](std::vector<std::string> reply, bool ok) {
-            runCorrectionButton_->setEnabled(true);
+            runCouplingCheckButton_->setEnabled(true);
             applyCorrectionResult(reply, ok);
             if (then) then();
         });
     if (!started) {
-        runCorrectionButton_->setEnabled(true);
+        runCouplingCheckButton_->setEnabled(true);
         showMessage(QStringLiteral("The device is busy with another command."), true);
         if (then) then();
     }
@@ -295,7 +292,7 @@ void WorkflowWindow::applyCorrectionResult(const std::vector<std::string>& reply
     correctionCheckPassed_ = coupling.pass;
     // Keep the measurement itself, not only its verdict: the Treatment stage feeds it to
     transmissionAmplitude_ = transmission;
-    correctionProgressBar_->setValue(percent);
+    couplingProgressBar_->setValue(percent);
     // checkCouplingSafety.m's own wording, including the line it appends when the report is not
     QStringList lines;
     ++correctionRunCount_;
@@ -314,7 +311,7 @@ void WorkflowWindow::applyCorrectionResult(const std::vector<std::string>& reply
             lines << QString::fromStdString(message);
         lines << QStringLiteral("Readjust coupling or add coupling gel over uncoupled elements");
     }
-    correctionStatusLabel_->setText(lines.join(QChar('\n')));
+    couplingStatusLabel_->setText(lines.join(QChar('\n')));
     updateCouplingCharts(transmission);
     // The through-transmit precondition just changed.
     updateSonicationSafety();
@@ -322,7 +319,6 @@ void WorkflowWindow::applyCorrectionResult(const std::vector<std::string>& reply
     if (!autoCouplingRecheck_ || !correctionCheckPassed_) {
         workflow_.change(beam::gui::WorkflowStage::Correction,
                          "Correction measured; awaiting operator acceptance.");
-        acceptCorrectionButton_->setEnabled(correctionCheckPassed_);
     }
     if (!autoCouplingRecheck_) {
         showMessage(correctionCheckPassed_

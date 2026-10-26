@@ -372,7 +372,7 @@ void WorkflowWindow::showScheduleRowMenu(const QPoint& where) {
     // Two cases land here: the blank row an empty plan draws, and the space below the last row
     if (!index.isValid() || protocolModel_->rows().empty()) {
         QMenu blank(this);
-        QAction* const add = blank.addAction(QStringLiteral("Add Row"));
+        QAction* const add = blank.addAction(QStringLiteral("Add Rows..."));
         QAction* const wholeProtocol =
             targetStore_.protocols().empty()
                 ? nullptr

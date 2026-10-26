@@ -121,8 +121,8 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
         header->setMinimumSectionSize(40);
         header->setStretchLastSection(false);
         static constexpr struct { int column; int width; } kStimWidths[] = {
-            {Stim::kTarget, 78},         {Stim::kX, 46},
-            {Stim::kY, 46},              {Stim::kZ, 46},
+            {Stim::kTarget, 78},         {Stim::kX, 68},
+            {Stim::kY, 68},              {Stim::kZ, 68},
             {Stim::kAmplitude, 76},      {Stim::kStartTime, 78},
             {Stim::kEndTime, 72},        {Stim::kBurstDuration, 104},
             {Stim::kBurstInterval, 100}, {Stim::kPulseDuration, 104},

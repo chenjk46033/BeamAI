@@ -1,5 +1,7 @@
 #include "treatment_internal.hpp"
 
+#include <QDialog>
+
 namespace beam::app {
 
 void WorkflowWindow::loadPatientData() {
@@ -404,21 +406,58 @@ void WorkflowWindow::addRowToVisit() {
         showMessage(QStringLiteral("The Target List is empty; there is nothing to add."), true);
         return;
     }
-    bool accepted = false;
-    const QString picked = QInputDialog::getItem(this, QStringLiteral("Add row"),
-                                                 QStringLiteral("Target:"), names, 0, false,
-                                                 &accepted);
-    if (!accepted || picked.isEmpty()) return;
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Add rows"));
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel(
+        QStringLiteral("Select one or more targets. Ctrl or Shift picks several."), &dialog));
+
+    auto* list = new QListWidget(&dialog);
+    applyItemViewPalette(list);
+    list->addItems(names);
+    list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    list->setCurrentRow(0);
+    layout->addWidget(list);
+
+    auto* countRow = new QHBoxLayout;
+    countRow->addWidget(new QLabel(QStringLiteral("Rows per target:"), &dialog));
+    auto* count = new QSpinBox(&dialog);
+    count->setRange(1, 50);
+    countRow->addWidget(count);
+    countRow->addStretch();
+    layout->addLayout(countRow);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    // Row order, not selection order, so the plan reads as the list does.
+    QStringList chosen;
+    for (int row = 0; row < list->count(); ++row)
+        if (list->item(row)->isSelected()) chosen << list->item(row)->text();
+    if (chosen.isEmpty()) return;
+
     const QString protocolName = currentProtocolName();
     const int visit = currentVisitNumber();
-    beam::gui::TreatmentLogRow row = rowForTarget(picked.toStdString(), std::nullopt);
-    row.protocol = protocolName.toStdString();
-    row.visit = visit;
-    treatmentLog_.append(std::move(row));
+    int added = 0;
+    for (const QString& name : chosen) {
+        for (int copy = 0; copy < count->value(); ++copy) {
+            beam::gui::TreatmentLogRow row = rowForTarget(name.toStdString(), std::nullopt);
+            row.protocol = protocolName.toStdString();
+            row.visit = visit;
+            treatmentLog_.append(std::move(row));
+            ++added;
+        }
+    }
     markVisitEdited(protocolName, visit);
     loadTreatmentProtocol(protocolName);
     saveTreatmentTargetStore();
-    showMessage(QStringLiteral("%1 added to visit %2.").arg(picked).arg(visit), false);
+    showMessage(added == 1
+                    ? QStringLiteral("1 row added to visit %1.").arg(visit)
+                    : QStringLiteral("%1 rows added to visit %2.").arg(added).arg(visit),
+                false);
 }
 
 }  // namespace beam::app
