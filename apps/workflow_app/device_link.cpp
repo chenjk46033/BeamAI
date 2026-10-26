@@ -79,3 +79,23 @@ std::string WorkflowWindow::calibrationDutyText() const { return joinValues(cali
 std::string WorkflowWindow::calibrationPressureText() const { return joinValues(calibration_.pressureMpa); }
 
 }  // namespace beam::app
+
+namespace beam::app {
+
+// The fiducials the registration was solved from, in MRI RAS millimetres.
+// Stored rather than the transform: the transform is a deterministic
+// function of these, and these are what an operator can check.
+QString WorkflowWindow::fiducialsAsText() const {
+    QStringList parts;
+    for (const beam::registration::FiducialMarker& marker : fiducials_) {
+        const Eigen::Vector3d mm = marker.position * 1000.0;
+        parts << QStringLiteral("%1:%2,%3,%4")
+                     .arg(QString::fromStdString(marker.name))
+                     .arg(mm.x(), 0, 'f', 3)
+                     .arg(mm.y(), 0, 'f', 3)
+                     .arg(mm.z(), 0, 'f', 3);
+    }
+    return parts.join(QLatin1Char(';'));
+}
+
+}  // namespace beam::app

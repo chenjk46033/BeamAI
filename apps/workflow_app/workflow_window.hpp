@@ -405,6 +405,8 @@ private:
     void buildTreatmentExecutionBody(const QString& acceptButtonStyle);
     void buildDeviceLinkPanel();
     void loadCalibrationCurve();
+    QString mriGeometryFingerprint() const;
+    QString fiducialsAsText() const;
     std::string calibrationDutyText() const;
     std::string calibrationPressureText() const;
     void startCorrectionMeasurement(std::function<void()> then);
@@ -484,6 +486,9 @@ private:
     bool correctionCheckPassed_ = false;
     int registrationStartFiducialRow_ = -1;
     QString mriPath_;
+    // Dimensions and affine of the loaded scan, so a delivery can name the
+    // image its RAS coordinates came from.
+    QString mriFingerprint_;
     QHash<QString, QString> sliceSliderTips_;
     QSlider* leftHorizontalPositionSlider_ = nullptr;
     QSlider* leftVerticalPositionSlider_ = nullptr;

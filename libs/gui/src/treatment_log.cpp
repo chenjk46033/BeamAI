@@ -468,6 +468,11 @@ void TreatmentLog::load(const std::string& path) {
         row.deviceSerial = text("HardwareSerialNumber");
         row.calDuty = text("CalDuty");
         row.calPressure = text("CalPressure");
+        row.mriFile = text("MRIFile");
+        row.mriFingerprint = text("MRIFingerprint");
+        row.fiducialsMm = text("Fiducials");
+        row.lockHorizontal = static_cast<int>(number("LockH", 0));
+        row.lockVertical = static_cast<int>(number("LockV", 0));
         const std::string fromPlan = text("FromPlan");
         row.fromPlan = fromPlan.empty() || fromPlan == "1" || fromPlan == "true";
         // The first row that names anybody names the file. Rows written before
@@ -517,7 +522,8 @@ void TreatmentLog::save(const std::string& path) const {
             "BEAMSerialNumber,"
             "Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,"
             "HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,"
-            "Protocol,FromPlan,StatusCode,DeviceModel,CalDuty,CalPressure\n";
+            "Protocol,FromPlan,StatusCode,DeviceModel,CalDuty,CalPressure,MRIFile,"
+            "MRIFingerprint,Fiducials,LockH,LockV\n";
     for (const TreatmentLogRow& row : rows_) {
         file << row.sequence << ',' << quote(row.target) << ','
              << (row.endTimeSeconds - row.startTimeSeconds) << ',' << row.amplitude << ','
@@ -551,7 +557,9 @@ void TreatmentLog::save(const std::string& path) const {
              << (row.sham ? 1 : 0) << ',' << quote(row.protocol) << ','
              << (row.fromPlan ? 1 : 0) << ',' << row.statusCode << ','
              << quote(row.deviceModel) << ',' << quote(row.calDuty) << ','
-             << quote(row.calPressure) << '\n';
+             << quote(row.calPressure) << ',' << quote(row.mriFile) << ','
+             << quote(row.mriFingerprint) << ',' << quote(row.fiducialsMm) << ','
+             << row.lockHorizontal << ',' << row.lockVertical << '\n';
     }
     if (!file) throw std::runtime_error("failed while writing " + path);
 }

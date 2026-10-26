@@ -3897,6 +3897,13 @@ void WorkflowWindow::recordSonicationStart(const beam::gui_qt::StimParamRow& row
     }
     entry.calDuty = calibrationDutyText();
     entry.calPressure = calibrationPressureText();
+    entry.mriFile = mriPath_.toStdString();
+    entry.mriFingerprint = mriFingerprint_.toStdString();
+    entry.fiducialsMm = fiducialsAsText().toStdString();
+    if (leftHorizontalPositionSlider_ != nullptr)
+        entry.lockHorizontal = leftHorizontalPositionSlider_->value();
+    if (leftVerticalPositionSlider_ != nullptr)
+        entry.lockVertical = leftVerticalPositionSlider_->value();
     entry.startedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs).toStdString();
     entry.statusCode = beam::gui::TreatmentLog::kRunning;
     // BeamV0 writes into treatmentProtocolTable row i, where i is the Current
@@ -5265,6 +5272,19 @@ void WorkflowWindow::exportCaseReport() {
                              QString::fromStdString(calibrationDutyText())));
     pair("CalPressure", recorded(&beam::gui::TreatmentLogRow::calPressure,
                                  QString::fromStdString(calibrationPressureText())));
+    pair("MRIFile", recorded(&beam::gui::TreatmentLogRow::mriFile, mriPath_));
+    pair("MRIFingerprint",
+         recorded(&beam::gui::TreatmentLogRow::mriFingerprint, mriFingerprint_));
+    pair("Fiducials", recorded(&beam::gui::TreatmentLogRow::fiducialsMm, fiducialsAsText()));
+    {
+        const auto rows = treatmentLog_.rowsFor(currentProtocolName().toStdString(), visit);
+        const QString lock =
+            rows.empty() ? QString()
+                         : QStringLiteral("H%1V%2")
+                               .arg(rows.front().lockHorizontal)
+                               .arg(rows.front().lockVertical);
+        pair("LockPosition", lock);
+    }
     pair("ExportedAt", QDateTime::currentDateTime().toString(Qt::ISODate));
     out << '\n';
     out << "Number,Target,Started,Ended,DurationSeconds,Amplitude,BD,BI,PD,PI,Sham,Outcome,"

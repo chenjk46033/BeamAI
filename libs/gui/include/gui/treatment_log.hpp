@@ -70,6 +70,18 @@ struct TreatmentLogRow {
     std::string deviceSerial;
     std::string calDuty;
     std::string calPressure;
+    // X/Y/Z are RAS millimetres, and RAS is defined by the image's affine:
+    // without naming the scan the coordinates do not mean anything.
+    std::string mriFile;
+    // Dimensions and affine, so a renamed or moved file is still recognised.
+    std::string mriFingerprint;
+    // The registration, as the measurements it was derived from: the array
+    // transform is a deterministic function of these, so they re-derive it.
+    // "name:x,y,z;..." in MRI RAS millimetres.
+    std::string fiducialsMm;
+    // Which of the sixteen lock positions the array was set to.
+    int lockHorizontal = 0;
+    int lockVertical = 0;
     // Operator-entered, filled in after the fact.
     std::optional<double> responsePain;
     std::optional<double> responseMood;

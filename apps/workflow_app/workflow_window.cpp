@@ -2072,6 +2072,7 @@ void WorkflowWindow::installMri(beam::mri::Volume3D volume, beam::mri::RasAxisVe
     if (mriAxes_.dimIS.size() > 1 && mriAxes_.dimIS(0) > mriAxes_.dimIS(mriAxes_.dimIS.size() - 1)) mriAxes_.dimIS.reverseInPlace();
     mriLoaded_ = true;
     mriPath_ = path;
+    mriFingerprint_ = mriGeometryFingerprint();
     workflow_.change(beam::gui::WorkflowStage::Imaging, "MRI changed; registration and later approvals require review.");
     setMriPathDisplay(path);
     const auto resolution = beam::mri::computeVoxelResolution(mriAxes_);
@@ -2164,6 +2165,7 @@ void WorkflowWindow::loadMri(const QString& path) {
             mriAxes_.dimIS.reverseInPlace();
         mriLoaded_ = true;
         mriPath_ = path;
+        mriFingerprint_ = mriGeometryFingerprint();
         workflow_.change(beam::gui::WorkflowStage::Imaging,
                          "MRI changed; registration and later approvals require review.");
         setMriPathDisplay(path);
@@ -4493,6 +4495,20 @@ void WorkflowWindow::applyCorrectionResult(const std::vector<std::string>& reply
                     !correctionCheckPassed_);
     }
     refresh();
+}
+
+// Extent and sampling of the loaded scan. Not a content hash: what makes RAS
+// millimetres mean something is the geometry, and that is what this pins.
+QString WorkflowWindow::mriGeometryFingerprint() const {
+    if (!mriLoaded_ || mriAxes_.dimLR.size() < 2) return QString();
+    const auto span = [](const Eigen::VectorXd& axis) {
+        return QStringLiteral("%1:%2..%3")
+            .arg(axis.size())
+            .arg(axis(0), 0, 'f', 3)
+            .arg(axis(axis.size() - 1), 0, 'f', 3);
+    };
+    return QStringLiteral("%1;%2;%3")
+        .arg(span(mriAxes_.dimLR), span(mriAxes_.dimAP), span(mriAxes_.dimIS));
 }
 
 }  // namespace beam::app

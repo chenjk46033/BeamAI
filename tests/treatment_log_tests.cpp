@@ -960,3 +960,41 @@ TEST(TreatmentLog, ClearForgetsTheName) {
     log.clear();
     EXPECT_TRUE(log.subjectName().empty());
 }
+
+// X/Y/Z are RAS millimetres, which only mean something against a named scan.
+TEST(TreatmentLog, MriProvenanceSurvivesAReload) {
+    const std::string path = scratch("mri_provenance.csv");
+    {
+        beam::gui::TreatmentLog log;
+        beam::gui::TreatmentLogRow row;
+        row.protocol = "P";
+        row.target = "T1";
+        row.mriFile = "beamai_F040_T1_MRI.nii";
+        row.mriFingerprint = "256:-127.500..128.000;256:-127.500..128.000;176:-70.000..105.000";
+        row.deviceModel = "NUCLEO-F303RE";
+        row.deviceSerial = "066FFF343433464757204334";
+        row.calDuty = "40;45;56;75;80;90;97.5";
+        row.calPressure = "0.75;1.12;1.72;2.95;3.1;3.72;3.92";
+        row.fiducialsMm = "LeftY1Z3:12.345,6.789,-1.234;RightY1Z1:-12.345,6.789,-1.234";
+        row.lockHorizontal = 3;
+        row.lockVertical = 2;
+        log.append(row);
+        log.save(path);
+    }
+    beam::gui::TreatmentLog reloaded;
+    reloaded.load(path);
+    ASSERT_EQ(reloaded.rows().size(), 1u);
+    const beam::gui::TreatmentLogRow& back = reloaded.rows().front();
+    EXPECT_EQ(back.mriFile, "beamai_F040_T1_MRI.nii");
+    EXPECT_EQ(back.mriFingerprint,
+              "256:-127.500..128.000;256:-127.500..128.000;176:-70.000..105.000");
+    EXPECT_EQ(back.deviceModel, "NUCLEO-F303RE");
+    EXPECT_EQ(back.deviceSerial, "066FFF343433464757204334");
+    EXPECT_EQ(back.calDuty, "40;45;56;75;80;90;97.5");
+    EXPECT_EQ(back.calPressure, "0.75;1.12;1.72;2.95;3.1;3.72;3.92");
+    EXPECT_EQ(back.fiducialsMm,
+              "LeftY1Z3:12.345,6.789,-1.234;RightY1Z1:-12.345,6.789,-1.234");
+    EXPECT_EQ(back.lockHorizontal, 3);
+    EXPECT_EQ(back.lockVertical, 2);
+    std::remove(path.c_str());
+}
