@@ -184,6 +184,7 @@ QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
     // Same control as the Registration page's, borrowing its stylesheet rather than repeating
     const auto makeLockSlider = [this, holder](Qt::Orientation orientation, int value) {
         auto* slider = new NumberedSlider(orientation, holder);
+        slider->setStyleSheet(QString::fromLatin1(kSliderStyle));
         slider->setRange(1, 4);
         slider->setSingleStep(1);
         slider->setPageStep(1);

@@ -122,6 +122,25 @@
                 </widget>
               </item>
               <item>
+                <widget class="QLabel" name="operatorHeader">
+                  <property name="minimumSize">
+                    <size>
+                      <width>150</width>
+                      <height>0</height>
+                    </size>
+                  </property>
+                  <property name="maximumSize">
+                    <size>
+                      <width>150</width>
+                      <height>16777215</height>
+                    </size>
+                  </property>
+                  <property name="text">
+                    <string>Operator: —</string>
+                  </property>
+                </widget>
+              </item>
+              <item>
                 <widget class="QLabel" name="deviceHeader">
                   <property name="text">
                     <string>● Device not checked</string>
@@ -465,6 +484,16 @@
                                         </property>
                                         <property name="checked">
                                           <bool>true</bool>
+                                        </property>
+                                      </widget>
+                                    </item>
+                                    <item>
+                                      <widget class="QCheckBox" name="showSteeringRangeCheckBox">
+                                        <property name="text">
+                                          <string>Show steering range</string>
+                                        </property>
+                                        <property name="toolTip">
+                                          <string>Volume the array can steer into: 90 x 56 x 30 mm about the array centre.</string>
                                         </property>
                                       </widget>
                                     </item>
@@ -1047,6 +1076,16 @@
                                 </widget>
                               </item>
                               <item>
+                                <widget class="QCheckBox" name="registrationShowSteeringRangeCheckBox">
+                                  <property name="text">
+                                    <string>Show steering range</string>
+                                  </property>
+                                  <property name="toolTip">
+                                    <string>Volume the array can steer into: 90 x 56 x 30 mm about the array centre.</string>
+                                  </property>
+                                </widget>
+                              </item>
+                              <item>
                                 <spacer name="registrationBrightnessControlGap">
                                   <property name="orientation">
                                     <enum>Qt::Horizontal</enum>
@@ -1123,7 +1162,26 @@
                                   <property name="enabled">
                                     <bool>false</bool>
                                   </property>
+                                  <property name="styleSheet">
+                                    <string>QPushButton { padding: 5px 10px; background: #e4f4f8; color: #12556d; border: 2px solid #2382a1; border-radius: 4px; font-weight: 600; } QPushButton:disabled { background: #edf1f2; color: #9aa6ac; border-color: #bdc7cb; }</string>
+                                  </property>
                                 </widget>
+                              </item>
+                              <item>
+                                <spacer name="registrationResetButtonGap">
+                                  <property name="orientation">
+                                    <enum>Qt::Horizontal</enum>
+                                  </property>
+                                  <property name="sizeType">
+                                    <enum>QSizePolicy::Fixed</enum>
+                                  </property>
+                                  <property name="sizeHint">
+                                    <size>
+                                      <width>14</width>
+                                      <height>1</height>
+                                    </size>
+                                  </property>
+                                </spacer>
                               </item>
                               <item>
                                 <widget class="QPushButton" name="registrationResetInitialSlicesButton">

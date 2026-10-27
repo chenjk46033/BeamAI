@@ -178,13 +178,16 @@ void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     rightColumn->addWidget(stimParamView_);
     // Under the grid, because that is where the numbers that fail it are typed.
     sonicationSafetyLabel_ = new QLabel(bodyContent);
-    sonicationSafetyLabel_->setWordWrap(true);
+    // One line: it shares the status row now, and wrapping there costs the
+    // viewers height. The full text is on the tooltip.
+    sonicationSafetyLabel_->setWordWrap(false);
     sonicationSafetyLabel_->setTextFormat(Qt::RichText);
     // Worth copying: the numbers in it are what an operator quotes when they ask someone about
     sonicationSafetyLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
                                                    Qt::TextSelectableByKeyboard);
     sonicationSafetyLabel_->setCursor(Qt::IBeamCursor);
-    rightColumn->addWidget(sonicationSafetyLabel_);
+    // Added to the execution status row instead, so it shares that line rather
+    // than taking a row of its own out of the viewers.
     // Separate from the banner above it: that one is about the sonication being fired now, this
     sonicationPrecheckLabel_ = new QLabel(bodyContent);
     sonicationPrecheckLabel_->setWordWrap(true);

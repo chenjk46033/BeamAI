@@ -42,12 +42,50 @@ QString WorkflowWindow::patientDataDirectory() const {
 
 // Who the patient is, as against which participant number they carry.
 void WorkflowWindow::buildCaseDemographics() {
-    const auto add = [this](const QString& label, const QString& placeholder) {
-        auto* edit = new QLineEdit(ui_->caseGroup);
+    // Who is running the case, not who is being treated: above the patient's own fields, and
+    // it survives a change of patient.
+    operatorIdEdit_ = new QLineEdit(ui_->caseGroup);
+    operatorIdEdit_->setPlaceholderText(QStringLiteral("Who is running this visit"));
+    styleInputField(operatorIdEdit_);
+    ui_->caseForm->insertRow(0, QStringLiteral("Operator ID"), operatorIdEdit_);
+    connect(operatorIdEdit_, &QLineEdit::textChanged, this, [this](const QString& text) {
+        const QString shown = text.trimmed();
+        ui_->operatorHeader->setText(shown.isEmpty()
+                                         ? QStringLiteral("Operator: —")
+                                         : QStringLiteral("Operator: %1").arg(shown));
+    });
+
+    // The patient's own fields are entered in a dialog, so the page is the list of patients
+    // and the one line saying which of them is open.
+    createPatientDialog_ = new QDialog(this);
+    createPatientDialog_->setWindowTitle(QStringLiteral("Create patient"));
+    createPatientDialog_->setMinimumWidth(420);
+    auto* dialogLayout = new QVBoxLayout(createPatientDialog_);
+    auto* dialogForm = new QFormLayout;
+    dialogLayout->addLayout(dialogForm);
+
+    // Moved rather than rebuilt, so everything that already reads these two keeps working.
+    const auto moveRow = [this, dialogForm](QLineEdit* edit) {
+        QFormLayout::TakeRowResult taken = ui_->caseForm->takeRow(edit);
+        QWidget* label = taken.labelItem == nullptr ? nullptr : taken.labelItem->widget();
+        delete taken.labelItem;
+        delete taken.fieldItem;
+        edit->setParent(createPatientDialog_);
+        if (label == nullptr) {
+            dialogForm->addRow(edit);
+        } else {
+            label->setParent(createPatientDialog_);
+            dialogForm->addRow(label, edit);
+        }
+    };
+    moveRow(ui_->participantEdit);
+    moveRow(ui_->siteEdit);
+
+    const auto add = [this, dialogForm](const QString& label, const QString& placeholder) {
+        auto* edit = new QLineEdit(createPatientDialog_);
         edit->setPlaceholderText(placeholder);
         styleInputField(edit);
-        // Below Site ID, above the Accept button, which is the last row.
-        ui_->caseForm->insertRow(ui_->caseForm->rowCount() - 1, label, edit);
+        dialogForm->addRow(label, edit);
         return edit;
     };
     lastNameEdit_ = add(QStringLiteral("Last name"), QStringLiteral("Optional"));
@@ -57,19 +95,40 @@ void WorkflowWindow::buildCaseDemographics() {
         add(QStringLiteral("Date of birth (YYYY-MM-DD)"), QStringLiteral("Optional"));
     // Typed plainly. An input mask returned "--" for an empty field, which the validation
 
-    // The header carries the name once there is one -- it is what the operator recognises,
+    auto* dialogButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+                                               createPatientDialog_);
+    dialogButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Create"));
+    dialogLayout->addWidget(dialogButtons);
+    connect(dialogButtons, &QDialogButtonBox::accepted, createPatientDialog_, &QDialog::accept);
+    connect(dialogButtons, &QDialogButtonBox::rejected, createPatientDialog_, &QDialog::reject);
+
+    casePatientLabel_ = new QLabel(ui_->caseGroup);
+    casePatientLabel_->setStyleSheet(QStringLiteral("QLabel { color: #dcebef; }"));
+    ui_->caseForm->insertRow(1, QStringLiteral("Patient"), casePatientLabel_);
+
+    // The header and the page line both name whoever the fields hold.
     const auto follow = [this] {
         const beam::gui::Patient typed = caseDemographics();
-        const QString shown = QString::fromStdString(beam::gui::patientDisplayName(typed));
+        const QString name = QString::fromStdString(beam::gui::patientDisplayName(typed));
         ui_->participantHeader->setText(
-            shown.isEmpty() ? QStringLiteral("Participant: —")
-                            : QStringLiteral("Participant: %1").arg(shown));
+            name.isEmpty() ? QStringLiteral("Participant: —")
+                           : QStringLiteral("Participant: %1").arg(name));
+        QStringList parts;
+        if (!typed.externalId.empty()) parts << QString::fromStdString(typed.externalId);
+        if (!name.isEmpty()) parts << name;
+        if (!typed.site.empty()) parts << QString::fromStdString(typed.site);
+        casePatientLabel_->setText(
+            parts.isEmpty()
+                ? QStringLiteral("No patient open. Create one, or pick a row below.")
+                : parts.join(QStringLiteral("   ·   ")));
     };
-    connect(lastNameEdit_, &QLineEdit::textChanged, this, follow);
-    connect(firstNameEdit_, &QLineEdit::textChanged, this, follow);
+    for (QLineEdit* edit : {ui_->participantEdit, ui_->siteEdit, lastNameEdit_, firstNameEdit_,
+                            dateOfBirthEdit_})
+        connect(edit, &QLineEdit::textChanged, this, follow);
+    follow();
 
     // Two steps, because they are two decisions.
-    createPatientButton_ = new QPushButton(QStringLiteral("Create patient"), ui_->caseGroup);
+    createPatientButton_ = new QPushButton(QStringLiteral("Create patient…"), ui_->caseGroup);
     createPatientButton_->setStyleSheet(
         QStringLiteral("QPushButton { padding: 9px 16px; background: #2b4a58; color: #dcebef; "
                        "border: 1px solid #39758e; border-radius: 5px; font-weight: 600; } "
@@ -78,8 +137,19 @@ void WorkflowWindow::buildCaseDemographics() {
         QStringLiteral("Opens this patient's record and adds them to the list below, without "
                        "leaving this page."));
     connect(createPatientButton_, &QPushButton::clicked, this, [this] {
-        if (!caseFieldsUsable()) return;
-        selectPatient(caseDemographics(), /*advancing=*/false);
+        // A new record starts blank rather than from whoever is open.
+        showCaseDemographics(beam::gui::Patient{});
+        ui_->participantEdit->setFocus(Qt::OtherFocusReason);
+        while (createPatientDialog_->exec() == QDialog::Accepted) {
+            if (!caseFieldsUsable(createPatientDialog_)) continue;
+            selectPatient(caseDemographics(), /*advancing=*/false);
+            return;
+        }
+        // Cancelled, so the fields go back to naming whoever is still open.
+        beam::gui::Patient open;
+        showCaseDemographics(currentPatientId_ != 0 && patients_.find(currentPatientId_, &open)
+                                 ? open
+                                 : beam::gui::Patient{});
     });
 
     // The Accept button moves out of the form's own column and alongside it.
@@ -108,18 +178,23 @@ void WorkflowWindow::buildCaseDemographics() {
 }
 
 // The two required fields, and a date of birth that is blank or a date.
-bool WorkflowWindow::caseFieldsUsable() {
+bool WorkflowWindow::caseFieldsUsable(QWidget* messageParent) {
+    const auto complain = [this, messageParent](const QString& text) {
+        if (messageParent == nullptr)
+            showMessage(text, true);
+        else
+            QMessageBox::warning(messageParent, QStringLiteral("Patient details"), text);
+    };
     if (ui_->participantEdit->text().trimmed().isEmpty() ||
         ui_->siteEdit->text().trimmed().isEmpty()) {
-        showMessage(QStringLiteral("Participant ID and Site ID are required."), true);
+        complain(QStringLiteral("Participant ID and Site ID are required."));
         return false;
     }
     std::string born;
     if (dateOfBirthEdit_ != nullptr && !readDateOfBirth(dateOfBirthEdit_->text(), &born)) {
-        showMessage(QStringLiteral("\"%1\" is not a date. Use YYYY-MM-DD, or leave the date of "
-                                   "birth blank.")
-                        .arg(dateOfBirthEdit_->text().trimmed()),
-                    true);
+        complain(QStringLiteral("\"%1\" is not a date. Use YYYY-MM-DD, or leave the date of "
+                                "birth blank.")
+                     .arg(dateOfBirthEdit_->text().trimmed()));
         dateOfBirthEdit_->setFocus(Qt::OtherFocusReason);
         dateOfBirthEdit_->selectAll();
         return false;
@@ -279,9 +354,8 @@ void WorkflowWindow::refreshPatientChooser() {
     patientChooserHint_->setText(
         people.empty()
             ? QString()
-            : QStringLiteral("Pick the patient in front of you, or type a new Participant ID "
-                             "above to start a record. Each patient's visits are kept "
-                             "separately."));
+            : QStringLiteral("Pick the patient in front of you, or use Create patient to start "
+                             "a record. Each patient's visits are kept separately."));
 
     // Whoever the filter admits.
     const QString needle =

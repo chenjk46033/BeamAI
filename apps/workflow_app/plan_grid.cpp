@@ -486,6 +486,7 @@ void WorkflowWindow::updateSonicationSafety() {
 
     if (sonicationSafetyPass_) {
         // The source's own word for a clean report.
+        sonicationSafetyLabel_->setToolTip(sonicationSafetyMessages_.join(QChar(0x0a)));
         sonicationSafetyLabel_->setText(
             QStringLiteral("<b style='color:#5ec46a'>&#9679; Sonication Online</b>"));
         sonicationSafetyLabel_->setStyleSheet(QStringLiteral(
@@ -495,6 +496,7 @@ void WorkflowWindow::updateSonicationSafety() {
         QStringList shown;
         for (const QString& message : sonicationSafetyMessages_)
             shown << message.toHtmlEscaped();
+        sonicationSafetyLabel_->setToolTip(sonicationSafetyMessages_.join(QChar(0x0a)));
         sonicationSafetyLabel_->setText(
             QStringLiteral("<b style='color:#ff554a'>&#9679; Sonication blocked</b> &nbsp; %1")
                 .arg(shown.join(QStringLiteral("<br>"))));
@@ -502,6 +504,9 @@ void WorkflowWindow::updateSonicationSafety() {
             "QLabel { color: #ffd9d6; background: #351a19; border: 1px solid #8e1b1b; "
             "border-radius: 4px; padding: 5px 10px; }"));
     }
+    // One status on this row. A clean report adds nothing to the countdown line beside it, and
+    // the device's own state is already in the header.
+    sonicationSafetyLabel_->setVisible(!sonicationSafetyPass_);
     stimParamModel_->setUnsafeCells(unsafe);
     precheckPendingSonications();
     // Re-applies the gate above to whatever buttons are on the current row.

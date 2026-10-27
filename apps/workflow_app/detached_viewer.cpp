@@ -1,6 +1,7 @@
 // "Open viewer in a new window" -- a larger, resizable window showing one MRI plane, with the
 
 #include "workflow_window.hpp"
+#include "workflow_internal.hpp"
 
 #include <array>
 
@@ -197,6 +198,7 @@ void WorkflowWindow::openDetachedViewer(WorkflowMriView* source, const QString& 
     auto* resetButton = mirrorButton(reset, QStringLiteral("↺"));
 
     auto* windowSlider = new QSlider(Qt::Horizontal, window);
+    windowSlider->setStyleSheet(QString::fromLatin1(kSliderStyle));
     if (slider) {
         windowSlider->setRange(slider->minimum(), slider->maximum());
         windowSlider->setValue(slider->value());
@@ -307,13 +309,12 @@ void WorkflowWindow::wireDetachedViewerMenus() {
             openDetachedViewer(captured.view, QString::fromLatin1(captured.title), captured.slider,
                                captured.previous, captured.next, captured.reset, captured.label);
         });
+        pane.view->setOpenSceneHandler([this] { openSceneWindow(); });
         // Only the Registration panes carry the overlay, which is what their lock position is
         if (pane.view == ui_->registrationSagittalPreview ||
             pane.view == ui_->registrationCoronalPreview ||
-            pane.view == ui_->registrationAxialPreview) {
+            pane.view == ui_->registrationAxialPreview)
             pane.view->setLockOverlayHandler([this](bool on) { setLockOverlayShown(on); });
-            pane.view->setOpenSceneHandler([this] { openSceneWindow(); });
-        }
     }
 }
 

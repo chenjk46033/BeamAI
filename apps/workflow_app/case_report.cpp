@@ -32,6 +32,14 @@ void WorkflowWindow::buildReportBody() {
     reportOperatorEdit_->setMaximumWidth(160);
     styleInputField(reportOperatorEdit_);
     connect(reportOperatorEdit_, &QLineEdit::textChanged, this, [this] { refreshReport(); });
+    // One operator per visit, whichever page it was typed on.
+    if (operatorIdEdit_ != nullptr) {
+        reportOperatorEdit_->setText(operatorIdEdit_->text());
+        connect(operatorIdEdit_, &QLineEdit::textChanged, reportOperatorEdit_,
+                &QLineEdit::setText);
+        connect(reportOperatorEdit_, &QLineEdit::textChanged, operatorIdEdit_,
+                &QLineEdit::setText);
+    }
     chooser->addWidget(reportOperatorEdit_);
     chooser->addStretch(1);
     exportReportButton_ = new QPushButton(QStringLiteral("Export CSV"), identityGroup);

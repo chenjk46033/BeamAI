@@ -12,6 +12,13 @@
 #include <functional>
 #include <vector>
 
+// getMaxSteeringRange.m's box, drawn per plane: the volume the array can steer
+// into, so a target outside it cannot be delivered.
+struct WorkflowMriRect {
+    QRectF normalized;
+    QColor color;
+};
+
 struct WorkflowMriMarker {
     QPointF normalizedPosition;
     QString label;
@@ -40,6 +47,7 @@ public:
     void setMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity, bool flipHorizontal = false);
     void setSecondaryMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity, bool flipHorizontal = false);
     void setMarkers(std::vector<WorkflowMriMarker> markers);
+    void setRects(std::vector<WorkflowMriRect> rects);
     void setRasMapping(QString plane, double fixedCoordinateMm,
                        double horizontalMinMm, double horizontalMaxMm,
                        double verticalMinMm, double verticalMaxMm,
@@ -155,6 +163,7 @@ private:
     QImage maskImage_;
     QImage secondaryMaskImage_;
     std::vector<WorkflowMriMarker> markers_;
+    std::vector<WorkflowMriRect> rects_;
     bool flipHorizontal_ = false;
     double dataMin_ = 0.0;
     double dataMax_ = 1.0;

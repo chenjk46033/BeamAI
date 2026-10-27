@@ -222,18 +222,22 @@ void WorkflowWindow::completeCurrentStage() {
 
 
 // Port of the array-position line BeamV0's drawROIs.m maintains: centerArrayMM =
+Eigen::Vector3d WorkflowWindow::arrayCentreMm() const {
+    const Eigen::Index columns = arrayData_.arrayTotal.rect.cols();
+    if (columns == 0) return Eigen::Vector3d::Zero();
+    return arrayData_.arrayTotal.rect.block(beam::array::kRectCenterStartRow, 0, 3, columns)
+               .rowwise()
+               .mean() *
+           1000.0;
+}
+
 void WorkflowWindow::updateArrayPositionReadout() {
     if (!arrayPositionLabel_) return;
-    const Eigen::Index columns = arrayData_.arrayTotal.rect.cols();
-    if (!registrationGeometryLoaded_ || columns == 0) {
+    if (!registrationGeometryLoaded_ || arrayData_.arrayTotal.rect.cols() == 0) {
         arrayPositionLabel_->setText(QStringLiteral("Array position    not placed"));
         return;
     }
-    const Eigen::Vector3d centreMm =
-        arrayData_.arrayTotal.rect.block(beam::array::kRectCenterStartRow, 0, 3, columns)
-            .rowwise()
-            .mean() *
-        1000.0;
+    const Eigen::Vector3d centreMm = arrayCentreMm();
     arrayPositionLabel_->setText(QStringLiteral("Array position    X %1    Y %2    Z %3  mm")
                                      .arg(centreMm.x(), 10, 'f', 3)
                                      .arg(centreMm.y(), 10, 'f', 3)

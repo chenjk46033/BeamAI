@@ -28,7 +28,9 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     treatmentExecutionProgressBar_->setMinimumWidth(210);
     treatmentExecutionProgressBar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     // The bar takes the larger share of the row: it is what the operator watches while a
-    statusColumn->addWidget(sonicationCountdownLabel_, 1);
+    sonicationSafetyLabel_->setParent(treatmentExecutionBody_);
+    statusColumn->addWidget(sonicationCountdownLabel_, 0);
+    statusColumn->addWidget(sonicationSafetyLabel_, 1);
     statusColumn->addWidget(treatmentExecutionProgressBar_, 1);
     row->addLayout(statusColumn, 1);
 

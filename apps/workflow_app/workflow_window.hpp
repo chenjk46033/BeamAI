@@ -212,6 +212,7 @@ private:
     void switchToSelectedTarget();
     void saveCurrentTargetSonications();
     void applyArrayCentreToAllTargets(const Eigen::Vector3d& centreMm);
+    Eigen::Vector3d arrayCentreMm() const;
     void updateStimGridHeight();
     void loadTreatmentProtocol(const QString& protocolName);
     QString treatmentDataDirectory() const;
@@ -264,7 +265,7 @@ private:
     // Opens the record of whoever the Case page names, writing out whoever was open before.
     void selectPatient(const beam::gui::Patient& details, bool advancing);
     // Both Case buttons agree about what is acceptable by asking this.
-    bool caseFieldsUsable();
+    bool caseFieldsUsable(QWidget* messageParent = nullptr);
     // Reads this patient's log and visit state in place of whoever was there, and puts the
     void loadPatientData();
     void savePatientData();
@@ -360,7 +361,7 @@ private:
     // app.sys.RTT(1).couplingThreshold. beam_app's port uses the same value.
     static constexpr double kCouplingThreshold = 0.10;
     // Height the Treatment plan body is guaranteed under the MRI viewers; it scrolls below that
-    static constexpr int kTreatmentBodyMinHeight = 360;
+    static constexpr int kTreatmentBodyMinHeight = 316;
     // Fixed viewer height for the Treatment plan stage, which shares its page with the whole
     static constexpr int kTreatmentViewerHeight = 420;
     // The Treatment page's viewers may not squeeze the plan below this.
@@ -470,7 +471,10 @@ private:
     QLineEdit* lastNameEdit_ = nullptr;
     QLineEdit* firstNameEdit_ = nullptr;
     QLineEdit* dateOfBirthEdit_ = nullptr;
+    QLineEdit* operatorIdEdit_ = nullptr;
     QPushButton* createPatientButton_ = nullptr;
+    QDialog* createPatientDialog_ = nullptr;
+    QLabel* casePatientLabel_ = nullptr;
     QWidget* reportBody_ = nullptr;
     QComboBox* reportVisitCombo_ = nullptr;
     QLineEdit* reportOperatorEdit_ = nullptr;
