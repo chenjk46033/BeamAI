@@ -296,6 +296,7 @@ private:
     void setSonicateEnabled(bool enabled);
     void paintRunningButton();
     void selectScheduledSonication(int oneBased);
+    void showCurrentSonicationRow();
     void refreshVisitCombo();
     // Selects a visit by number, whatever the item happens to read.
     void selectVisit(int visit);

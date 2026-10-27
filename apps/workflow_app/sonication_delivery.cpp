@@ -296,6 +296,14 @@ void WorkflowWindow::applyScheduledDurationToGrid() {
     stimParamModel_->setRows(std::move(rows));
 }
 
+// The running row carries Stop and the lamp, so it has to be on screen rather than below the
+// log's fold.
+void WorkflowWindow::showCurrentSonicationRow() {
+    if (protocolView_ == nullptr || protocolModel_ == nullptr || currentSonication_ <= 0) return;
+    const QModelIndex cell = protocolModel_->index(currentSonication_ - 1, 0);
+    if (cell.isValid()) protocolView_->scrollTo(cell, QAbstractItemView::EnsureVisible);
+}
+
 void WorkflowWindow::selectScheduledSonication(int oneBased) {
     if (!protocolModel_) return;
     const int scheduled = static_cast<int>(protocolModel_->rows().size());
@@ -311,7 +319,10 @@ void WorkflowWindow::selectScheduledSonication(int oneBased) {
     const int position = std::clamp(oneBased, 1, scheduled);
 
     currentSonication_ = position;
-    if (protocolView_) protocolView_->selectRow(position - 1);
+    if (protocolView_) {
+        protocolView_->selectRow(position - 1);
+        showCurrentSonicationRow();
+    }
     // Every row delivered means there is no "next" one: marking a finished row as current, and
     bool anyLeft = false;
     for (const beam::gui_qt::TreatmentProtocolRow& row : protocolModel_->rows())
@@ -773,6 +784,7 @@ void WorkflowWindow::startSonicationCountdown(int durationSeconds, bool sham) {
     }
     runningFlashOn_ = true;
     runningFlashTimer_->start();
+    showCurrentSonicationRow();
     // The bar takes the colour of the tick this row will end up with, so the two say the same
     treatmentExecutionProgressBar_->setStyleSheet(progressBarStyle(
         sham ? QColor(0xe0, 0xa3, 0x2e) : QColor(0x5e, 0xc4, 0x6a)));
