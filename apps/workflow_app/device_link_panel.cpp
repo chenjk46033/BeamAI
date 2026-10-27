@@ -15,6 +15,7 @@
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QFontMetrics>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QPushButton>
@@ -171,6 +172,14 @@ void DeviceLinkPanel::buildWidgets() {
         *value = new QLabel(QStringLiteral("--"), this);
         (*value)->setStyleSheet(QString::fromLatin1(kFieldValueStyle));
         (*value)->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        name->ensurePolished();
+        (*value)->ensurePolished();
+        // The monospace value and the UI-font caption centre to different baselines.
+        const QFontMetrics cap(name->font());
+        const QFontMetrics val((*value)->font());
+        const int drop = (val.height() - cap.height()) / 2 + (cap.ascent() - val.ascent());
+        if (drop > 0) (*value)->setContentsMargins(0, drop, 0, 0);
+        else if (drop < 0) name->setContentsMargins(0, -drop, 0, 0);
         return std::pair<QLabel*, QLabel*>(name, *value);
     };
     const auto model = field(QStringLiteral("Model"), &modelValue_);
@@ -181,6 +190,17 @@ void DeviceLinkPanel::buildWidgets() {
     row->addSpacing(16);
     row->addWidget(serial.first);
     row->addWidget(serial.second);
+
+    // These three change length as the link comes and goes, and a label that grows
+    // slides every control to its right.
+    const auto pin = [](QLabel* label, const QString& widest) {
+        label->ensurePolished();
+        label->setFixedWidth(label->fontMetrics().horizontalAdvance(widest) + 12);
+    };
+    pin(status_, QStringLiteral("Connected since 0000-00-00 00:00:00"));
+    pin(modelValue_, QStringLiteral("NUCLEO-F303REXX"));
+    pin(serialValue_, QStringLiteral("066FFF343433464757204334"));
+
     row->addStretch(1);
 
     auto* column = new QVBoxLayout(this);
