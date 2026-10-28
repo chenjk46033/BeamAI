@@ -16,6 +16,7 @@
 
 #include "gui/case_report_form.hpp"
 #include "gui/patient_registry.hpp"
+#include "infra_db/schema.hpp"
 #include "gui/treatment_session.hpp"
 #include "gui/treatment_log.hpp"
 #include "gui/treatment_target_store.hpp"
@@ -224,14 +225,19 @@ private:
     QString treatmentDataDirectory() const;
     // The install's own files -- the protocol/target library and the list of people treated on
     QString patientDataDirectory() const;
-    QString patientsPath() const;
     // The operator's device-wide copy of a data file, else the shipped seed.
     QString shippedDataFile(const QString& fileName) const;
     QString locateDataFile(const QString& fileName) const;
     // This patient's own Target List. Empty when nobody is named.
-    QString patientTargetsPath() const;
     void loadPatientRegistry();
     void savePatientRegistry();
+    QString storePath() const;
+    void openStore();
+    // Written after the CSVs, so a database fault cannot cost a record.
+    void readPatientsFromStore();
+    void readPatientDataFromStore();
+    void countPatientVisits(int patientId, int* visits, QString* lastTreated) const;
+    void writeStore();
     // The list of people on this device, on the Case page.
     void buildPatientChooser();
     void refreshPatientChooser();
@@ -276,7 +282,6 @@ private:
     void loadPatientData();
     void savePatientData();
     // Moves a pre-patient install's record under the first patient identified on it.
-    void adoptLegacyPatientData(int patientId);
     // Throws away everything measured on a person -- their MRI, the fiducials found in it, the
     void clearPatientImagingAndRegistration();
     QString currentProtocolName() const;
@@ -334,7 +339,6 @@ private:
     void addProtocolToVisit(int afterSequence);
     // Appends one sonication, the target chosen by the operator.
     void addRowToVisit();
-    QString visitStatePath() const;
     static QString visitKey(const QString& protocol, int visit);
     void writeTargetPointsToStore();
     void openTreatmentLibrary(TreatmentLibraryDialog::Page page);
@@ -503,6 +507,7 @@ private:
     QPushButton* saveSessionOnTreatmentButton_ = nullptr;
     QListWidget* pastReportsList_ = nullptr;
     // Whose record is open.
+    std::unique_ptr<beam::db::Database> store_;
     int currentPatientId_ = 0;
     // The row runSonication opened, so the countdown can stamp its end.
     int openLogSequence_ = 0;

@@ -139,38 +139,57 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
 
 // generalSonicateMaster.m's decision path: build stimParams from the shown row, run the two
 
-QString WorkflowWindow::visitStatePath() const {
-    const QString directory = patientDataDirectory();
-    if (directory.isEmpty()) return QString();
-    return QDir(directory).filePath(QStringLiteral("treatment_visit_state.csv"));
-}
 
-// Where each visit was left.
+// Where each visit was left. The three containers below are keyed by
+// "protocol|visit", which is exactly what identifies a row of `visit`.
 void WorkflowWindow::saveVisitState() const {
-    const QString path = visitStatePath();
-    // Nobody named, so nothing to file it against.
-    if (path.isEmpty()) return;
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return;
-    QTextStream out(&file);
-    out << "Protocol,Visit,CurrentSonication,Edited,AutoRank\n";
-    // Every visit any of the three knows about: one created and left empty has no position of
+    if (store_ == nullptr || currentPatientId_ <= 0) return;
+    // Every visit any of the three knows about: one created and left empty has
+    // no position of its own but still exists.
     QSet<QString> keys;
     for (auto entry = visitSonication_.constBegin(); entry != visitSonication_.constEnd();
          ++entry)
         keys.insert(entry.key());
     keys.unite(editedVisits_);
     keys.unite(rankingOffVisits_);
-    QStringList ordered(keys.constBegin(), keys.constEnd());
-    ordered.sort();  // a stable file, so a diff of it means something
-    for (const QString& key : ordered) {
-        const int split = key.lastIndexOf(QLatin1Char('|'));
-        if (split <= 0) continue;
-        QString protocol = key.left(split);
-        protocol.replace(QLatin1Char('"'), QStringLiteral("\"\""));
-        out << '"' << protocol << "\"," << key.mid(split + 1) << ','
-            << visitSonication_.value(key, 1) << ',' << (editedVisits_.contains(key) ? 1 : 0)
-            << ',' << (rankingOffVisits_.contains(key) ? 0 : 1) << '\n';
+
+    try {
+        beam::db::Transaction work(*store_);
+        auto find = store_->prepare(
+            "SELECT id FROM visit WHERE patient_id = ? AND protocol = ? AND number = ?");
+        auto create = store_->prepare(
+            "INSERT INTO visit (patient_id, protocol, number) VALUES (?, ?, ?)");
+        auto update = store_->prepare(
+            "UPDATE visit SET current_sonication = ?, edited = ?, auto_rank = ? WHERE id = ?");
+        for (const QString& key : keys) {
+            const int split = key.lastIndexOf(QLatin1Char('|'));
+            if (split <= 0) continue;
+            const std::string protocol = key.left(split).toStdString();
+            const long long number = key.mid(split + 1).toLongLong();
+
+            find.bind(1, static_cast<long long>(currentPatientId_))
+                .bind(2, protocol)
+                .bind(3, number);
+            long long visitId = 0;
+            if (find.step()) visitId = find.row().integer(0);
+            find.reset();
+            if (visitId == 0) {
+                create.bind(1, static_cast<long long>(currentPatientId_))
+                    .bind(2, protocol)
+                    .bind(3, number)
+                    .run();
+                visitId = store_->lastInsertId();
+            }
+            update.bind(1, static_cast<long long>(visitSonication_.value(key, 1)))
+                .bind(2, static_cast<long long>(editedVisits_.contains(key) ? 1 : 0))
+                .bind(3, static_cast<long long>(rankingOffVisits_.contains(key) ? 0 : 1))
+                .bind(4, visitId)
+                .run();
+        }
+        work.commit();
+    } catch (const std::exception&) {
+        // Reported by the next write that matters; losing a cursor position is
+        // not worth interrupting a treatment for.
     }
 }
 
@@ -181,47 +200,26 @@ void WorkflowWindow::markVisitEdited(const QString& protocol, int visit) {
 }
 
 void WorkflowWindow::loadVisitState() {
-    const QString path = visitStatePath();
-    if (path.isEmpty()) return;
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
-    QTextStream in(&file);
-    in.readLine();  // header
-    while (!in.atEnd()) {
-        const QString line = in.readLine();
-        if (line.trimmed().isEmpty()) continue;
-        // "Protocol",Visit,CurrentSonication[,Edited[,AutoRank]] -- the protocol is quoted
-        if (!line.startsWith(QLatin1Char('"'))) continue;
-        QString protocol;
-        int at = 1;
-        bool closed = false;
-        while (at < line.size()) {
-            if (line.at(at) == QLatin1Char('"')) {
-                if (at + 1 < line.size() && line.at(at + 1) == QLatin1Char('"')) {
-                    protocol += QLatin1Char('"');
-                    at += 2;
-                    continue;
-                }
-                closed = true;
-                ++at;
-                break;
-            }
-            protocol += line.at(at);
-            ++at;
+    visitSonication_.clear();
+    editedVisits_.clear();
+    rankingOffVisits_.clear();
+    if (store_ == nullptr || currentPatientId_ <= 0) return;
+    try {
+        auto read = store_->prepare(
+            "SELECT protocol, number, current_sonication, edited, auto_rank "
+            "FROM visit WHERE patient_id = ? ORDER BY protocol, number");
+        read.bind(1, static_cast<long long>(currentPatientId_));
+        while (read.step()) {
+            const beam::db::Row row = read.row();
+            const QString key = QStringLiteral("%1|%2")
+                                    .arg(QString::fromStdString(row.text(0)))
+                                    .arg(row.integer(1));
+            visitSonication_.insert(key, static_cast<int>(row.integer(2)));
+            if (row.integer(3) != 0) editedVisits_.insert(key);
+            if (row.integer(4) == 0) rankingOffVisits_.insert(key);
         }
-        if (!closed || at >= line.size() || line.at(at) != QLatin1Char(',')) continue;
-        const QStringList fields = line.mid(at + 1).split(QLatin1Char(','));
-        if (fields.size() < 2) continue;
-        bool visitOk = false;
-        bool positionOk = false;
-        const int visit = fields.at(0).trimmed().toInt(&visitOk);
-        const int position = fields.at(1).trimmed().toInt(&positionOk);
-        if (!visitOk || !positionOk || visit <= 0 || position <= 0) continue;
-        const QString key = visitKey(protocol, visit);
-        visitSonication_.insert(key, position);
-        if (fields.value(2).trimmed() == QLatin1String("1")) editedVisits_.insert(key);
-        // Absent means on, so a file written before this column keeps BeamV0's always-on
-        if (fields.value(3).trimmed() == QLatin1String("0")) rankingOffVisits_.insert(key);
+    } catch (const std::exception& error) {
+        showMessage(QStringLiteral("Visit state could not be read: %1").arg(error.what()), true);
     }
 }
 

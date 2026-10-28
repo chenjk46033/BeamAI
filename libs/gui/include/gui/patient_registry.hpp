@@ -64,6 +64,11 @@ public:
     // departed patient's directory is not handed to somebody else.
     bool remove(int id);
 
+    // Replaces the contents wholesale, as load() does. The database loader is
+    // the other caller.
+    void adopt(std::vector<Patient> patients, int nextId);
+    int nextId() const { return nextId_; }
+
 private:
     std::vector<Patient> patients_;
     // One past the highest id ever issued, carried in the file. Not derived

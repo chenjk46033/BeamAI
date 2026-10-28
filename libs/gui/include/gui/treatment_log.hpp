@@ -95,6 +95,8 @@ public:
     void save(const std::string& path) const;
 
     const std::vector<TreatmentLogRow>& rows() const { return rows_; }
+    // Replaces the rows wholesale, as load() does; the database loader uses it.
+    void adopt(std::vector<TreatmentLogRow> rows) { rows_ = std::move(rows); }
 
     // Whose treatment this is. A property of the log, not of each row, but
     // written into every row because setLogInfoToCSV.m's column shape has

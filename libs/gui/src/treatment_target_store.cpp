@@ -49,7 +49,9 @@ std::vector<std::vector<std::string>> readCsv(const std::string& path, std::size
             headerSeen = true;
             continue;
         }
-        if (fields.size() != columns) {
+        // A minimum, not an exact count: the shipped seed carries no placement
+        // columns and a patient's own file does.
+        if (fields.size() < columns) {
             throw std::runtime_error(path + ":" + std::to_string(lineNumber) + ": expected " +
                                      std::to_string(columns) + " fields, got " +
                                      std::to_string(fields.size()));
@@ -209,6 +211,12 @@ std::vector<std::string> TreatmentTargetStore::distinctTargetsOf(const std::stri
     return names;
 }
 
+void TreatmentTargetStore::adoptTargets(std::vector<TreatmentTarget> targets) {
+    targetIndex_.clear();
+    for (std::size_t i = 0; i < targets.size(); ++i) targetIndex_.emplace(targets[i].name, i);
+    targets_ = std::move(targets);
+}
+
 void TreatmentTargetStore::saveTargets(const std::string& path) const {
 
     std::ofstream file(path);
@@ -225,7 +233,8 @@ void TreatmentTargetStore::saveTargets(const std::string& path) const {
                  << point.amplitude << ',' << point.startTimeSeconds << ','
                  << point.endTimeSeconds << ',' << point.burstDurationSeconds << ','
                  << point.burstIntervalSeconds << ',' << point.pulseDurationSeconds << ','
-                 << point.pulseIntervalSeconds << '\n';
+                 << point.pulseIntervalSeconds << ',' << point.xMm << ',' << point.yMm
+                 << ',' << point.zMm << '\n';
         }
     }
     if (!file) throw std::runtime_error("failed while writing " + path);

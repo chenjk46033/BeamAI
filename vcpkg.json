@@ -8,6 +8,7 @@
     "dcmtk",
     "matio",
     "miniz",
+    "sqlite3",
     {
       "name": "qtbase",
       "default-features": false,

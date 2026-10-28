@@ -856,7 +856,7 @@ void WorkflowWindow::openTreatmentLibrary(TreatmentLibraryDialog::Page page) {
         // Which list this edits follows where it would be saved, so the dialog cannot say one
         beam::gui::Patient open;
         const bool belongsToSomebody =
-            !patientTargetsPath().isEmpty() && patients_.find(currentPatientId_, &open);
+            currentPatientId_ > 0 && patients_.find(currentPatientId_, &open);
         dialog.setTargetScope(
             belongsToSomebody
                 ? QStringLiteral("%1 (%2)")

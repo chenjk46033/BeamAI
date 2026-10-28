@@ -32,6 +32,7 @@ void WorkflowWindow::addTargetListRow(const QString& name, int atRow) {
 
 void WorkflowWindow::buildTreatmentPlanBody(const QString& acceptButtonStyle) {
     // Before the store: which patient's log is read depends on this.
+    openStore();
     loadPatientRegistry();
     buildCaseDemographics();
     buildPatientChooser();

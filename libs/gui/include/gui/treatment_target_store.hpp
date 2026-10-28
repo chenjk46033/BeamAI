@@ -20,7 +20,7 @@
 //                   the target. That is BeamV0's split --
 //                   treatmentProtocolTables holds Name/Duration/Amplitude,
 //                   protocolTables holds the stimParamTable.
-//   session         X/Y/Z placement, per patient. Not here.
+//   placement       X/Y/Z, per patient. On the point, zero in the seed.
 //
 // What was actually delivered is a separate record, not this one: BeamV0 keeps
 // treatmentProtocolTables(i).sessions(visit).Data, a per-visit copy of the
@@ -35,8 +35,8 @@ namespace beam::gui {
 // Flattening a target to a single parameter set loses every row past the
 // first -- which is what this type exists to stop.
 //
-// X/Y/Z are not here: placement is per-patient session data, and the grid
-// supplies it from the array centre until the operator places the point.
+// X/Y/Z are per patient: the shipped seed leaves them zero and the grid
+// supplies the array centre until the operator places the point.
 struct TreatmentTargetPoint {
     int order = 1;
     bool show = true;
@@ -53,6 +53,12 @@ struct TreatmentTargetPoint {
     double burstIntervalSeconds = 0.70;
     double pulseDurationSeconds = 0.005;
     double pulseIntervalSeconds = 0.01;
+    // Where this point sits in the patient's MRI, in RAS millimetres. Zero
+    // until it is placed. Per patient, never in the shipped seed: the install
+    // says what a target is, the patient's own record says where it went.
+    double xMm = 0.0;
+    double yMm = 0.0;
+    double zMm = 0.0;
 };
 
 struct TreatmentTarget {
@@ -87,6 +93,8 @@ public:
     void loadProtocols(const std::string& path);
 
     const std::vector<TreatmentTarget>& targets() const { return targets_; }
+    // Replaces the targets wholesale; the database loader uses it.
+    void adoptTargets(std::vector<TreatmentTarget> targets);
     const std::vector<TreatmentProtocolDefinition>& protocols() const { return protocols_; }
 
     const TreatmentTarget* findTarget(const std::string& name) const;

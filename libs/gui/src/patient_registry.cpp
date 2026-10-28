@@ -175,6 +175,14 @@ void PatientRegistry::load(const std::string& path) {
     nextId_ = nextId;
 }
 
+void PatientRegistry::adopt(std::vector<Patient> patients, int nextId) {
+    // Floored against the rows exactly as load() does, so a store whose
+    // marker is missing or stale cannot hand out a number already in use.
+    for (const Patient& patient : patients) nextId = std::max(nextId, patient.id + 1);
+    patients_ = std::move(patients);
+    nextId_ = std::max(1, nextId);
+}
+
 void PatientRegistry::save(const std::string& path) const {
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file) throw std::runtime_error("cannot write " + path);

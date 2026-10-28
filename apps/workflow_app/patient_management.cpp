@@ -1,5 +1,7 @@
 #include "treatment_internal.hpp"
 
+#include "gui/treatment_log_db.hpp"
+
 namespace beam::app {
 
 QString WorkflowWindow::currentProtocolName() const {
@@ -26,9 +28,6 @@ QString WorkflowWindow::treatmentDataDirectory() const {
     return home;
 }
 
-QString WorkflowWindow::patientsPath() const {
-    return QDir(treatmentDataDirectory()).filePath(QStringLiteral("patients.csv"));
-}
 
 // Where one person's record lives: their log, and where each of their visits was left.
 QString WorkflowWindow::patientDataDirectory() const {
@@ -396,26 +395,10 @@ void WorkflowWindow::refreshPatientChooser() {
     patientTable_->setRowCount(static_cast<int>(shown.size()));
     for (std::size_t index = 0; index < shown.size(); ++index) {
         const beam::gui::Patient& patient = *shown[index];
-        // Their own log, read only to count what is in it.
+        // Counted in the store rather than by reading a record back out of it.
         int visits = 0;
         QString lastTreated;
-        try {
-            beam::gui::TreatmentLog log;
-            log.load(QDir(QDir(treatmentDataDirectory())
-                              .filePath(QStringLiteral("patients/%1").arg(patient.id)))
-                         .filePath(QStringLiteral("treatment_log.csv"))
-                         .toStdString());
-            std::set<std::pair<std::string, int>> seen;
-            for (const beam::gui::TreatmentLogRow& row : log.rows()) {
-                seen.insert({row.protocol, row.visit});
-                if (row.startedAt.empty()) continue;
-                const QString stamp = QString::fromStdString(row.startedAt);
-                if (stamp > lastTreated) lastTreated = stamp;
-            }
-            visits = static_cast<int>(seen.size());
-        } catch (const std::exception&) {
-            lastTreated = QStringLiteral("unreadable");
-        }
+        countPatientVisits(patient.id, &visits, &lastTreated);
 
         const auto cell = [](const QString& text, bool rightAlign = false) {
             auto* item = new QTableWidgetItem(text);
@@ -486,18 +469,16 @@ void WorkflowWindow::refreshPatientChooser() {
 int WorkflowWindow::patientDeliveryCount(int patientId, int* plannedRows) const {
     int delivered = 0;
     if (plannedRows != nullptr) *plannedRows = 0;
+    if (store_ == nullptr) return 1;
     try {
         beam::gui::TreatmentLog log;
-        log.load(QDir(QDir(treatmentDataDirectory())
-                          .filePath(QStringLiteral("patients/%1").arg(patientId)))
-                     .filePath(QStringLiteral("treatment_log.csv"))
-                     .toStdString());
+        beam::gui::loadLog(*store_, patientId, &log);
         for (const beam::gui::TreatmentLogRow& row : log.rows()) {
             if (beam::gui::TreatmentLog::delivered(row)) ++delivered;
             else if (plannedRows != nullptr) ++*plannedRows;
         }
     } catch (const std::exception&) {
-        // A log that will not parse is not a log that can be proved empty.
+        // A record that cannot be read is not one that can be proved empty.
         return 1;
     }
     return delivered;
@@ -673,20 +654,12 @@ void WorkflowWindow::deletePatient(int patientId, int plannedRows) {
 }
 
 void WorkflowWindow::loadPatientRegistry() {
-    try {
-        patients_.load(patientsPath().toStdString());
-    } catch (const std::exception& error) {
-        // A list of patients that will not parse is not something to carry on past quietly:
-        showMessage(QStringLiteral("The patient list could not be read (%1). No patient record "
-                                   "will be opened until it is fixed.")
-                        .arg(error.what()),
-                    true);
-    }
+    readPatientsFromStore();
 }
 
 void WorkflowWindow::savePatientRegistry() {
     try {
-        patients_.save(patientsPath().toStdString());
+        writeStore();
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("The patient list could not be saved: %1").arg(error.what()),
                     true);
@@ -732,7 +705,6 @@ void WorkflowWindow::selectPatient(const beam::gui::Patient& details, bool advan
     // The record may hold details the Case page was not told, which is what picking an existing
     showCaseDemographics(patient);
     refreshPatientChooser();
-    adoptLegacyPatientData(patient.id);
 
     // Before the plan is rebuilt, not after: the rebuild reads the array position off the
     if (switching) {
@@ -765,25 +737,5 @@ void WorkflowWindow::selectPatient(const beam::gui::Patient& details, bool advan
 }
 
 // A pre-patient install kept one subject's record in the runtime directory; the first patient
-void WorkflowWindow::adoptLegacyPatientData(int patientId) {
-    if (patientId <= 0) return;
-    const QDir runtime(treatmentDataDirectory());
-    const QString directory =
-        runtime.filePath(QStringLiteral("patients/%1").arg(patientId));
-    if (!QDir().mkpath(directory)) return;
-    for (const QString& name : {QStringLiteral("treatment_log.csv"),
-                                QStringLiteral("treatment_visit_state.csv")}) {
-        const QString from = runtime.filePath(name);
-        const QString to = QDir(directory).filePath(name);
-        if (!QFileInfo::exists(from) || QFileInfo::exists(to)) continue;
-        if (QFile::rename(from, to)) continue;
-        if (QFile::copy(from, to) && QFile::remove(from)) continue;
-        showMessage(QStringLiteral("%1 could not be moved under patient %2 and is no longer "
-                                   "being read. Move it there by hand.")
-                        .arg(QDir::toNativeSeparators(from))
-                        .arg(patientId),
-                    true);
-    }
-}
 
 }  // namespace beam::app

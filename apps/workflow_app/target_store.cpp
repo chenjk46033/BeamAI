@@ -19,18 +19,10 @@ void WorkflowWindow::loadPatientData() {
     lastLoadedVisit_ = 0;
     currentSonication_ = 1;
 
-    const QString directory = patientDataDirectory();
-    if (!directory.isEmpty()) {
-        try {
-            treatmentLog_.load(
-                QDir(directory).filePath(QStringLiteral("treatment_log.csv")).toStdString());
-        } catch (const std::exception& error) {
-            showMessage(QStringLiteral("This patient's treatment log could not be read: %1")
-                            .arg(error.what()),
-                        true);
-        }
-        loadVisitState();
-    }
+    // The log and the visits come from the store; the patient directory now
+    // holds nothing but exported reports.
+    readPatientDataFromStore();
+    loadVisitState();
     // After the load, which clears it, and whatever the file said: the registry is the
     beam::gui::Patient open;
     if (patients_.find(currentPatientId_, &open)) {
@@ -42,20 +34,16 @@ void WorkflowWindow::loadPatientData() {
     if (treatmentProtocolCombo_ == nullptr) return;
 
     // Their Target List, which carries the parameters prescribed for them.
-    {
-        const QString own = patientTargetsPath();
-        const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
-                                        ? own
-                                        : shippedDataFile(QStringLiteral("treatment_targets.csv"));
-        if (!targetsPath.isEmpty()) {
+    // A patient with no targets of their own starts from the shipped list.
+    if (targetStore_.targets().empty()) {
+        const QString seed = shippedDataFile(QStringLiteral("treatment_targets.csv"));
+        if (!seed.isEmpty()) {
             try {
-                // loadTargets replaces the targets and leaves the protocols, which are the
                 beam::gui::TreatmentTargetStore loaded = targetStore_;
-                loaded.loadTargets(targetsPath.toStdString());
+                loaded.loadTargets(seed.toStdString());
                 targetStore_ = std::move(loaded);
             } catch (const std::exception& error) {
-                showMessage(QStringLiteral("This patient's Target List could not be read (%1); "
-                                           "the one on screen is the previous patient's.")
+                showMessage(QStringLiteral("The shipped Target List could not be read: %1")
                                 .arg(error.what()),
                             true);
             }
@@ -185,11 +173,6 @@ void WorkflowWindow::restoreShippedParameters() {
 }
 
 // Target parameters are prescribed per person, so the Target List lives with the patient.
-QString WorkflowWindow::patientTargetsPath() const {
-    const QString patientDirectory = patientDataDirectory();
-    if (patientDirectory.isEmpty()) return QString();
-    return QDir(patientDirectory).filePath(QStringLiteral("treatment_targets.csv"));
-}
 
 // As shipped, never a runtime copy: a Target List is prescribed per patient, so there is no
 QString WorkflowWindow::shippedDataFile(const QString& fileName) const {
@@ -214,11 +197,8 @@ void WorkflowWindow::loadTreatmentTargetStore() {
     const auto locate = [this](const QString& fileName) { return locateDataFile(fileName); };
 
     loadShippedTargetStore();
-    // This patient's Target List if they have one, else the device's, which is what a new
-    const QString own = patientTargetsPath();
-    const QString targetsPath = !own.isEmpty() && QFileInfo::exists(own)
-                                    ? own
-                                    : locate(QStringLiteral("treatment_targets.csv"));
+    // The shipped list seeds a patient who has none; the store overrides it.
+    const QString targetsPath = locate(QStringLiteral("treatment_targets.csv"));
     const QString protocolsPath = locate(QStringLiteral("treatment_protocols.csv"));
     if (targetsPath.isEmpty() || protocolsPath.isEmpty()) {
         showMessage(QStringLiteral("Treatment target/protocol data was not found; using built-in "
@@ -229,12 +209,8 @@ void WorkflowWindow::loadTreatmentTargetStore() {
     try {
         targetStore_.loadTargets(targetsPath.toStdString());
         targetStore_.loadProtocols(protocolsPath.toStdString());
-        // The log belongs to the patient, not to the install's seed -- and on a device that has
-        const QString patientDirectory = patientDataDirectory();
-        if (!patientDirectory.isEmpty())
-            treatmentLog_.load(QDir(patientDirectory)
-                                   .filePath(QStringLiteral("treatment_log.csv"))
-                                   .toStdString());
+        // The patient's own targets and log come from the store.
+        readPatientDataFromStore();
     } catch (const std::exception& error) {
         showMessage(QStringLiteral("Treatment data could not be read: %1").arg(error.what()), true);
         return;
@@ -296,15 +272,11 @@ void WorkflowWindow::saveTreatmentTargetStore(bool announce) {
     writeTargetPointsToStore();
     const QString directory = treatmentDataDirectory();
     try {
-        // The Target List goes under the patient once there is one: its parameters are
-        const QString own = patientTargetsPath();
-        if (!own.isEmpty()) targetStore_.saveTargets(own.toStdString());
-        // Protocols are the site's library and stay shared.
+        // Protocols are the site's library, shared across patients and still a
+        // file. Everything belonging to a patient is in the store.
         targetStore_.saveProtocols(
             QDir(directory).filePath(QStringLiteral("treatment_protocols.csv")).toStdString());
-        // The library above is the install's; the log below is this patient's.
-        const QString patientDirectory = patientDataDirectory();
-        if (patientDirectory.isEmpty()) {
+        if (currentPatientId_ <= 0) {
             // Nobody is named, so there is nobody to file this against.
             if (!treatmentLog_.rows().empty()) {
                 showMessage(QStringLiteral("Nothing was logged: the Case page has not said which "
@@ -313,13 +285,10 @@ void WorkflowWindow::saveTreatmentTargetStore(bool announce) {
             }
             return;
         }
-        const QString logPath =
-            QDir(patientDirectory).filePath(QStringLiteral("treatment_log.csv"));
-        treatmentLog_.save(logPath.toStdString());
+        writeStore();
         // The log writes itself on every change, so there is no Save button to press and no way
         if (!announce) return;
-        showMessage(QStringLiteral("%1 updated at %2")
-                        .arg(QDir::toNativeSeparators(logPath))
+        showMessage(QStringLiteral("Treatment record saved at %1")
                         .arg(QDateTime::currentDateTime().toString(
                             QStringLiteral("HH:mm:ss.zzz"))),
                     false);
