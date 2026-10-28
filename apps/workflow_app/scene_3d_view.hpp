@@ -6,6 +6,7 @@
 // does exactly, and which keeps the application free of any GPU dependency.
 
 #include <array>
+#include <functional>
 #include <vector>
 
 #include <QColor>
@@ -13,6 +14,10 @@
 #include <QPointF>
 #include <QString>
 #include <QWidget>
+
+QT_BEGIN_NAMESPACE
+class QMenu;
+QT_END_NAMESPACE
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -39,6 +44,14 @@ struct ScenePoint {
     double radius = 4.0;
 };
 
+// An axis-aligned ellipsoid, for the acoustic focus.
+struct SceneEllipsoid {
+    Eigen::Vector3d centreMm = Eigen::Vector3d::Zero();
+    Eigen::Vector3d semiAxesMm = Eigen::Vector3d::Ones();
+    QColor color;
+    double opacity = 0.35;
+};
+
 class Scene3DView final : public QWidget {
     Q_OBJECT
 
@@ -48,6 +61,9 @@ public:
     void setPlanes(std::vector<ScenePlane> planes);
     void setQuads(std::vector<SceneQuad> quads);
     void setPoints(std::vector<ScenePoint> points);
+    void setEllipsoids(std::vector<SceneEllipsoid> ellipsoids);
+    // The lock-position popup, the same one the slice panes carry.
+    void setContextWidgetFactory(std::function<QWidget*(QMenu*)> factory);
     // Everything is drawn about this, and the view rotates around it.
     void setCentreMm(const Eigen::Vector3d& centreMm);
 
@@ -58,6 +74,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     // Camera basis from the two angles: columns are right, up and toward the
@@ -70,10 +87,14 @@ private:
     std::vector<ScenePlane> planes_;
     std::vector<SceneQuad> quads_;
     std::vector<ScenePoint> points_;
+    std::vector<SceneEllipsoid> ellipsoids_;
+    std::function<QWidget*(QMenu*)> contextWidgetFactory_;
     Eigen::Vector3d centreMm_ = Eigen::Vector3d::Zero();
 
-    double azimuthDeg_ = 35.0;
-    double elevationDeg_ = 18.0;
+    // Opens coronal: the camera in front of the patient looking back, superior
+    // up, so the head stands straight and screen right is the patient's left.
+    double azimuthDeg_ = 180.0;
+    double elevationDeg_ = 0.0;
     double zoom_ = 1.0;
     QPointF dragFrom_;
     bool dragging_ = false;

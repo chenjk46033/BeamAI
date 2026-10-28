@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QPointF>
 #include <QMarginsF>
+#include <QCursor>
 #include <QPointer>
 #include <QSet>
 #include <QSize>
@@ -131,6 +132,11 @@ private:
     QWidget* buildFiducialPickerWidget(QMenu* menu);
     void performFiducialRegistration();
     void performCurrentPositionRegistration();
+    void updateLockPositionFeedback(bool calibrationReady, bool locksMatch);
+    void sayLockLine(const QString& text, bool warning);
+    void setLockFlashing(bool on);
+    void startLockWatch();
+    bool lockPanelsEngaged() const;
     void acceptFiducialRegistration();
     void applyRegistrationResult(beam::registration::AffineArrayResult result);
     // heldAxis is the axis the clicked plane cannot measure (0=LR, 1=AP, 2=IS); it keeps its
@@ -346,6 +352,7 @@ private:
     void buildDeviceLinkPanel();
     void loadCalibrationCurve();
     QString mriGeometryFingerprint() const;
+    QString suggestedParticipantId() const;
     QString fiducialsAsText() const;
     void buildRegistrationPage();
     std::string calibrationDutyText() const;
@@ -421,6 +428,13 @@ private:
     QSlider* rightHorizontalPositionSlider_ = nullptr;
     QSlider* rightVerticalPositionSlider_ = nullptr;
     QPushButton* registerCurrentPositionButton_ = nullptr;
+    QTimer* lockFlashTimer_ = nullptr;
+    QTimer* lockWatchTimer_ = nullptr;
+    QWidget* leftLockPanel_ = nullptr;
+    QWidget* rightLockPanel_ = nullptr;
+    qint64 lastLockChangeMs_ = 0;
+    bool lockLineOwned_ = false;
+    bool lockFlashOn_ = false;
     QPushButton* detectFiducialsButton_ = nullptr;
     QToolButton* fiducialActionsButton_ = nullptr;
     // The picker is rebuilt per right-click, so the pick is remembered here.

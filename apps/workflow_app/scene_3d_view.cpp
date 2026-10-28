@@ -6,7 +6,10 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include <QPainterPath>
+#include <QWidgetAction>
 #include <QPolygonF>
 #include <QWheelEvent>
 
@@ -19,9 +22,37 @@ constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
 // Drawn back to front, so each item carries the depth it is sorted on.
 struct Drawable {
     double depth = 0.0;
-    int kind = 0;  // 0 plane, 1 quad, 2 point
+    int kind = 0;  // 0 plane, 1 quad, 2 point, 3 ellipsoid
     std::size_t index = 0;
 };
+
+// Orthographic projection takes an ellipsoid to an ellipse exactly, so
+// diagonalising a 2x2 gives its screen axes -- no tessellation.
+struct ProjectedEllipse {
+    double semiA = 0.0;
+    double semiB = 0.0;
+    double tiltRad = 0.0;
+};
+
+ProjectedEllipse projectEllipsoid(const Eigen::Vector3d& semiAxesMm,
+                                  const Eigen::Vector3d& right,
+                                  const Eigen::Vector3d& up) {
+    const Eigen::Vector3d a = semiAxesMm.cwiseProduct(right);
+    const Eigen::Vector3d b = semiAxesMm.cwiseProduct(up);
+    const double maa = a.squaredNorm();
+    const double mbb = b.squaredNorm();
+    const double mab = a.dot(b);
+
+    const double mean = 0.5 * (maa + mbb);
+    const double diff = 0.5 * (maa - mbb);
+    const double root = std::sqrt(std::max(0.0, diff * diff + mab * mab));
+    ProjectedEllipse out;
+    out.semiA = std::sqrt(std::max(0.0, mean + root));
+    out.semiB = std::sqrt(std::max(0.0, mean - root));
+    // Screen y grows downward, so the tilt is negated to match.
+    out.tiltRad = -0.5 * std::atan2(2.0 * mab, maa - mbb);
+    return out;
+}
 
 }  // namespace
 
@@ -44,6 +75,26 @@ void Scene3DView::setQuads(std::vector<SceneQuad> quads) {
 void Scene3DView::setPoints(std::vector<ScenePoint> points) {
     points_ = std::move(points);
     update();
+}
+
+void Scene3DView::setEllipsoids(std::vector<SceneEllipsoid> ellipsoids) {
+    ellipsoids_ = std::move(ellipsoids);
+    update();
+}
+
+void Scene3DView::setContextWidgetFactory(std::function<QWidget*(QMenu*)> factory) {
+    contextWidgetFactory_ = std::move(factory);
+}
+
+void Scene3DView::contextMenuEvent(QContextMenuEvent* event) {
+    if (!contextWidgetFactory_) return;
+    QMenu menu(this);
+    QWidget* supplied = contextWidgetFactory_(&menu);
+    if (supplied == nullptr) return;
+    auto* action = new QWidgetAction(&menu);
+    action->setDefaultWidget(supplied);
+    menu.addAction(action);
+    menu.exec(event->globalPos());
 }
 
 void Scene3DView::setCentreMm(const Eigen::Vector3d& centreMm) {
@@ -90,7 +141,7 @@ double Scene3DView::depthOf(const Eigen::Vector3d& worldMm, const Eigen::Matrix3
 void Scene3DView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.fillRect(rect(), QColor(0x0d, 0x13, 0x17));
-    if (planes_.empty() && quads_.empty() && points_.empty()) {
+    if (planes_.empty() && quads_.empty() && points_.empty() && ellipsoids_.empty()) {
         painter.setPen(QColor(0x7e, 0x8c, 0x93));
         painter.drawText(rect(), Qt::AlignCenter,
                          QStringLiteral("Register the array to see it in space."));
@@ -105,7 +156,7 @@ void Scene3DView::paintEvent(QPaintEvent*) {
     };
 
     std::vector<Drawable> order;
-    order.reserve(planes_.size() + quads_.size() + points_.size());
+    order.reserve(planes_.size() + quads_.size() + ellipsoids_.size() + points_.size());
     for (std::size_t i = 0; i < planes_.size(); ++i)
         order.push_back({depthOf(centroid(planes_[i].cornersMm), m), 0, i});
     for (std::size_t i = 0; i < quads_.size(); ++i)
@@ -113,6 +164,11 @@ void Scene3DView::paintEvent(QPaintEvent*) {
     // Furthest first: a painter has no depth buffer.
     std::sort(order.begin(), order.end(),
               [](const Drawable& a, const Drawable& b) { return a.depth < b.depth; });
+
+    // After the sort: the focus sits where the slices cross, so sorting against
+    // them ties on depth and a near-opaque plane paints it out as the view turns.
+    for (std::size_t i = 0; i < ellipsoids_.size(); ++i)
+        order.push_back({depthOf(ellipsoids_[i].centreMm, m), 3, i});
 
     // Markers go in a pass of their own, over everything: a slice is a sheet the width of the
     for (std::size_t i = 0; i < points_.size(); ++i)
@@ -152,6 +208,27 @@ void Scene3DView::paintEvent(QPaintEvent*) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(quad.color);
             painter.drawPolygon(face);
+            continue;
+        }
+        if (item.kind == 3) {
+            const SceneEllipsoid& blob = ellipsoids_[item.index];
+            const ProjectedEllipse shape =
+                projectEllipsoid(blob.semiAxesMm, m.col(0), m.col(1));
+            const double s = scale();
+            QColor edge = blob.color;
+            edge.setAlphaF(std::min(1.0, blob.opacity * 2.2));
+            painter.save();
+            painter.translate(project(blob.centreMm, m));
+            painter.rotate(shape.tiltRad / kDegToRad);
+            painter.setOpacity(blob.opacity);
+            painter.setBrush(blob.color);
+            painter.setPen(Qt::NoPen);
+            painter.drawEllipse(QPointF(0, 0), shape.semiA * s, shape.semiB * s);
+            painter.setOpacity(1.0);
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(edge, 1.2));
+            painter.drawEllipse(QPointF(0, 0), shape.semiA * s, shape.semiB * s);
+            painter.restore();
             continue;
         }
         const ScenePoint& point = points_[item.index];

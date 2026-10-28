@@ -547,6 +547,16 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         goToNextStage();
     });
     // Two explicit buttons rather than BeamV0's one Load MRI that first asks file-or-folder:
+    // The same blue every other action button on the page wears.
+    for (QPushButton* button : {ui_->loadDicomButton, ui_->loadNiftiButton}) {
+        button->setMinimumHeight(30);
+        button->setStyleSheet(QStringLiteral(
+            "QPushButton { background: #176b87; color: white; border: 1px solid #0f5269; "
+            "border-radius: 4px; padding: 5px 12px; font-weight: 600; } "
+            "QPushButton:hover { background: #2083a3; } "
+            "QPushButton:disabled { background: #414141; color: #8b8b8b; "
+            "border-color: #555555; }"));
+    }
     connect(ui_->loadDicomButton, &QPushButton::clicked, this, [this] { chooseDicomDirectory(); });
     connect(ui_->loadNiftiButton, &QPushButton::clicked, this, [this] { chooseNifti(); });
 
@@ -643,8 +653,11 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         connect(pair.first, &QSlider::valueChanged, pair.second, &QSlider::setValue);
         connect(pair.second, &QSlider::valueChanged, pair.first, &QSlider::setValue);
     }
-    // Clicking a treatment plane does not move the target.
-    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_, treatmentAxialPreview_})
+    // Clicking a treatment plane does not move the target. The Registration
+    // panes get the same popup: that is the page the lock is actually set on.
+    for (WorkflowMriView* view : {treatmentSagittalPreview_, treatmentCoronalPreview_,
+                                  treatmentAxialPreview_, ui_->registrationSagittalPreview,
+                                  ui_->registrationCoronalPreview, ui_->registrationAxialPreview})
         view->setContextWidgetFactory([this](QMenu* menu) { return buildFiducialPickerWidget(menu); });
     connect(ui_->resetSagittalButton, &QToolButton::clicked, this, [this] {
         ui_->sagittalSlider->setValue(static_cast<int>((mriVolume_.nx - 1) / 2));

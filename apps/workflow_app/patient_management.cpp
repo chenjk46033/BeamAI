@@ -41,6 +41,18 @@ QString WorkflowWindow::patientDataDirectory() const {
 }
 
 // Who the patient is, as against which participant number they carry.
+// One past the highest Participant ID already in use, counting only the ones
+// that are plain numbers, so a site using its own codes is left alone.
+QString WorkflowWindow::suggestedParticipantId() const {
+    int highest = 0;
+    for (const beam::gui::Patient& patient : patients_.patients()) {
+        bool numeric = false;
+        const int value = QString::fromStdString(patient.externalId).toInt(&numeric);
+        if (numeric && value > highest) highest = value;
+    }
+    return QString::number(highest + 1);
+}
+
 void WorkflowWindow::buildCaseDemographics() {
     // Who is running the case, not who is being treated: above the patient's own fields, and
     // it survives a change of patient.
@@ -137,9 +149,13 @@ void WorkflowWindow::buildCaseDemographics() {
         QStringLiteral("Opens this patient's record and adds them to the list below, without "
                        "leaving this page."));
     connect(createPatientButton_, &QPushButton::clicked, this, [this] {
-        // A new record starts blank rather than from whoever is open.
-        showCaseDemographics(beam::gui::Patient{});
+        // A new record starts blank rather than from whoever is open, but with
+        // the next free Participant ID already in it.
+        beam::gui::Patient fresh;
+        fresh.externalId = suggestedParticipantId().toStdString();
+        showCaseDemographics(fresh);
         ui_->participantEdit->setFocus(Qt::OtherFocusReason);
+        ui_->participantEdit->selectAll();
         while (createPatientDialog_->exec() == QDialog::Accepted) {
             if (!caseFieldsUsable(createPatientDialog_)) continue;
             selectPatient(caseDemographics(), /*advancing=*/false);

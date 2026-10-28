@@ -116,6 +116,15 @@ void WorkflowWindow::buildScene(Scene3DView* view) {
                           current ? 5.0 : 3.0});
     }
     view->setPoints(std::move(points));
+
+    // The acoustic focus rebuildFocusImage() fills: 30 mm along the beam, 5 mm
+    // across. A 2D pane only ever cuts one slice through it.
+    std::vector<SceneEllipsoid> field;
+    if (focusImageLoaded_ && ui_->showFieldCheckBox->isChecked())
+        field.push_back({targetMm_, Eigen::Vector3d(30.0, 5.0, 5.0),
+                         QColor(255, 128, 128), 0.38});
+    view->setEllipsoids(std::move(field));
+
     view->setCentreMm(targetMm_);
 }
 
@@ -130,10 +139,21 @@ void WorkflowWindow::openSceneWindow() {
         sceneWindow_ = new QWidget(this, Qt::Window);
         sceneWindow_->setWindowTitle(QStringLiteral("BeamAI - array in space"));
         sceneWindow_->setAttribute(Qt::WA_DeleteOnClose, false);
-        sceneWindow_->resize(720, 620);
+        // Sized off a slice pane the way a detached 2D viewer is, plus a tenth:
+        // this one holds three planes and the array, not a single slice.
+        constexpr double kSceneExtra = 1.1;
+        sceneWindow_->resize(
+            static_cast<int>(
+                std::max(static_cast<int>(ui_->sagittalPreview->width() * kViewerScale),
+                         kMinViewerSide + 40) * kSceneExtra),
+            static_cast<int>(
+                std::max(static_cast<int>(ui_->sagittalPreview->height() * kViewerScale),
+                         kMinViewerSide + 110) * kSceneExtra));
         auto* layout = new QVBoxLayout(sceneWindow_);
         layout->setContentsMargins(0, 0, 0, 0);
         sceneView_ = new Scene3DView(sceneWindow_);
+        sceneView_->setContextWidgetFactory(
+            [this](QMenu* menu) { return buildFiducialPickerWidget(menu); });
         layout->addWidget(sceneView_);
         auto* close = new QShortcut(QKeySequence(Qt::Key_Escape), sceneWindow_);
         connect(close, &QShortcut::activated, sceneWindow_, &QWidget::close);
@@ -264,6 +284,9 @@ void WorkflowWindow::refreshDetachedViewers() {
         open.view->mirrorFrom(*open.source);
         if (open.label && open.sourceLabel) open.label->setText(open.sourceLabel->text());
     }
+    // The 3D window too: it was built once when opened, so a re-registration or
+    // a slice change left it showing the array where it used to be.
+    if (sceneWindow_ != nullptr && sceneWindow_->isVisible()) buildScene(sceneView_);
 }
 
 // Every pane offers the same context-menu entry.

@@ -201,10 +201,10 @@ QWidget* WorkflowWindow::buildFiducialPickerWidget(QMenu* menu) {
     auto* grid = new QGridLayout;
     grid->setHorizontalSpacing(7);
     grid->setVerticalSpacing(2);
-    grid->addWidget(new QLabel(QStringLiteral("Vertical"), holder), 0, 0, Qt::AlignCenter);
-    grid->addWidget(vertical, 1, 0, Qt::AlignCenter);
-    grid->addWidget(new QLabel(QStringLiteral("Horizontal"), holder), 0, 1, Qt::AlignCenter);
-    grid->addWidget(horizontal, 1, 1, Qt::AlignCenter);
+    grid->addWidget(new QLabel(QStringLiteral("Horizontal (Y)"), holder), 0, 0, Qt::AlignCenter);
+    grid->addWidget(horizontal, 1, 0, Qt::AlignCenter);
+    grid->addWidget(new QLabel(QStringLiteral("Vertical (Z)"), holder), 0, 1, Qt::AlignCenter);
+    grid->addWidget(vertical, 1, 1, Qt::AlignCenter);
     layout->addLayout(grid);
 
     auto* accept = new QPushButton(QStringLiteral("Accept new array position"), holder);
@@ -267,9 +267,21 @@ void WorkflowWindow::updateRegistrationAvailability() {
     ui_->confirmFiducialButton->setEnabled(allLocated && hasPendingLocated);
     ui_->registerFiducialsButton->setEnabled(geometryReady && allMeasured && !fitApplied);
     // Deliberately not gated: detectFiducials() reports what is missing, which is more use to
-    if (registerCurrentPositionButton_)
-        // Step 3 is intentionally repeatable.
-        registerCurrentPositionButton_->setEnabled(calibrationReady);
+    const bool locksMatch =
+        leftHorizontalPositionSlider_ == nullptr ||
+        (leftHorizontalPositionSlider_->value() == rightHorizontalPositionSlider_->value() &&
+         leftVerticalPositionSlider_->value() == rightVerticalPositionSlider_->value());
+    if (registerCurrentPositionButton_) {
+        // Step 3 is intentionally repeatable, but refuses mismatched panels --
+        // and a button that refuses silently reads as a dead button.
+        registerCurrentPositionButton_->setEnabled(calibrationReady && locksMatch);
+        registerCurrentPositionButton_->setToolTip(
+            locksMatch ? QStringLiteral("Apply the BeamV0 lock-position offset after "
+                                        "registering the array to MRI fiducials")
+                       : QStringLiteral("Subject Left and Subject Right are on different "
+                                        "notches. Match them to register."));
+    }
+    updateLockPositionFeedback(calibrationReady, locksMatch);
     ui_->acceptRegistrationButton->setEnabled(registrationPhase_ == RegistrationPhase::LockPositionRegistered);
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_}) {
@@ -427,6 +439,116 @@ void WorkflowWindow::acceptFiducialRegistration() {
     refresh();
     // Correction is an internal half of the combined Coupling/Correction gate and is
     goToNextStage();
+}
+
+// Everything the lock panels say, decided from the state they are in right now.
+//
+// Rebuilt on every call rather than patched: the earlier version set the line
+// on each transition and left it alone otherwise, so any state reached without
+// passing through a transition kept the previous sentence.
+void WorkflowWindow::updateLockPositionFeedback(bool calibrationReady, bool locksMatch) {
+    if (!calibrationReady) {
+        setLockFlashing(false);
+        lockLineOwned_ = false;
+        return;
+    }
+    if (locksMatch) {
+        setLockFlashing(false);
+        // Only worth saying if a warning preceded it.
+        if (lockLineOwned_)
+            sayLockLine(QStringLiteral("Lock positions match: both panels at Y%1 Z%2.")
+                            .arg(leftHorizontalPositionSlider_->value())
+                            .arg(leftVerticalPositionSlider_->value()),
+                        false);
+        lockLineOwned_ = false;
+        return;
+    }
+    // Mismatched. Setting the second panel passes through this on the way, so
+    // nothing is said until the operator has stepped away from both.
+    if (lockPanelsEngaged()) {
+        setLockFlashing(false);
+        if (lockLineOwned_) {
+            sayLockLine(QStringLiteral("Setting lock position..."), false);
+            lockLineOwned_ = false;
+        }
+        startLockWatch();
+        return;
+    }
+    sayLockLine(QStringLiteral("Lock positions do not match: Subject Left is at Y%1 Z%2, "
+                               "Subject Right is at Y%3 Z%4. Set both panels to the same "
+                               "notches before registering.")
+                    .arg(leftHorizontalPositionSlider_->value())
+                    .arg(leftVerticalPositionSlider_->value())
+                    .arg(rightHorizontalPositionSlider_->value())
+                    .arg(rightVerticalPositionSlider_->value()),
+                true);
+    lockLineOwned_ = true;
+    setLockFlashing(true);
+}
+
+// showMessage only recolours the Registration line on success, so the text is
+// written here directly and both states behave the same way.
+void WorkflowWindow::sayLockLine(const QString& text, bool warning) {
+    showMessage(text, warning);
+    if (ui_->registrationResult != nullptr) ui_->registrationResult->setText(text);
+}
+
+// Still choosing: the pointer is over either panel, or a notch moved a moment
+// ago. Not hasFocus() -- a clicked slider keeps the keyboard after the pointer
+// leaves, which reads as engaged until something else is clicked.
+bool WorkflowWindow::lockPanelsEngaged() const {
+    for (QWidget* panel : {leftLockPanel_, rightLockPanel_})
+        if (panel != nullptr && panel->isVisible() &&
+            panel->rect().contains(panel->mapFromGlobal(QCursor::pos())))
+            return true;
+    return lastLockChangeMs_ != 0 &&
+           QDateTime::currentMSecsSinceEpoch() - lastLockChangeMs_ < 700;
+}
+
+// Polls until they step away, then re-decides. Nothing else drives that moment:
+// leaving a widget with the mouse raises no signal the window hears.
+void WorkflowWindow::startLockWatch() {
+    if (lockWatchTimer_ == nullptr) {
+        lockWatchTimer_ = new QTimer(this);
+        lockWatchTimer_->setInterval(250);
+        connect(lockWatchTimer_, &QTimer::timeout, this, [this] {
+            if (lockPanelsEngaged()) return;
+            lockWatchTimer_->stop();
+            updateRegistrationAvailability();
+        });
+    }
+    if (!lockWatchTimer_->isActive()) lockWatchTimer_->start();
+}
+
+void WorkflowWindow::setLockFlashing(bool on) {
+    if (!on) {
+        if (lockWatchTimer_ != nullptr) lockWatchTimer_->stop();
+        if (lockFlashTimer_ != nullptr) lockFlashTimer_->stop();
+        return;
+    }
+    if (lockFlashTimer_ == nullptr) {
+        lockFlashTimer_ = new QTimer(this);
+        lockFlashTimer_->setInterval(520);
+        connect(lockFlashTimer_, &QTimer::timeout, this, [this] {
+            lockFlashOn_ = !lockFlashOn_;
+            for (QWidget* banner : {static_cast<QWidget*>(ui_->workflowMessage),
+                                    static_cast<QWidget*>(ui_->registrationResult)}) {
+                if (banner == nullptr || !banner->isVisible()) continue;
+                banner->setStyleSheet(
+                    lockFlashOn_
+                        ? QStringLiteral("padding: 9px 10px; color: #ffffff; background: #c62828; "
+                                         "border: 1px solid #8e1b1b; border-radius: 5px; "
+                                         "font-weight: 700;")
+                        : QStringLiteral("padding: 9px 10px; color: #a32018; background: #fdeceb; "
+                                         "border: 1px solid #e3a49c; border-radius: 5px; "
+                                         "font-weight: 700;"));
+            }
+        });
+    }
+    if (!lockFlashTimer_->isActive()) {
+        lockFlashOn_ = false;
+        lockFlashTimer_->start();
+    }
 }
 
 void WorkflowWindow::performCurrentPositionRegistration() {

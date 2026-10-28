@@ -223,16 +223,20 @@ void WorkflowWindow::buildRegistrationPage() {
         horizontal->setMinimumWidth(120);
         horizontal->setMinimumHeight(48);
         horizontal->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        panelLayout->addWidget(new QLabel(QStringLiteral("Vertical"), panel), 0, 0, 1, 2, Qt::AlignCenter);
-        panelLayout->addWidget(vertical, 1, 0, 2, 2, Qt::AlignCenter);
-        panelLayout->addWidget(new QLabel(QStringLiteral("Horizontal"), panel), 0, 2, Qt::AlignCenter);
-        panelLayout->addWidget(horizontal, 1, 2, 2, 1, Qt::AlignCenter);
+        // Horizontal first, matching the H3V4 readout and the array's own
+        // LeftY1Z3 naming, where Y is the horizontal lock.
+        panelLayout->addWidget(new QLabel(QStringLiteral("Horizontal (Y)"), panel), 0, 0, Qt::AlignCenter);
+        panelLayout->addWidget(horizontal, 1, 0, 2, 1, Qt::AlignCenter);
+        panelLayout->addWidget(new QLabel(QStringLiteral("Vertical (Z)"), panel), 0, 1, 1, 2, Qt::AlignCenter);
+        panelLayout->addWidget(vertical, 1, 1, 2, 2, Qt::AlignCenter);
         return panel;
     };
-    calibrationControls->addWidget(makeLockPanel(QStringLiteral("Subject Left"),
-                                                  leftHorizontalPositionSlider_, leftVerticalPositionSlider_), 0);
-    calibrationControls->addWidget(makeLockPanel(QStringLiteral("Subject Right"),
-                                                  rightHorizontalPositionSlider_, rightVerticalPositionSlider_), 0);
+    leftLockPanel_ = makeLockPanel(QStringLiteral("Subject Left"),
+                                   leftHorizontalPositionSlider_, leftVerticalPositionSlider_);
+    rightLockPanel_ = makeLockPanel(QStringLiteral("Subject Right"),
+                                    rightHorizontalPositionSlider_, rightVerticalPositionSlider_);
+    calibrationControls->addWidget(leftLockPanel_, 0);
+    calibrationControls->addWidget(rightLockPanel_, 0);
     registerCurrentPositionButton_ = new QPushButton(QStringLiteral("Register Arrays to Current Position"), calibrationGroup);
     registerCurrentPositionButton_->setFixedHeight(kRegistrationButtonHeight);
     registerCurrentPositionButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -343,11 +347,12 @@ void WorkflowWindow::buildRegistrationPage() {
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
         connect(slider, &QSlider::valueChanged, this, [this] {
             // Slider changes are already delivered after Qt has accepted the new value.
+            lastLockChangeMs_ = QDateTime::currentMSecsSinceEpoch();
             if (registrationLockPositionRegistered())
                 setRegistrationPhase(RegistrationPhase::FitApplied);
-            else if (registerCurrentPositionButton_)
-                registerCurrentPositionButton_->setEnabled(
-                    registrationGeometryLoaded_ && mriLoaded_ && registrationFitApplied());
+            // Through the one function that knows the rules, so a mismatched
+            // pair of panels disables the button here too.
+            updateRegistrationAvailability();
         });
     for (QSlider* slider : {leftHorizontalPositionSlider_, leftVerticalPositionSlider_,
                             rightHorizontalPositionSlider_, rightVerticalPositionSlider_})
@@ -355,9 +360,9 @@ void WorkflowWindow::buildRegistrationPage() {
             // Pressing a calibration track is an explicit request to review or redo Step 3,
             if (registrationLockPositionRegistered())
                 setRegistrationPhase(RegistrationPhase::FitApplied);
-            else if (registerCurrentPositionButton_)
-                registerCurrentPositionButton_->setEnabled(
-                    registrationGeometryLoaded_ && mriLoaded_ && registrationFitApplied());
+            // Through the one function that knows the rules, so a mismatched
+            // pair of panels disables the button here too.
+            updateRegistrationAvailability();
         });
     connect(registerCurrentPositionButton_, &QPushButton::clicked, this,
             [this] { performCurrentPositionRegistration(); });
