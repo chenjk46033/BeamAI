@@ -53,11 +53,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     }
     // The page palette is intentionally light-text for the dark work surface.
     for (QLineEdit* edit : findChildren<QLineEdit*>()) styleInputField(edit);
-    for (QComboBox* combo : findChildren<QComboBox*>()) {
-        combo->setStyleSheet(QStringLiteral(
-            "QComboBox { background: #ffffff; color: #17313f; } "
-            "QComboBox QAbstractItemView { background: #ffffff; color: #17313f; selection-background-color: #58c7e5; }"));
-    }
     ui_->stageList->setAutoFillBackground(true);
     QPalette stagePalette = ui_->stageList->palette();
     stagePalette.setColor(QPalette::Base, QColor(36, 36, 36));
@@ -190,8 +185,10 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         label->setFocusPolicy(Qt::ClickFocus);
     }
     // On the window rather than swept over its children: the treatment and
-    // safety boxes are built further down, and a sweep here misses them.
-    setStyleSheet(styleSheet() + QString::fromLatin1(kCheckBoxStyle));
+    // safety boxes, and every combo but two, are built further down -- a sweep
+    // here misses them.
+    setStyleSheet(styleSheet() + QString::fromLatin1(kCheckBoxStyle) +
+                  QString::fromLatin1(kComboBoxStyle));
     for (std::size_t i = 0; i < stageCount; ++i) ui_->stageList->addItem(QString());
     // Hardware readiness is not a prerequisite for offline MRI loading and registration.
     ui_->stageList->item(static_cast<int>(beam::gui::WorkflowStage::SystemCheck))->setHidden(true);

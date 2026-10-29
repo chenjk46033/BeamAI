@@ -270,6 +270,24 @@ const char* const kCheckBoxStyle =
     "QCheckBox::indicator:checked:disabled { background: #6f99a4; border-color: #5d848e; } "
     "QCheckBox:disabled { color: #8fa6b0; }";
 
+// Also set on the window: the protocol, visit, ACC-flag and trigger combos are
+// all built later. The arrow is a resource because a sheet cannot draw one.
+const char* const kComboBoxStyle =
+    "QComboBox { background: #ffffff; color: #17313f; border: 1px solid #7c9da8; "
+    "    border-radius: 4px; padding: 3px 8px; } "
+    "QComboBox:hover { border-color: #2888a2; } "
+    "QComboBox:focus, QComboBox:on { border-color: #167e91; } "
+    "QComboBox:disabled { background: #e4eaec; color: #8fa6b0; border-color: #b4c2c8; } "
+    "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: center right; "
+    "    width: 20px; border: none; background: transparent; } "
+    "QComboBox::down-arrow { image: url(:/combo/combo_arrow.xpm); width: 10px; height: 7px; } "
+    "QComboBox::down-arrow:disabled { image: url(:/combo/combo_arrow_disabled.xpm); } "
+    "QComboBox::down-arrow:on { top: 1px; } "
+    "QComboBox QAbstractItemView { background: #ffffff; color: #17313f; "
+    "    border: 1px solid #7c9da8; border-radius: 4px; padding: 2px; outline: none; "
+    "    selection-background-color: #167e91; selection-color: #ffffff; } "
+    "QComboBox QAbstractItemView::item { min-height: 22px; padding: 2px 6px; border: none; }";
+
 const char* const kSliderStyle =
     "QSlider::groove:horizontal { height: 6px; border-radius: 3px; background: #55727f; } "
     "QSlider::add-page:horizontal { background: #55727f; border-radius: 3px; } "

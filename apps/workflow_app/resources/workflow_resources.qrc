@@ -3,4 +3,8 @@
     <file>checkbox_tick.xpm</file>
     <file>checkbox_cross.xpm</file>
   </qresource>
+  <qresource prefix="/combo">
+    <file>combo_arrow.xpm</file>
+    <file>combo_arrow_disabled.xpm</file>
+  </qresource>
 </RCC>

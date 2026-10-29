@@ -1,0 +1,19 @@
+/* XPM */
+static const char *combo_arrow_disabled[] = {
+"10 7 9 1",
+". c None",
+"a c #DBE3E6",
+"b c #D3DCDF",
+"c c #CAD4D9",
+"d c #C2CDD2",
+"e c #B9C6CC",
+"f c #B0BFC5",
+"g c #A8B7BF",
+"h c #9FB0B8",
+"..........",
+"dhb....bhd",
+"chhc..chhc",
+".chhddhhc.",
+"..bhhhhb..",
+"...agga...",
+".........."};

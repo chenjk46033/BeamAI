@@ -62,9 +62,7 @@ void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyl
     };
     triggerModeCombo_ = new QComboBox(controlPanel);
     triggerModeCombo_->addItems({QStringLiteral("Immediate"), QStringLiteral("External")});
-    triggerModeCombo_->setStyleSheet(QStringLiteral(
-        "QComboBox { background: #ffffff; color: #17313f; padding: 4px 8px; "
-        "border: 1px solid #7c9da8; border-radius: 4px; }"));
+
     // A plan holds many sonications and BeamV0 fires them one at a time, so finishing the stage
     finishTreatmentButton_ = new QPushButton(QStringLiteral("Finish Treatment"),
                                              treatmentExecutionBody_);

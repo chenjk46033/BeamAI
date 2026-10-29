@@ -1,0 +1,19 @@
+/* XPM */
+static const char *combo_arrow[] = {
+"10 7 9 1",
+". c None",
+"a c #E7EBED",
+"b c #CED7DA",
+"c c #B6C3C8",
+"d c #9EAFB5",
+"e c #859AA3",
+"f c #6D8690",
+"g c #54727E",
+"h c #3C5E6B",
+"..........",
+"dhb....bhd",
+"chhc..chhc",
+".chhddhhc.",
+"..bhhhhb..",
+"...agga...",
+".........."};
