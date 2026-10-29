@@ -135,25 +135,61 @@ void WorkflowMriView::setRasMapping(QString plane, double fixedCoordinateMm,
     reverseVertical_ = reverseVertical;
 }
 
+namespace {
+constexpr double kDisplayGamma = 0.80;
+}  // namespace
+
+// Windowed on the 98th percentile of tissue rather than the brightest voxel,
+// so one hot spot does not wash the slice out.
+WorkflowGreyWindow workflowGreyWindowFor(const Eigen::MatrixXd& slice) {
+    WorkflowGreyWindow window;
+    if (slice.size() == 0) return window;
+    window.lo = slice.minCoeff();
+    const double sliceMax = slice.maxCoeff();
+    const double floor = window.lo + (sliceMax - window.lo) * 0.05;
+    std::vector<double> tissue;
+    tissue.reserve(static_cast<std::size_t>(slice.size()) / 2);
+    for (Eigen::Index k = 0; k < slice.size(); ++k)
+        if (slice.data()[k] > floor) tissue.push_back(slice.data()[k]);
+    if (tissue.size() > 200) {
+        const std::size_t hi = tissue.size() * 98 / 100;
+        std::nth_element(tissue.begin(), tissue.begin() + static_cast<std::ptrdiff_t>(hi),
+                         tissue.end());
+        window.hi = tissue[hi];
+    } else {
+        window.hi = sliceMax;
+    }
+    if (window.hi <= window.lo) window.hi = window.lo + 1.0;
+    return window;
+}
+
+QImage workflowToneMapSlice(const Eigen::MatrixXd& slice, WorkflowGreyWindow window,
+                            double brightness, double contrast, bool flipHorizontal) {
+    if (slice.size() == 0) return {};
+    const double range = std::max(window.hi - window.lo, 1e-12);
+    // Brightness is an output-level offset centered at 1.0.
+    const double brightnessOffset = (brightness - 1.0) * 0.5;
+    QImage result(static_cast<int>(slice.cols()), static_cast<int>(slice.rows()),
+                  QImage::Format_Grayscale8);
+    for (int y = 0; y < result.height(); ++y) {
+        auto* row = result.scanLine(y);
+        for (int x = 0; x < result.width(); ++x) {
+            const double normalized = std::clamp((slice(y, x) - window.lo) / range, 0.0, 1.0);
+            const double toned = std::pow(normalized, kDisplayGamma);
+            const double displayed = (toned - 0.5) * contrast + 0.5 + brightnessOffset;
+            row[x] = static_cast<unsigned char>(std::clamp(displayed * 255.0, 0.0, 255.0));
+        }
+    }
+    return flipHorizontal ? result.mirrored(true, false) : result;
+}
+
 void WorkflowMriView::setSlice(const Eigen::MatrixXd& slice, bool flipHorizontal) {
     slice_ = slice;
     flipHorizontal_ = flipHorizontal;
     if (slice_.size() > 0) {
-        dataMin_ = slice_.minCoeff();
-        const double sliceMax = slice_.maxCoeff();
-        const double floor = dataMin_ + (sliceMax - dataMin_) * 0.05;
-        std::vector<double> tissue;
-        tissue.reserve(static_cast<std::size_t>(slice_.size()) / 2);
-        for (Eigen::Index k = 0; k < slice_.size(); ++k)
-            if (slice_.data()[k] > floor) tissue.push_back(slice_.data()[k]);
-        if (tissue.size() > 200) {
-            const std::size_t hi = tissue.size() * 98 / 100;
-            std::nth_element(tissue.begin(), tissue.begin() + static_cast<std::ptrdiff_t>(hi), tissue.end());
-            dataMax_ = tissue[hi];
-        } else {
-            dataMax_ = sliceMax;
-        }
-        if (dataMax_ <= dataMin_) dataMax_ = dataMin_ + 1.0;
+        const WorkflowGreyWindow window = workflowGreyWindowFor(slice_);
+        dataMin_ = window.lo;
+        dataMax_ = window.hi;
     }
     rebuildImage();
     update();
@@ -288,27 +324,9 @@ void WorkflowMriView::mirrorFrom(const WorkflowMriView& source) {
     update();
 }
 
-constexpr double kDisplayGamma = 0.80;
-
 void WorkflowMriView::rebuildImage() {
-    if (slice_.size() == 0) {
-        image_ = {};
-        return;
-    }
-    const double range = std::max(dataMax_ - dataMin_, 1e-12);
-    // Brightness is an output-level offset centered at 1.0.
-    const double brightnessOffset = (brightness_ - 1.0) * 0.5;
-    QImage result(static_cast<int>(slice_.cols()), static_cast<int>(slice_.rows()), QImage::Format_Grayscale8);
-    for (int y = 0; y < result.height(); ++y) {
-        auto* row = result.scanLine(y);
-        for (int x = 0; x < result.width(); ++x) {
-            const double normalized = std::clamp((slice_(y, x) - dataMin_) / range, 0.0, 1.0);
-            const double toned = std::pow(normalized, kDisplayGamma);
-            const double displayed = (toned - 0.5) * contrast_ + 0.5 + brightnessOffset;
-            row[x] = static_cast<unsigned char>(std::clamp(displayed * 255.0, 0.0, 255.0));
-        }
-    }
-    image_ = flipHorizontal_ ? result.mirrored(true, false) : result;
+    image_ = workflowToneMapSlice(slice_, {dataMin_, dataMax_}, brightness_, contrast_,
+                                  flipHorizontal_);
 }
 
 QRectF WorkflowMriView::imageRect() const {

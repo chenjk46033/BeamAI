@@ -19,6 +19,16 @@ struct WorkflowMriRect {
     QColor color;
 };
 
+// The grey window and tone curve the slice panes draw with, shared so the 3D
+// scene's planes cannot drift from the 2D panes showing the same slice.
+struct WorkflowGreyWindow {
+    double lo = 0.0;
+    double hi = 1.0;
+};
+WorkflowGreyWindow workflowGreyWindowFor(const Eigen::MatrixXd& slice);
+QImage workflowToneMapSlice(const Eigen::MatrixXd& slice, WorkflowGreyWindow window,
+                            double brightness, double contrast, bool flipHorizontal);
+
 struct WorkflowMriMarker {
     QPointF normalizedPosition;
     QString label;
@@ -58,6 +68,9 @@ public:
     void resetBrightness();
     void adjustContrast(double amount);
     void resetContrast();
+    double brightness() const { return brightness_; }
+    double contrast() const { return contrast_; }
+    WorkflowGreyWindow greyWindow() const { return {dataMin_, dataMax_}; }
     void resetView();
     // Brings a point into view, doing nothing when it is already comfortably
     // inside it. Zoom is only ever raised, so the operator's own framing and

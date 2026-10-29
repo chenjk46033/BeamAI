@@ -130,6 +130,7 @@ private:
                              std::array<QPointF, 6>* apIsMm,
                              std::array<double, 6>* lrMm = nullptr) const;
     QWidget* buildFiducialPickerWidget(QMenu* menu);
+    QWidget* buildSceneControlsWidget(QMenu* menu);
     void performFiducialRegistration();
     void performCurrentPositionRegistration();
     void updateLockPositionFeedback(bool calibrationReady, bool locksMatch);

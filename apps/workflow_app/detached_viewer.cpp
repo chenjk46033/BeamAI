@@ -4,8 +4,10 @@
 #include "workflow_internal.hpp"
 
 #include <array>
+#include <functional>
 
 #include <QCloseEvent>
+#include <QMenu>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
@@ -52,32 +54,31 @@ void WorkflowWindow::buildScene(Scene3DView* view) {
     const double atAp = ap(std::clamp(coronal - 1, 0, int(ap.size()) - 1));
     const double atIs = is(std::clamp(axial - 1, 0, int(is.size()) - 1));
 
-    // Greyscale straight from the same slice the 2D panes draw.
-    const auto toImage = [](const Eigen::MatrixXd& slice) {
-        QImage out(int(slice.cols()), int(slice.rows()), QImage::Format_Grayscale8);
-        double lo = slice.minCoeff(), hi = slice.maxCoeff();
-        const double range = std::max(hi - lo, 1e-12);
-        for (int y = 0; y < out.height(); ++y) {
-            uchar* row = out.scanLine(y);
-            for (int x = 0; x < out.width(); ++x)
-                row[x] = uchar(std::clamp((slice(y, x) - lo) / range, 0.0, 1.0) * 255.0);
-        }
-        return out;
+    // The window and tone curve the 2D panes draw with, taken from the pane
+    // showing that plane so the two cannot disagree. No flip: the plane's
+    // corners already place the image in the patient.
+    const auto toImage = [](const Eigen::MatrixXd& slice, const WorkflowMriView* pane) {
+        return workflowToneMapSlice(slice, workflowGreyWindowFor(slice),
+                                    pane == nullptr ? 1.0 : pane->brightness(),
+                                    pane == nullptr ? 1.0 : pane->contrast(), false);
     };
 
     std::vector<ScenePlane> planes;
     ScenePlane sag;
-    sag.image = toImage(beam::mri::getSliceImage(mriVolume_, sagittal, "sagital"));
+    sag.image = toImage(beam::mri::getSliceImage(mriVolume_, sagittal, "sagital"),
+                        ui_->sagittalPreview);
     sag.cornersMm = {Eigen::Vector3d(atLr, ap0, is1), Eigen::Vector3d(atLr, ap1, is1),
                      Eigen::Vector3d(atLr, ap1, is0), Eigen::Vector3d(atLr, ap0, is0)};
     planes.push_back(std::move(sag));
     ScenePlane cor;
-    cor.image = toImage(beam::mri::getSliceImage(mriVolume_, coronal, "coronal"));
+    cor.image = toImage(beam::mri::getSliceImage(mriVolume_, coronal, "coronal"),
+                        ui_->coronalPreview);
     cor.cornersMm = {Eigen::Vector3d(lr0, atAp, is1), Eigen::Vector3d(lr1, atAp, is1),
                      Eigen::Vector3d(lr1, atAp, is0), Eigen::Vector3d(lr0, atAp, is0)};
     planes.push_back(std::move(cor));
     ScenePlane axi;
-    axi.image = toImage(beam::mri::getSliceImage(mriVolume_, axial, "axial"));
+    axi.image = toImage(beam::mri::getSliceImage(mriVolume_, axial, "axial"),
+                        ui_->axialPreview);
     axi.cornersMm = {Eigen::Vector3d(lr0, ap1, atIs), Eigen::Vector3d(lr1, ap1, atIs),
                      Eigen::Vector3d(lr1, ap0, atIs), Eigen::Vector3d(lr0, ap0, atIs)};
     planes.push_back(std::move(axi));
@@ -153,7 +154,7 @@ void WorkflowWindow::openSceneWindow() {
         layout->setContentsMargins(0, 0, 0, 0);
         sceneView_ = new Scene3DView(sceneWindow_);
         sceneView_->setContextWidgetFactory(
-            [this](QMenu* menu) { return buildFiducialPickerWidget(menu); });
+            [this](QMenu* menu) { return buildSceneControlsWidget(menu); });
         layout->addWidget(sceneView_);
         auto* close = new QShortcut(QKeySequence(Qt::Key_Escape), sceneWindow_);
         connect(close, &QShortcut::activated, sceneWindow_, &QWidget::close);
@@ -339,6 +340,71 @@ void WorkflowWindow::wireDetachedViewerMenus() {
             pane.view == ui_->registrationAxialPreview)
             pane.view->setLockOverlayHandler([this](bool on) { setLockOverlayShown(on); });
     }
+}
+
+// The 3D window's popup: the brightness its planes are drawn with, over the
+// same lock picker the slice panes carry.
+QWidget* WorkflowWindow::buildSceneControlsWidget(QMenu* menu) {
+    auto* container = new QWidget(menu);
+    auto* layout = new QVBoxLayout(container);
+    layout->setContentsMargins(10, 8, 10, 4);
+    layout->setSpacing(6);
+
+    const QString buttonStyle = QStringLiteral(
+        "QToolButton { background: #f7fafb; color: #17313f; border: 1px solid #9eacb4; "
+        "border-radius: 3px; min-width: 24px; max-width: 24px; min-height: 22px; max-height: 22px; "
+        "font-family: 'Segoe UI Symbol'; font-weight: 700; } "
+        "QToolButton:hover { background: #e3f2f6; border-color: #2888a2; }");
+
+    // One brightness, held by the slice panes: the planes here are drawn with
+    // it, so the 3D view cannot carry a second setting that disagrees.
+    const auto eachPane = [this](const std::function<void(WorkflowMriView*)>& change) {
+        for (WorkflowMriView* pane :
+             {ui_->sagittalPreview, ui_->coronalPreview, ui_->axialPreview})
+            if (pane != nullptr) change(pane);
+        refreshDetachedViewers();
+    };
+
+    const auto addRow = [&](const QString& name,
+                            const std::function<void(WorkflowMriView*, double)>& adjust,
+                            const std::function<void(WorkflowMriView*)>& reset) {
+        auto* row = new QHBoxLayout;
+        auto* label = new QLabel(name, container);
+        label->setMinimumWidth(72);
+        row->addWidget(label);
+        row->addSpacing(6);
+        const auto makeButton = [container, &buttonStyle](QChar symbol, const QString& tip) {
+            auto* button = new QToolButton(container);
+            button->setText(QString(symbol));
+            button->setToolTip(tip);
+            button->setStyleSheet(buttonStyle);
+            return button;
+        };
+        auto* up = makeButton(QChar(0x2191), QStringLiteral("Increase %1").arg(name.toLower()));
+        auto* down = makeButton(QChar(0x2193), QStringLiteral("Decrease %1").arg(name.toLower()));
+        auto* back = makeButton(QChar(0x21BA), QStringLiteral("Reset %1").arg(name.toLower()));
+        row->addWidget(up);
+        row->addWidget(down);
+        row->addWidget(back);
+        layout->addLayout(row);
+        connect(up, &QToolButton::clicked, this, [eachPane, adjust] {
+            eachPane([adjust](WorkflowMriView* pane) { adjust(pane, 0.1); });
+        });
+        connect(down, &QToolButton::clicked, this, [eachPane, adjust] {
+            eachPane([adjust](WorkflowMriView* pane) { adjust(pane, -0.1); });
+        });
+        connect(back, &QToolButton::clicked, this, [eachPane, reset] { eachPane(reset); });
+    };
+
+    addRow(QStringLiteral("Brightness"),
+           [](WorkflowMriView* pane, double amount) { pane->adjustBrightness(amount); },
+           [](WorkflowMriView* pane) { pane->resetBrightness(); });
+    addRow(QStringLiteral("Contrast"),
+           [](WorkflowMriView* pane, double amount) { pane->adjustContrast(amount); },
+           [](WorkflowMriView* pane) { pane->resetContrast(); });
+
+    if (QWidget* picker = buildFiducialPickerWidget(menu)) layout->addWidget(picker);
+    return container;
 }
 
 }  // namespace beam::app

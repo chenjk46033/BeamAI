@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# MSVC compiles one file at a time per project unless told otherwise.
+if (MSVC)
+    add_compile_options(/MP)
+endif()
+
 # Decided 2026-09-09: Beam is converted from BeamV0 as fully separate code --
 # no dependency on Diadem's libs/, no shared platform layer. An earlier
 # version of this file depended on Diadem/libs/common (see git history if
