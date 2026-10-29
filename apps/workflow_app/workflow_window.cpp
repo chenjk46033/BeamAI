@@ -827,8 +827,16 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     ui_->registrationTable->setFixedHeight(kRegistrationColumnHeight);
     if (auto* fiducialHeader = ui_->registrationTable->horizontalHeaderItem(0))
         fiducialHeader->setText(QStringLiteral("Fiducial"));
-    ui_->acceptRegistrationButton->setText(QStringLiteral("4  Accept registration and continue →"));
-    ui_->acceptRegistrationButton->setText(ui_->acceptRegistrationButton->text().mid(3));
+    // Wide enough for their own labels: a flat 220 left "Accept registration and
+    // continue" a few pixels short once the stylesheet's padding counted, which
+    // clipped the first letter.
+    for (QPushButton* button : {ui_->acceptDeviceReadinessButton, ui_->acceptImagingButton,
+                                ui_->acceptRegistrationButton, registerCurrentPositionButton_}) {
+        if (button == nullptr) continue;
+        button->ensurePolished();
+        button->setMinimumWidth(
+            std::max(220, button->fontMetrics().horizontalAdvance(button->text()) + 44));
+    }
     ui_->registrationTable->setStyleSheet(
         QStringLiteral("QTableWidget { color: #17313f; background: #ffffff; } "
                        "QTableWidget::item { color: #17313f; background: #ffffff; } "

@@ -265,7 +265,8 @@ void WorkflowWindow::buildRegistrationPage() {
     calibrationGroup->setMinimumHeight(0);
     calibrationGroup->setMaximumHeight(QWIDGETSIZE_MAX);
     calibrationGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    calibrationGroup->setTitle(QStringLiteral("2    Set the transducer lock position and accept"));
+    calibrationGroup->setTitle(QStringLiteral(
+        "2    Set the lock position, register the arrays to it, and accept"));
     ui_->registrationDetailsLayout->addWidget(calibrationGroup, 1);
 
     // The presses this stage needs, at the top of the pane each one belongs to rather than
