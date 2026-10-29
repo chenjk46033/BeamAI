@@ -254,6 +254,22 @@ constexpr double kTargetViewZoom = 4.0;
 constexpr int kMinMriViewerHeight = 300;
 
 // A default slider is a hairline with a small hollow box on it, which on these grounds reads as
+// Set on the window so it reaches every checkbox, including the ones built
+// after the constructor's early sweep. The box is drawn by the sheet so it can
+// answer to hover and disabled; only the glyph comes from a resource.
+const char* const kCheckBoxStyle =
+    "QCheckBox { spacing: 8px; padding: 2px 3px; background: transparent; } "
+    "QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #7c95a1; "
+    "    border-radius: 4px; background: #ffffff; } "
+    "QCheckBox::indicator:unchecked { image: url(:/checkbox/checkbox_cross.xpm); } "
+    "QCheckBox::indicator:unchecked:hover { border-color: #2888a2; } "
+    "QCheckBox::indicator:checked { background: #167e91; border-color: #11637a; "
+    "    image: url(:/checkbox/checkbox_tick.xpm); } "
+    "QCheckBox::indicator:checked:hover { border-color: #5ccde5; } "
+    "QCheckBox::indicator:disabled { background: #cfdbe0; border-color: #9fb0b8; } "
+    "QCheckBox::indicator:checked:disabled { background: #6f99a4; border-color: #5d848e; } "
+    "QCheckBox:disabled { color: #8fa6b0; }";
+
 const char* const kSliderStyle =
     "QSlider::groove:horizontal { height: 6px; border-radius: 3px; background: #55727f; } "
     "QSlider::add-page:horizontal { background: #55727f; border-radius: 3px; } "

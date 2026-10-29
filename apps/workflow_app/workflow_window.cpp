@@ -189,14 +189,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
                                        Qt::TextSelectableByKeyboard);
         label->setFocusPolicy(Qt::ClickFocus);
     }
-    // Fixed-size resource indicators keep the label origin stable while providing an explicit X
-    for (QCheckBox* checkBox : findChildren<QCheckBox*>()) {
-        checkBox->setStyleSheet(QStringLiteral(
-            "QCheckBox { spacing: 6px; padding: 2px 3px; background: transparent; } "
-            "QCheckBox::indicator { width: 13px; height: 13px; } "
-            "QCheckBox::indicator:unchecked { image: url(:/checkbox/checkbox_unchecked.xpm); } "
-            "QCheckBox::indicator:checked { image: url(:/checkbox/checkbox_checked.xpm); }"));
-    }
+    // On the window rather than swept over its children: the treatment and
+    // safety boxes are built further down, and a sweep here misses them.
+    setStyleSheet(styleSheet() + QString::fromLatin1(kCheckBoxStyle));
     for (std::size_t i = 0; i < stageCount; ++i) ui_->stageList->addItem(QString());
     // Hardware readiness is not a prerequisite for offline MRI loading and registration.
     ui_->stageList->item(static_cast<int>(beam::gui::WorkflowStage::SystemCheck))->setHidden(true);
