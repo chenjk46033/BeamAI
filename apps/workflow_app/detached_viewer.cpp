@@ -138,7 +138,7 @@ void WorkflowWindow::openSceneWindow() {
     }
     if (sceneWindow_ == nullptr) {
         sceneWindow_ = new QWidget(this, Qt::Window);
-        sceneWindow_->setWindowTitle(QStringLiteral("BeamAI - array in space"));
+        sceneWindow_->setWindowTitle(QStringLiteral("Beam - array in space"));
         sceneWindow_->setAttribute(Qt::WA_DeleteOnClose, false);
         // Sized off a slice pane the way a detached 2D viewer is, plus a tenth:
         // this one holds three planes and the array, not a single slice.

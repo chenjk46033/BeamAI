@@ -106,7 +106,7 @@ QString WorkflowWindow::writeFiducialsCsv(const QString& path) const {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return QString();
     QTextStream out(&file);
-    out << "# BeamAI measured fiducials, millimetres, RAS (+x right, +y anterior, +z superior)\n";
+    out << "# Beam measured fiducials, millimetres, RAS (+x right, +y anterior, +z superior)\n";
     out << "# MRI: " << mriPath_ << "\n";
     out << "# geometry: " << currentMriGeometry() << "\n";
     out << "# lock left: horizontal=" << leftHorizontalPositionSlider_->value()

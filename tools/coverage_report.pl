@@ -118,16 +118,16 @@ my $html = <<"HTML";
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BeamAI coverage</title>
+<title>Beam coverage</title>
 <style>
   :root {
-    --bg: #f7fafb; --panel: #ffffff; --ink: #17313f; --dim: #6b828e;
+    --bg: #f7fafb; --panel: #ffffff; --ink: #17313f; --dim: #4f6b78;
     --line: #dde6ea; --low: #d4564f; --mid: #d8a12a; --high: #2e9b7a;
     --accent: #167e91;
   }
   \@media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #10242c; --panel: #16303a; --ink: #e8f1f4; --dim: #8fa8b3;
+      --bg: #10242c; --panel: #16303a; --ink: #e8f1f4; --dim: #a9c2cd;
       --line: #23424e; --low: #e0736c; --mid: #e3b556; --high: #49b994;
       --accent: #5ccde5;
     }
@@ -135,7 +135,7 @@ my $html = <<"HTML";
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--ink);
-    font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+    font: 16px/1.55 "Segoe UI", system-ui, -apple-system, sans-serif;
   }
   main { max-width: 860px; margin: 0 auto; }
   h1 { font-size: 15px; font-weight: 600; letter-spacing: .08em;
@@ -150,8 +150,8 @@ my $html = <<"HTML";
   .meta { color: var(--dim); font-size: 14px; }
   .wrap { background: var(--panel); border: 1px solid var(--line);
           border-radius: 10px; overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th { text-align: left; font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; font-size: 12.5px; letter-spacing: .07em; text-transform: uppercase;
        color: var(--dim); font-weight: 600; padding: 12px 14px;
        border-bottom: 1px solid var(--line); }
   td { padding: 7px 14px; border-bottom: 1px solid var(--line); }
@@ -159,17 +159,17 @@ my $html = <<"HTML";
   .mod td { font-weight: 650; background: color-mix(in srgb, var(--accent) 7%, transparent); }
   .file { padding-left: 32px; color: var(--dim); }
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .dim { color: var(--dim); font-size: 13px; }
+  .dim { color: var(--dim); font-size: 14px; }
   .bar { width: 42%; min-width: 120px; }
   .bar span { display: block; height: 8px; border-radius: 4px; }
   .bar .low { background: var(--low); } .bar .mid { background: var(--mid); }
   .bar .high { background: var(--high); }
-  footer { color: var(--dim); font-size: 13px; margin-top: 18px; }
+  footer { color: var(--dim); font-size: 14px; margin-top: 18px; }
 </style>
 </head>
 <body>
 <main>
-  <h1>BeamAI line coverage</h1>
+  <h1>Beam line coverage</h1>
   <div class="headline">
     <span class="big">@{[ pct($all_rate) ]}</span>
     <span class="meta">$all_covered of $all_total executable lines &middot;

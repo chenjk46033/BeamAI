@@ -631,8 +631,8 @@ QString WorkflowWindow::caseReportHtml(int visit) const {
     html += QStringLiteral("<p style=\"margin-top:18pt; margin-bottom:0\"></p>");
     html += rule(kRule, 1);
     html += QStringLiteral("<p style=\"margin-top:4pt; font-size:7.5pt; color:%1\">"
-                           "Produced by BeamAI on %2 from this patient's treatment log. "
-                           "A blank field is one BeamAI does not collect yet.</p>")
+                           "Produced by Beam on %2 from this patient's treatment log. "
+                           "A blank field is one Beam does not collect yet.</p>")
                 .arg(kMuted, esc(QDateTime::currentDateTime().toString(Qt::ISODate)));
     html += QStringLiteral("</body></html>");
     return html;

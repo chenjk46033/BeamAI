@@ -4,7 +4,7 @@
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("BeamAI"));
+    app.setApplicationName(QStringLiteral("Beam"));
     beam::app::WorkflowWindow window;
     window.showMaximized();
     return app.exec();
