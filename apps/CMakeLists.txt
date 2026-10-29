@@ -135,7 +135,7 @@ if(Qt6_FOUND AND TARGET gui_qt)
     # gui_qt + Charts: the Coupling page draws updateAttenuationPlots.m's two RF
     # plots and setAvgTransmissionDataBars.m's bar pair, both already ported there.
     target_link_libraries(workflow_app PRIVATE gui gui_qt gui_qt_models gui_qt_views mri correction
-                                                stimulation sham safety serialcom infra_dicom infra_mat
+                                                stimulation sham safety serialcom infra_dicom
                                                 Qt6::Widgets Qt6::Charts)
     if(WIN32)
         target_link_libraries(workflow_app PRIVATE winmm)

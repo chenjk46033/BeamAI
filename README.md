@@ -112,7 +112,7 @@ _As of 2026-09-21_
 ## Test results
 
 - **Unit tests** — 401/401 passing (1 disabled), Debug and Release.
-- **Line coverage** — 90.0% of `libs/` (5195 of 5775 lines). See
+- **Line coverage** — 92.3% of `libs/` (5195 of 5626 lines). See
   [Coverage](#coverage) for how to reproduce it and what it excludes.
 - **Per-function coverage** — [one row per converted function](docs/unit-test-coverage.md),
   its test, and result.
@@ -148,11 +148,14 @@ Two things the number does not include:
   libraries, not the app sources, so the Qt UI in `apps/workflow_app` is not in
   the test binary at all. UI changes are verified by rendering offscreen
   instead.
-- **`libs/infra_mat` reads 0%** because the only test that exercises it,
+- **`libs/infra_mat` is not measured at all.** It holds only the BeamV0 `.mat`
+  reader, which nothing in the app calls — `beam_mat_info` and the
+  `TreatmentMigration` parity tests are its only callers. Its one test,
   `TreatmentMigration.TheAuthoritativeTargetListIsBeamV0sTwelve`, parses a
-  124 MB `.mat`. That is milliseconds in Release but does not finish under
-  Debug plus line tracing, so `tools/coverage.sh` excludes it by default. It
-  passes in the normal test run — the 0% is the exclusion, not a gap. Pass
+  124 MB `.mat`: milliseconds in Release, but it does not finish under Debug
+  plus line tracing. Both the test and the module are excluded by default, so
+  the figure reflects code the suite actually exercises rather than carrying a
+  standing 0%. The test still passes in the normal run. Pass
   `tools/coverage.sh 'TreatmentMigration.*'` to measure it, slowly.
 
 ## Known gaps

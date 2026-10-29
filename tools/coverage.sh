@@ -37,6 +37,9 @@ args=(
     --excluded_sources "$(cygpath -w "$root/tests")"
     --excluded_sources "$(cygpath -w "$build")"
     --excluded_sources vcpkg_installed
+    # Its one test parses a 124 MB .mat and is excluded below, and nothing in
+    # the app calls it -- measuring it would only report a standing 0%.
+    --excluded_sources "$(cygpath -w "$root/libs/infra_mat")"
     --export_type "html:$(cygpath -w "$out/html")"
     --export_type "cobertura:$(cygpath -w "$out/coverage.xml")"
 )

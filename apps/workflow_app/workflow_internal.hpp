@@ -68,7 +68,6 @@
 #include <QEvent>
 
 #include "infra_dicom/load_mri_ras.hpp"
-#include "infra_mat/legacy_beam_session.hpp"
 #include "array/array_data.hpp"
 #include "array/array_struct.hpp"
 #include "gui/mri_overlay_presenter.hpp"
@@ -283,10 +282,11 @@ const char* const kComboBoxStyle =
     "QComboBox::down-arrow { image: url(:/combo/combo_arrow.xpm); width: 10px; height: 7px; } "
     "QComboBox::down-arrow:disabled { image: url(:/combo/combo_arrow_disabled.xpm); } "
     "QComboBox::down-arrow:on { top: 1px; } "
+    // Verbatim the rule that was here before the restyle. The visit combo
+    // installs its own QListView and anything more than these three
+    // properties stopped its rows painting.
     "QComboBox QAbstractItemView { background: #ffffff; color: #17313f; "
-    "    border: 1px solid #7c9da8; border-radius: 4px; padding: 2px; outline: none; "
-    "    selection-background-color: #167e91; selection-color: #ffffff; } "
-    "QComboBox QAbstractItemView::item { min-height: 22px; padding: 2px 6px; border: none; }";
+    "    selection-background-color: #58c7e5; }";
 
 // The item views are white, so the native bar was a pale handle on a pale
 // track. Transparent track, so the one handle reads on the white tables and on

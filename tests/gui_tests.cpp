@@ -531,6 +531,19 @@ TEST(GetTopTargets, NegativeFallbackTieBrokenTowardBestRankedRegion) {
     EXPECT_DOUBLE_EQ(best.numericResponse[0], -1.0);
 }
 
+TEST(GetTopTargets, NegativeFallbackTakesASingleLeastNegativeTarget) {
+    // All negative and no ranked name present to backfill with, so the
+    // fallback runs -- here with one clear least-negative target rather than
+    // the tie the test above covers.
+    const std::vector<beam::gui::TargetResponse> responses = {
+        tr(1, "Other1", -5), tr(2, "Other2", -1), tr(3, "Other3", -3)};
+    const beam::gui::BestTargets best =
+        beam::gui::getTopTargetsFromTreatmentProtocolTable(responses, beam::gui::AccFlag::kOther);
+    ASSERT_EQ(best.name.size(), 1u);
+    EXPECT_EQ(best.name[0], "Other2");
+    EXPECT_DOUBLE_EQ(best.numericResponse[0], -1.0);
+}
+
 TEST(GetTopTargets, EmptyInputPadsWithShamThenFillsFromRanking) {
     const beam::gui::BestTargets best =
         beam::gui::getTopTargetsFromTreatmentProtocolTable({}, beam::gui::AccFlag::kOther);
@@ -1136,6 +1149,23 @@ TEST(RankTreatmentRows, TreatmentRowsWithNothingScreenedAboveThemAreLeftAlone) {
 }
 
 // A row already running the target the ranking would give it is not a change.
+// A screening block naming both regions is neither all-SCC nor all-aMCC, so
+// the tie that trims it falls back on the mixed ranking. SCC2 and aMCC2 tie at
+// 2; the mixed list ranks aMCC2 worse, so it is the one dropped.
+TEST(RankTreatmentRows, AMixedScreeningBlockRanksOnTheMixedList) {
+    std::vector<beam::gui::PlanRow> plan = {
+        pr(1, "SCC1", 30, 4, true), pr(2, "aMCC1", 30, 3, true),
+        pr(3, "SCC2", 30, 2, true), pr(4, "aMCC2", 30, 2, true),
+        pr(5, "T1", 180),           pr(6, "T2", 180),
+        pr(7, "T3", 180)};
+
+    const std::vector<beam::gui::RankedTarget> changes = beam::gui::rankTreatmentRows(plan);
+    std::vector<std::string> byRow;
+    for (const beam::gui::RankedTarget& change : changes)
+        byRow.push_back(std::to_string(change.sequence) + "=" + change.target);
+    EXPECT_EQ(byRow, (std::vector<std::string>{"5=SCC1", "6=aMCC1", "7=SCC2"}));
+}
+
 TEST(RankTreatmentRows, NothingIsReportedWhenThePlanAlreadyMatches) {
     std::vector<beam::gui::PlanRow> plan = {pr(1, "SCC1", 30, 4, true), pr(2, "SCC1", 180)};
     EXPECT_TRUE(beam::gui::rankTreatmentRows(plan).empty());

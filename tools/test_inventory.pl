@@ -228,9 +228,17 @@ for my $m (sort keys %by_module) {
         (scalar(@rows) == 1 ? '' : 's'), ($bad ? " — **$bad failing**" : '');
     print $out "| Test | Path | Purpose | From | Type | Result |\n";
     print $out "| --- | --- | --- | --- | --- | --- |\n";
+    my $suite = '';
     for my $t (@rows) {
-        printf $out "| %s.%s | `%s` | %s | %s | %s | %s |\n",
-            $t->{suite}, $t->{name}, $t->{path}, md($t->{purpose}),
+        # A labelled row per suite: each is a distinct algorithm or component,
+        # and a flat list of a hundred rows hides that.
+        if ($t->{suite} ne $suite) {
+            $suite = $t->{suite};
+            my $n = grep { $_->{suite} eq $suite } @rows;
+            printf $out "| **%s** | | _%d test%s_ | | | |\n", $suite, $n, ($n == 1 ? '' : 's');
+        }
+        printf $out "| %s | `%s` | %s | %s | %s | %s |\n",
+            $t->{name}, $t->{path}, md($t->{purpose}),
             ($t->{derived} ? 'name' : 'comment'),
             $t->{type}, $t->{result};
     }
@@ -259,18 +267,27 @@ if (defined $html_path) {
             . '</tr></thead><tbody>' . "\n",
             esc($m), scalar(@rows), (scalar(@rows) == 1 ? '' : 's'),
             ($bad ? sprintf(' &middot; <b class="bad">%d failing</b>', $bad) : ''));
+        my $suite = '';
         for my $t (@rows) {
+            if ($t->{suite} ne $suite) {
+                $suite = $t->{suite};
+                my $n = grep { $_->{suite} eq $suite } @rows;
+                $sections .= sprintf(
+                    '<tr class="suite"><td colspan="6">%s <span class="count">%d test%s'
+                    . '</span></td></tr>' . "\n",
+                    esc($suite), $n, ($n == 1 ? '' : 's'));
+            }
             # A few purposes are whole paragraphs; the cell shows the opening
             # and carries the rest in its tooltip.
             my $full = $t->{purpose};
             my $shown = length($full) > 260 ? substr($full, 0, 257) . '...' : $full;
             my $from = $t->{derived} ? 'name' : 'comment';
             $sections .= sprintf(
-                '<tr><td class="name"><b>%s</b>.%s</td><td class="purpose" title="%s">%s</td>'
+                '<tr><td class="name">%s</td><td class="purpose" title="%s">%s</td>'
                 . '<td><span class="tag %s">%s</span></td>'
                 . '<td class="path">%s</td><td><span class="tag %s">%s</span></td>'
                 . '<td><span class="tag %s">%s</span></td></tr>' . "\n",
-                esc($t->{suite}), esc($t->{name}),
+                esc($t->{name}),
                 esc($full), esc($shown),
                 $from, $from,
                 esc($t->{path}),
@@ -317,6 +334,8 @@ if (defined $html_path) {
   section { margin-bottom:26px; }
   h2 { font-size:15px; margin:0 0 8px; }
   .count { font-weight:400; font-size:14px; color:var(--dim); }
+  tr.suite td { font-weight:650; padding-top:12px;
+                background:color-mix(in srgb, var(--accent) 8%, transparent); }
   .wrap { background:var(--panel); border:1px solid var(--line); border-radius:10px;
           overflow-x:auto; }
   table { width:100%; border-collapse:collapse; font-size:15px; table-layout:fixed; }
