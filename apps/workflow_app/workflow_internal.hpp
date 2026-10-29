@@ -288,6 +288,23 @@ const char* const kComboBoxStyle =
     "    selection-background-color: #167e91; selection-color: #ffffff; } "
     "QComboBox QAbstractItemView::item { min-height: 22px; padding: 2px 6px; border: none; }";
 
+// The item views are white, so the native bar was a pale handle on a pale
+// track. Transparent track, so the one handle reads on the white tables and on
+// the dark panels alike.
+const char* const kScrollBarStyle =
+    "QScrollBar:vertical { background: transparent; width: 14px; margin: 0; border: none; } "
+    "QScrollBar:horizontal { background: transparent; height: 14px; margin: 0; border: none; } "
+    "QScrollBar::handle:vertical { background: #8aa6b1; border-radius: 5px; "
+    "    min-height: 32px; margin: 2px; } "
+    "QScrollBar::handle:horizontal { background: #8aa6b1; border-radius: 5px; "
+    "    min-width: 32px; margin: 2px; } "
+    "QScrollBar::handle:hover { background: #5f8795; } "
+    "QScrollBar::handle:pressed { background: #2888a2; } "
+    "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; "
+    "    background: transparent; } "
+    "QScrollBar::add-page, QScrollBar::sub-page { background: transparent; } "
+    "QAbstractScrollArea::corner { background: transparent; border: none; }";
+
 const char* const kSliderStyle =
     "QSlider::groove:horizontal { height: 6px; border-radius: 3px; background: #55727f; } "
     "QSlider::add-page:horizontal { background: #55727f; border-radius: 3px; } "

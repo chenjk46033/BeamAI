@@ -188,7 +188,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     // safety boxes, and every combo but two, are built further down -- a sweep
     // here misses them.
     setStyleSheet(styleSheet() + QString::fromLatin1(kCheckBoxStyle) +
-                  QString::fromLatin1(kComboBoxStyle));
+                  QString::fromLatin1(kComboBoxStyle) +
+                  QString::fromLatin1(kScrollBarStyle));
     for (std::size_t i = 0; i < stageCount; ++i) ui_->stageList->addItem(QString());
     // Hardware readiness is not a prerequisite for offline MRI loading and registration.
     ui_->stageList->item(static_cast<int>(beam::gui::WorkflowStage::SystemCheck))->setHidden(true);
