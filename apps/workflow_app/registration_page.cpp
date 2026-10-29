@@ -289,7 +289,7 @@ void WorkflowWindow::buildRegistrationPage() {
     // Its own line: sharing the row above clipped "Accept registration and continue" to "ccept
     saveSessionOnRegistrationButton_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     // Beside Save session, because both belong to the lock position: one shows what the sixteen
-    overlayAllTargetsButton_ = new QPushButton(QStringLiteral("Overlay all targets"),
+    overlayAllTargetsButton_ = new QPushButton(QStringLiteral("Overlay lock positions"),
                                                calibrationGroup_);
     overlayAllTargetsButton_->setCheckable(true);
     overlayAllTargetsButton_->setFixedHeight(kRegistrationButtonHeight);
@@ -297,8 +297,9 @@ void WorkflowWindow::buildRegistrationPage() {
     // Takes the width Save session leaves: the stretch used to swallow it.
     overlayAllTargetsButton_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     overlayAllTargetsButton_->setToolTip(
-        QStringLiteral("Draws the target each of the sixteen lock positions would reach, "
-                       "labelled H<horizontal> V<vertical>, on all three views at once."));
+        QStringLiteral("Draws the target each of the sixteen lock positions would reach on the "
+                       "sagittal view, here and on the Treatment page. The notches move in "
+                       "AP and IS, so they all project onto a sagittal slice."));
     connect(overlayAllTargetsButton_, &QPushButton::toggled, this,
             [this](bool on) { setLockOverlayShown(on); });
     auto* saveSessionRow = new QHBoxLayout;

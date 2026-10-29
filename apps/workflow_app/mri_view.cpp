@@ -637,8 +637,8 @@ void WorkflowMriView::contextMenuEvent(QContextMenuEvent* event) {
         menu.addSeparator();
         // Here as well as on the Registration page, so a detached viewer -- the bigger view the
         QAction* overlay = menu.addAction(lockOverlayShown_
-                                              ? QStringLiteral("Hide all lock-position targets")
-                                              : QStringLiteral("Overlay all lock-position targets"));
+                                              ? QStringLiteral("Hide lock positions")
+                                              : QStringLiteral("Overlay lock positions"));
         connect(overlay, &QAction::triggered, this,
                 [this] { lockOverlayHandler_(!lockOverlayShown_); });
     }

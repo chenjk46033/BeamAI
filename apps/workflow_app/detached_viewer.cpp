@@ -334,10 +334,12 @@ void WorkflowWindow::wireDetachedViewerMenus() {
                                captured.previous, captured.next, captured.reset, captured.label);
         });
         pane.view->setOpenSceneHandler([this] { openSceneWindow(); });
-        // Only the Registration panes carry the overlay, which is what their lock position is
+        // The panes the overlay can appear on: the Registration three, and the
+        // Treatment sagittal, which now draws it too.
         if (pane.view == ui_->registrationSagittalPreview ||
             pane.view == ui_->registrationCoronalPreview ||
-            pane.view == ui_->registrationAxialPreview)
+            pane.view == ui_->registrationAxialPreview ||
+            pane.view == treatmentSagittalPreview_)
             pane.view->setLockOverlayHandler([this](bool on) { setLockOverlayShown(on); });
     }
 }

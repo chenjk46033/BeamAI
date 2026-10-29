@@ -501,6 +501,9 @@ void WorkflowWindow::showMriPreviews() {
         ui_->registrationSagittalPreview->setMarkers(std::move(sagMarkers));
         ui_->registrationCoronalPreview->setMarkers(std::move(corMarkers));
         ui_->registrationAxialPreview->setMarkers(std::move(axialMarkers));
+        // The same notches on the Treatment page, so the lock position stays visible
+        // where the sonication is actually run.
+        appendLockPositionOverlay(treatmentSagMarkers);
         treatmentSagittalPreview_->setMarkers(std::move(treatmentSagMarkers));
         treatmentCoronalPreview_->setMarkers(std::move(treatmentCorMarkers));
         treatmentAxialPreview_->setMarkers(std::move(treatmentAxialMarkers));

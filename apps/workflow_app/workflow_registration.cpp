@@ -319,13 +319,14 @@ void WorkflowWindow::setLockOverlayShown(bool shown) {
         const QSignalBlocker blocker(overlayAllTargetsButton_);
         overlayAllTargetsButton_->setChecked(lockOverlayShown_);
         overlayAllTargetsButton_->setText(lockOverlayShown_
-                                              ? QStringLiteral("Hide all targets")
-                                              : QStringLiteral("Overlay all targets"));
+                                              ? QStringLiteral("Hide lock positions")
+                                              : QStringLiteral("Overlay lock positions"));
     }
     // So the menu entry reads "Hide" once it is on, in the pane and in any detached viewer
     for (WorkflowMriView* view : {ui_->registrationSagittalPreview,
                                   ui_->registrationCoronalPreview,
-                                  ui_->registrationAxialPreview})
+                                  ui_->registrationAxialPreview,
+                                  treatmentSagittalPreview_})
         if (view != nullptr) view->setLockOverlayShown(lockOverlayShown_);
     if (lockOverlayShown_ && lockOverlayTargets_.empty())
         showMessage(QStringLiteral("Register to the MRI fiducials first: the lock positions are "
