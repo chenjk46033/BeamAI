@@ -488,16 +488,6 @@
                                       </widget>
                                     </item>
                                     <item>
-                                      <widget class="QCheckBox" name="showSteeringRangeCheckBox">
-                                        <property name="text">
-                                          <string>Show steering range</string>
-                                        </property>
-                                        <property name="toolTip">
-                                          <string>Volume the array can steer into: 90 x 56 x 30 mm about the array centre.</string>
-                                        </property>
-                                      </widget>
-                                    </item>
-                                    <item>
                                       <spacer name="brightnessControlGap">
                                         <property name="orientation">
                                           <enum>Qt::Horizontal</enum>
@@ -1072,16 +1062,6 @@
                                   </property>
                                   <property name="checked">
                                     <bool>true</bool>
-                                  </property>
-                                </widget>
-                              </item>
-                              <item>
-                                <widget class="QCheckBox" name="registrationShowSteeringRangeCheckBox">
-                                  <property name="text">
-                                    <string>Show steering range</string>
-                                  </property>
-                                  <property name="toolTip">
-                                    <string>Volume the array can steer into: 90 x 56 x 30 mm about the array centre.</string>
                                   </property>
                                 </widget>
                               </item>

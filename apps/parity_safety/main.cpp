@@ -8,7 +8,7 @@
 // be invoked directly. verify_safety.m instead evaluates the acoustic
 // formulae copied verbatim from those source files (with line references),
 // and calls the two functions that *are* directly callable
-// (getMaxSteeringRange, getMaxSonicationAmplitude).
+// (getMaxSonicationAmplitude).
 
 #include <cstdio>
 #include <exception>
@@ -66,9 +66,6 @@ int run() {
     r.v("isptaBurstInterval_s3", ispta.isptaBurstInterval);
 
     // --- limits ---
-    const Eigen::Matrix<double, 3, 2> steer = maxSteeringRangeDegrees();
-    for (int a = 0; a < 3; ++a)
-        for (int b = 0; b < 2; ++b) r.v("maxSteer_" + std::to_string(a) + std::to_string(b), steer(a, b));
     r.v("maxAmp", kMaxSonicationAmplitudeMPa);
 
     return 0;

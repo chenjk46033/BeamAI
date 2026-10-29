@@ -325,11 +325,8 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     auto* treatmentShowTarget = new QCheckBox(QStringLiteral("Show target"), treatmentMriPage_);
     auto* treatmentShowTransducers = new QCheckBox(QStringLiteral("Show transducers"), treatmentMriPage_);
     auto* treatmentShowFiducials = new QCheckBox(QStringLiteral("Show fiducials"), treatmentMriPage_);
-    auto* treatmentShowSteeringRange =
-        new QCheckBox(QStringLiteral("Show steering range"), treatmentMriPage_);
-    treatmentShowSteeringRange->setToolTip(ui_->showSteeringRangeCheckBox->toolTip());
     for (QCheckBox* check : {treatmentShowField, treatmentShowTarget, treatmentShowTransducers,
-                             treatmentShowFiducials, treatmentShowSteeringRange}) {
+                             treatmentShowFiducials}) {
         check->setStyleSheet(QStringLiteral("QCheckBox { color: #dcebef; padding: 2px; }"));
         treatmentViewerControls->addWidget(check);
     }
@@ -364,10 +361,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->showTargetCheckBox, &QCheckBox::toggled, treatmentShowTarget, &QCheckBox::setChecked);
     connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, treatmentShowTransducers, &QCheckBox::setChecked);
     connect(ui_->showFiducialsCheckBox, &QCheckBox::toggled, treatmentShowFiducials, &QCheckBox::setChecked);
-    connect(treatmentShowSteeringRange, &QCheckBox::toggled, ui_->showSteeringRangeCheckBox,
-            &QCheckBox::setChecked);
-    connect(ui_->showSteeringRangeCheckBox, &QCheckBox::toggled, treatmentShowSteeringRange,
-            &QCheckBox::setChecked);
     connect(treatmentTransparency, &QSlider::valueChanged, ui_->transducerTransparencySlider, &QSlider::setValue);
     connect(ui_->transducerTransparencySlider, &QSlider::valueChanged, treatmentTransparency, &QSlider::setValue);
     connect(treatmentBrightnessDown, &QToolButton::clicked, ui_->brightnessDownButton, &QToolButton::click);
@@ -377,7 +370,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     treatmentShowTarget->setChecked(ui_->showTargetCheckBox->isChecked());
     treatmentShowTransducers->setChecked(ui_->showTransducersCheckBox->isChecked());
     treatmentShowFiducials->setChecked(ui_->showFiducialsCheckBox->isChecked());
-    treatmentShowSteeringRange->setChecked(ui_->showSteeringRangeCheckBox->isChecked());
     treatmentSagittalPreview_ = ui_->treatmentSagittalPreview;
     treatmentCoronalPreview_ = ui_->treatmentCoronalPreview;
     treatmentAxialPreview_ = ui_->treatmentAxialPreview;
@@ -601,12 +593,6 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
     connect(ui_->showFieldCheckBox, &QCheckBox::toggled, ui_->registrationShowFieldCheckBox, &QCheckBox::setChecked);
     // Show Target is NOT mirrored between the two panes the way Show Field and Show Transducers
     connect(ui_->registrationShowTargetCheckBox, &QCheckBox::toggled, this,
-            [this] { if (mriLoaded_) showMriPreviews(); });
-    connect(ui_->showSteeringRangeCheckBox, &QCheckBox::toggled,
-            ui_->registrationShowSteeringRangeCheckBox, &QCheckBox::setChecked);
-    connect(ui_->registrationShowSteeringRangeCheckBox, &QCheckBox::toggled,
-            ui_->showSteeringRangeCheckBox, &QCheckBox::setChecked);
-    connect(ui_->showSteeringRangeCheckBox, &QCheckBox::toggled, this,
             [this] { if (mriLoaded_) showMriPreviews(); });
     connect(ui_->showTransducersCheckBox, &QCheckBox::toggled, ui_->registrationShowTransducersCheckBox, &QCheckBox::setChecked);
     connect(ui_->transducerTransparencySlider, &QSlider::valueChanged, ui_->registrationTransparencySlider, &QSlider::setValue);

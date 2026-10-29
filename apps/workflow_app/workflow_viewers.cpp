@@ -302,44 +302,6 @@ void WorkflowWindow::showMriPreviews() {
                                   ui_->registrationAxialPreview})
         view->setNavigationCrosshairVisible(showTargetOnRegistration);
 
-    // DiademV0/getMaxSteeringRange.m: the half-extents the array can steer to.
-    const bool steeringOnImaging = ui_->showSteeringRangeCheckBox->isChecked();
-    const bool steeringOnRegistration = ui_->registrationShowSteeringRangeCheckBox->isChecked();
-    std::vector<WorkflowMriRect> steeringSag, steeringCor, steeringAxial;
-    if (registrationGeometryLoaded_ && (steeringOnImaging || steeringOnRegistration)) {
-        const Eigen::Vector3d centre = arrayCentreMm();
-        const Eigen::Vector3d half(45.0, 28.0, 15.0);
-        const QColor steeringColor(70, 160, 255);
-        // The flips are the ones the markers above use, so min and max can swap.
-        const auto box = [](double x0, double x1, double y0, double y1) {
-            return QRectF(QPointF(std::min(x0, x1), std::min(y0, y1)),
-                          QPointF(std::max(x0, x1), std::max(y0, y1)));
-        };
-        const auto lr = [&](double mm) { return normalizedAxisPosition(mriAxes_.dimLR, mm); };
-        const auto ap = [&](double mm) { return 1.0 - normalizedAxisPosition(mriAxes_.dimAP, mm); };
-        const auto is = [&](double mm) { return 1.0 - normalizedAxisPosition(mriAxes_.dimIS, mm); };
-        steeringSag.push_back({box(ap(centre.y() - half.y()), ap(centre.y() + half.y()),
-                                   is(centre.z() - half.z()), is(centre.z() + half.z())),
-                               steeringColor});
-        steeringCor.push_back({box(lr(centre.x() - half.x()), lr(centre.x() + half.x()),
-                                   is(centre.z() - half.z()), is(centre.z() + half.z())),
-                               steeringColor});
-        steeringAxial.push_back({box(lr(centre.x() - half.x()), lr(centre.x() + half.x()),
-                                     ap(centre.y() - half.y()), ap(centre.y() + half.y())),
-                                 steeringColor});
-    }
-    for (WorkflowMriView* view : {ui_->sagittalPreview, treatmentSagittalPreview_})
-        view->setRects(steeringOnImaging ? steeringSag : std::vector<WorkflowMriRect>{});
-    for (WorkflowMriView* view : {ui_->coronalPreview, treatmentCoronalPreview_})
-        view->setRects(steeringOnImaging ? steeringCor : std::vector<WorkflowMriRect>{});
-    for (WorkflowMriView* view : {ui_->axialPreview, treatmentAxialPreview_})
-        view->setRects(steeringOnImaging ? steeringAxial : std::vector<WorkflowMriRect>{});
-    ui_->registrationSagittalPreview->setRects(
-        steeringOnRegistration ? steeringSag : std::vector<WorkflowMriRect>{});
-    ui_->registrationCoronalPreview->setRects(
-        steeringOnRegistration ? steeringCor : std::vector<WorkflowMriRect>{});
-    ui_->registrationAxialPreview->setRects(
-        steeringOnRegistration ? steeringAxial : std::vector<WorkflowMriRect>{});
 
     // Imaging is the unregistered source image review.
     if (focusImageLoaded_ && ui_->showFieldCheckBox->isChecked()) {

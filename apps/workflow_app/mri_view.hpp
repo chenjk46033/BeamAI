@@ -12,13 +12,6 @@
 #include <functional>
 #include <vector>
 
-// getMaxSteeringRange.m's box, drawn per plane: the volume the array can steer
-// into, so a target outside it cannot be delivered.
-struct WorkflowMriRect {
-    QRectF normalized;
-    QColor color;
-};
-
 // The grey window and tone curve the slice panes draw with, shared so the 3D
 // scene's planes cannot drift from the 2D panes showing the same slice.
 struct WorkflowGreyWindow {
@@ -57,7 +50,6 @@ public:
     void setMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity, bool flipHorizontal = false);
     void setSecondaryMaskOverlay(const Eigen::MatrixXd& mask, QColor color, double opacity, bool flipHorizontal = false);
     void setMarkers(std::vector<WorkflowMriMarker> markers);
-    void setRects(std::vector<WorkflowMriRect> rects);
     void setRasMapping(QString plane, double fixedCoordinateMm,
                        double horizontalMinMm, double horizontalMaxMm,
                        double verticalMinMm, double verticalMaxMm,
@@ -176,7 +168,6 @@ private:
     QImage maskImage_;
     QImage secondaryMaskImage_;
     std::vector<WorkflowMriMarker> markers_;
-    std::vector<WorkflowMriRect> rects_;
     bool flipHorizontal_ = false;
     double dataMin_ = 0.0;
     double dataMax_ = 1.0;

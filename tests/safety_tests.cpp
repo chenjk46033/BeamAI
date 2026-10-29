@@ -35,15 +35,11 @@ TEST(Intensity, IsptaBurstDurationAndInterval) {
     EXPECT_NEAR(r.isptaBurstInterval, 30.91924 * 0.5 * 0.1 / 1.0, 1e-3);
 }
 
-TEST(Limits, ConstantsAndSteeringRange) {
+TEST(Limits, Constants) {
     EXPECT_DOUBLE_EQ(kIsptaThresholdWPerCm2, 0.720);
     EXPECT_DOUBLE_EQ(kIsppaThresholdWPerCm2, 190.0);
     EXPECT_DOUBLE_EQ(kMechanicalIndexThreshold, 1.9);
     EXPECT_DOUBLE_EQ(kMaxSonicationAmplitudeMPa, 3.0);
-
-    Eigen::Matrix<double, 3, 2> expected;
-    expected << -45, 45, -28, 28, -15, 15;
-    EXPECT_TRUE(maxSteeringRangeDegrees().isApprox(expected));
 }
 
 namespace {

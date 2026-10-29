@@ -30,11 +30,6 @@ WorkflowMriView::WorkflowMriView(QWidget* parent) : QWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
 }
 
-void WorkflowMriView::setRects(std::vector<WorkflowMriRect> rects) {
-    rects_ = std::move(rects);
-    update();
-}
-
 void WorkflowMriView::setNavigationCrosshair(QPointF normalizedPosition) {
     crosshair_.setX(std::clamp(normalizedPosition.x(), 0.0, 1.0));
     crosshair_.setY(std::clamp(normalizedPosition.y(), 0.0, 1.0));
@@ -361,17 +356,6 @@ void WorkflowMriView::paintEvent(QPaintEvent*) {
 
     painter.setRenderHint(QPainter::Antialiasing, true);
     paintMeasurement(painter, displayed);
-    for (const WorkflowMriRect& box : rects_) {
-        const QRectF shown(displayed.left() + box.normalized.left() * displayed.width(),
-                           displayed.top() + box.normalized.top() * displayed.height(),
-                           box.normalized.width() * displayed.width(),
-                           box.normalized.height() * displayed.height());
-        QColor fill = box.color;
-        fill.setAlpha(40);
-        painter.setBrush(fill);
-        painter.setPen(QPen(box.color, 2.0));
-        painter.drawRect(shown);
-    }
     painter.setBrush(Qt::NoBrush);
 
     for (const WorkflowMriMarker& marker : markers_) {
