@@ -168,11 +168,13 @@ int WorkflowWindow::selectedSonicationRow() const {
 // The sonication grid holds one row in normal use, so a fixed slice of the body left a band of
 void WorkflowWindow::updateStimGridHeight() {
     if (!stimParamView_) return;
-    const int rows = stimParamModel_->rowCount();
-    const int rowHeight = rows > 0 ? stimParamView_->rowHeight(0) : 26;
-    const int wanted = stimParamView_->horizontalHeader()->height() + rows * rowHeight +
-                       2 * stimParamView_->frameWidth();
-    stimParamView_->setFixedHeight(std::clamp(wanted, 56, 220));
+    int rowSum = 0;
+    for (int r = 0, n = stimParamModel_->rowCount(); r < n; ++r)
+        rowSum += stimParamView_->rowHeight(r);
+    stimParamView_->setFixedHeight(
+        std::min(stimParamView_->horizontalHeader()->height() + rowSum +
+                     2 * stimParamView_->frameWidth(),
+                 220));
 }
 
 // Copies the selected target's placed position into the grid row's X/Y/Z, so the grid always
