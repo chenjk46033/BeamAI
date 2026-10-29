@@ -47,6 +47,22 @@ cmake --build build-ai --config Debug --target unit_tests
 .\build-ai\tests\Debug\unit_tests.exe
 ```
 
+Same commands in bash (Git Bash), with `--parallel` so `/MP` actually uses the
+machine's cores:
+
+```bash
+cmake --build build-ai --config Release --parallel --target workflow_app unit_tests
+./build-ai/apps/Release/workflow_app.exe
+./build-ai/tests/Release/unit_tests.exe
+./build-ai/tests/Release/unit_tests.exe --gtest_filter='TreatmentLog*'
+```
+
+Two build failures that are not code errors, both meaning the app is still
+running: `LNK1104`/`LNK1168` is the exe being held, and `Permission denied`
+copying `qwindows.dll` is the Qt plugin being held. The second buries its one
+real line under ~20 `MSB3073` lines that are just MSBuild echoing its script.
+Build only `unit_tests` to work while the app stays open.
+
 Equivalent build presets exist for both configurations:
 
 ```powershell
@@ -95,13 +111,49 @@ _As of 2026-09-21_
 
 ## Test results
 
-- **Unit tests** — 300/300 passing, Debug and Release.
+- **Unit tests** — 401/401 passing (1 disabled), Debug and Release.
+- **Line coverage** — 90.0% of `libs/` (5195 of 5775 lines). See
+  [Coverage](#coverage) for how to reproduce it and what it excludes.
 - **Per-function coverage** — [one row per converted function](docs/unit-test-coverage.md),
   its test, and result.
 - **MATLAB parity** — the C++ ports diffed against the real BeamV0 `.m`
   functions on the same input (atol/rtol 1e-9), every non-GUI phase:
   Arrays + Util 88/88, Correction 48/48, Stimulation 28/28, MRI 69/69,
   Registration 89/89, Safety 14/14. See `matlab_verify/`.
+
+## Coverage
+
+Line coverage comes from [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage),
+which reads debug info and watches the process — nothing is linked into
+`unit_tests.exe`, so the binary measured is the one that normally runs. It is
+deliberately a separate command rather than part of the test run: the suite is
+~2 s in Release, and coverage needs a Debug build and several minutes.
+
+```bash
+tools/coverage.sh                    # whole suite
+tools/coverage.sh 'TreatmentLog*'    # one gtest filter
+```
+
+Outputs, all under `coverage/` (gitignored):
+
+| file | what it is |
+| --- | --- |
+| `summary.html` | one readable page, modules worst-first |
+| `coverage.xml` | Cobertura, for CI |
+| `html/index.html` | OpenCppCoverage's own per-file drill-down |
+
+Two things the number does not include:
+
+- **`apps/` is absent, not at zero.** `tests/CMakeLists.txt` compiles the
+  libraries, not the app sources, so the Qt UI in `apps/workflow_app` is not in
+  the test binary at all. UI changes are verified by rendering offscreen
+  instead.
+- **`libs/infra_mat` reads 0%** because the only test that exercises it,
+  `TreatmentMigration.TheAuthoritativeTargetListIsBeamV0sTwelve`, parses a
+  124 MB `.mat`. That is milliseconds in Release but does not finish under
+  Debug plus line tracing, so `tools/coverage.sh` excludes it by default. It
+  passes in the normal test run — the 0% is the exclusion, not a gap. Pass
+  `tools/coverage.sh 'TreatmentMigration.*'` to measure it, slowly.
 
 ## Known gaps
 

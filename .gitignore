@@ -48,3 +48,7 @@ Desktop.ini
 # apps/make_mri_fixture from the original DICOM series; carries geometry and
 # voxels only -- no patient, physician, study, or date fields.
 !/testdata/beamai_F040_T1_MRI.nii
+
+# OpenCppCoverage output (tools/coverage.sh)
+/coverage/
+LastCoverageResults.log
