@@ -448,6 +448,9 @@ void WorkflowMriView::mousePressEvent(QMouseEvent* event) {
                                 displayed.top() + marker.normalizedPosition.y() * displayed.height());
             if (QLineF(point, event->position()).length() <= 14.0) {
                 draggingMarker_ = true;
+                // Captured from the marker, not the cursor: the two differ by
+                // however far inside the 14 px grab radius the press landed.
+                dragOriginRas_ = rasAtWidgetPosition(point);
                 setCursor(Qt::CrossCursor);
                 if (markerPickedHandler_ && marker.markerIndex >= 0)
                     markerPickedHandler_(marker.markerIndex);
@@ -520,6 +523,7 @@ void WorkflowMriView::mouseReleaseEvent(QMouseEvent* event) {
         }
         pendingPlacement_ = false;
         draggingMarker_ = false;
+        dragOriginRas_.reset();
         panning_ = false;
         setCursor(Qt::ArrowCursor);
     }
@@ -1039,8 +1043,23 @@ void WorkflowMriView::paintMeasurement(QPainter& painter, const QRectF& displaye
     }
 }
 
+// Puts a dragged marker back where it was picked up. Callable from the window,
+// because the key can arrive at whichever widget holds focus, not this one.
+bool WorkflowMriView::cancelMarkerDrag() {
+    if (!draggingMarker_) return false;
+    if (dragOriginRas_ && pointPickedHandler_) pointPickedHandler_(*dragOriginRas_);
+    draggingMarker_ = false;
+    dragOriginRas_.reset();
+    setCursor(Qt::ArrowCursor);
+    update();
+    return true;
+}
+
 void WorkflowMriView::keyPressEvent(QKeyEvent* event) {
-    // Escape abandons what is being drawn.
+    if (event->key() == Qt::Key_Escape && cancelMarkerDrag()) {
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Escape && measurementInProgress()) {
         cancelMeasurementInProgress();
         event->accept();

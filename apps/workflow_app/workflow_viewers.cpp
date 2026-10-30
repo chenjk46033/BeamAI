@@ -62,6 +62,32 @@ double WorkflowWindow::sliceCoordinateMm(const QString& axis, int index) const {
     return vector(std::clamp<Eigen::Index>(index, 0, vector.size() - 1));
 }
 
+// Escape puts a fiducial being dragged back where it was picked up. Handled
+// here as well as in the view: the key goes to whichever widget holds focus,
+// and the press that starts a drag does not always leave it with the view.
+void WorkflowWindow::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Escape) {
+        bool cancelled = false;
+        for (WorkflowMriView* view : {ui_->registrationSagittalPreview,
+                                      ui_->registrationCoronalPreview,
+                                      ui_->registrationAxialPreview,
+                                      ui_->sagittalPreview, ui_->coronalPreview,
+                                      ui_->axialPreview, treatmentSagittalPreview_,
+                                      treatmentCoronalPreview_, treatmentAxialPreview_})
+            if (view != nullptr && view->cancelMarkerDrag()) cancelled = true;
+        for (const DetachedViewer& open : detachedViewers_)
+            if (open.view != nullptr && open.view->cancelMarkerDrag()) cancelled = true;
+        if (cancelled) {
+            showMessage(QStringLiteral("Move cancelled; the fiducial is back where it was."),
+                        false);
+            showMriPreviews();
+            event->accept();
+            return;
+        }
+    }
+    QMainWindow::keyPressEvent(event);
+}
+
 bool WorkflowWindow::eventFilter(QObject* watched, QEvent* event) {
     // What a stim parameter shipped as.
     if (stimParamView_ != nullptr && watched == stimParamView_->viewport() &&

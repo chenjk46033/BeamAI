@@ -58,6 +58,8 @@ public:
     void setNavigationCrosshairVisible(bool visible);
     void adjustBrightness(double amount);
     void resetBrightness();
+    // True when a marker drag was in progress and has been put back.
+    bool cancelMarkerDrag();
     void adjustContrast(double amount);
     void resetContrast();
     double brightness() const { return brightness_; }
@@ -180,6 +182,8 @@ private:
     bool pendingPlacement_ = false;
     QPoint pressPosition_;
     bool draggingMarker_ = false;
+    // Where a dragged marker was picked up, so Escape can put it back.
+    std::optional<Eigen::Vector3d> dragOriginRas_;
     QPointF crosshair_ = QPointF(0.5, 0.5);
     bool navigationCrosshairVisible_ = false;
     QString plane_;

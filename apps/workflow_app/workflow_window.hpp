@@ -90,6 +90,7 @@ public:
 protected:
     void resizeEvent(QResizeEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     enum class RegistrationPhase { Locating, FitApplied, LockPositionRegistered, Accepted };
