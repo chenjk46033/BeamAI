@@ -142,9 +142,10 @@ void WorkflowWindow::buildCaseDemographics() {
     // Two steps, because they are two decisions.
     createPatientButton_ = new QPushButton(QStringLiteral("Create patient…"), ui_->caseGroup);
     createPatientButton_->setStyleSheet(
-        QStringLiteral("QPushButton { padding: 9px 16px; background: #2b4a58; color: #dcebef; "
-                       "border: 1px solid #39758e; border-radius: 5px; font-weight: 600; } "
-                       "QPushButton:hover { background: #35596a; }"));
+        QStringLiteral("QPushButton { padding: 9px 16px; background: #176b87; color: white; "
+                       "border: 1px solid #0f5269; border-radius: 5px; font-weight: 600; } "
+                       "QPushButton:hover { background: #2083a3; border-color: #0c4357; } "
+                       "QPushButton:pressed { background: #10566e; }"));
     createPatientButton_->setToolTip(
         QStringLiteral("Opens this patient's record and adds them to the list below, without "
                        "leaving this page."));

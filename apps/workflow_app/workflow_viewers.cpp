@@ -179,8 +179,10 @@ void WorkflowWindow::syncMriViewerHeights() {
         maxStackHeight_ = stackHeight;
     if (maxStackHeight_ > 0) stackHeight = std::min(stackHeight, maxStackHeight_);
     // What each page needs for everything except its viewer row.
+    // Minimum, not sizeHint: the details panel asks for 44 px more than it
+    // needs, and granting its preference costs every viewer that height.
     const auto reservedFor = [](const QWidget* page, const QLayout* viewerRow) {
-        return page->layout()->sizeHint().height() - viewerRow->sizeHint().height();
+        return page->layout()->minimumSize().height() - viewerRow->minimumSize().height();
     };
     const int reserved = std::max(reservedFor(ui_->imagingPage, ui_->mriPreviewLayout),
                                   reservedFor(ui_->registrationPage, ui_->registrationImages));

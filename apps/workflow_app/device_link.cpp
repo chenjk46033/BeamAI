@@ -20,6 +20,19 @@ void WorkflowWindow::buildDeviceLinkPanel() {
     ui_->placeholderLayout->addWidget(deviceLink_);
 
     serialHeaderLabel_ = ui_->deviceHeader;
+    // The other three header labels carry a pinned width; this one did not, so
+    // every link-state change resized it and slid the whole header line.
+    serialHeaderLabel_->ensurePolished();
+    int widest = 0;
+    for (const QString& state : {QStringLiteral("Device not checked"),
+                                 QStringLiteral("Searching for device..."),
+                                 QStringLiteral("Device connected"),
+                                 QStringLiteral("Device not found")}) {
+        const QString shown = QString(QChar(0x25CF)) + QLatin1Char(' ') + state;
+        widest = std::max(widest, serialHeaderLabel_->fontMetrics().horizontalAdvance(shown));
+    }
+    // 28 px of stylesheet padding-left, plus slack.
+    serialHeaderLabel_->setMinimumWidth(widest + 34);
     connect(deviceLink_, &DeviceLinkPanel::linkLostWhileDelivering, this,
             [this](const QString& text) {
                 showMessage(QStringLiteral("Lost contact with the device while delivering: %1 "
