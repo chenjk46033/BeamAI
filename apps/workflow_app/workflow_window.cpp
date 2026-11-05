@@ -684,6 +684,9 @@ WorkflowWindow::WorkflowWindow(QWidget* parent) : QMainWindow(parent), ui_(new U
         }
         std::string reason;
         if (workflow_.complete(beam::gui::WorkflowStage::Imaging, &reason)) {
+            // Accepting is the approval, so this is where the visit learns
+            // which scan it was planned on.
+            bindCurrentVisitToMri();
             showMessage(QStringLiteral("MRI accepted. Continuing to Registration."), false);
             refresh();
             updateRegistrationAvailability();

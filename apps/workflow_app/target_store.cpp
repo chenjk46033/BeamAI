@@ -14,6 +14,7 @@ void WorkflowWindow::loadPatientData() {
     treatmentLog_.clear();
     visitSonication_.clear();
     editedVisits_.clear();
+    visitBinding_.clear();
     // So loadTreatmentProtocol treats this as a fresh protocol and opens on this patient's
     lastLoadedProtocol_.clear();
     lastLoadedVisit_ = 0;
@@ -72,6 +73,11 @@ void WorkflowWindow::loadPatientData() {
     if (targetListWidget_->count() > 0) targetListWidget_->setCurrentRow(0);
     refreshVisitCombo();
     loadTreatmentProtocol(currentProtocolName());
+    // After refreshVisitCombo(), not before: the binding is keyed by visit, and
+    // until the combo is rebuilt currentVisitNumber() still names the last
+    // patient's visit. Opening a patient is the case this exists for -- come
+    // back a week later and the right scan is already up, awaiting acceptance.
+    resolveVisitMri();
 }
 
 void WorkflowWindow::savePatientData() {

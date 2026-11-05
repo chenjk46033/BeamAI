@@ -1,5 +1,7 @@
 #include "treatment_internal.hpp"
 
+#include "mri/fingerprint.hpp"
+
 namespace beam::app {
 
 void WorkflowWindow::buildTreatmentExecutionBody(const QString& acceptButtonStyle) {
@@ -159,6 +161,9 @@ void WorkflowWindow::saveVisitState() const {
         keys.insert(entry.key());
     keys.unite(editedVisits_);
     keys.unite(rankingOffVisits_);
+    // A visit whose only recorded fact is the scan it was planned on still exists.
+    for (auto entry = visitBinding_.constBegin(); entry != visitBinding_.constEnd(); ++entry)
+        keys.insert(entry.key());
     QStringList ordered(keys.constBegin(), keys.constEnd());
     ordered.sort();  // a stable file, so a diff of it means something
     for (const QString& key : ordered) {
@@ -168,11 +173,91 @@ void WorkflowWindow::saveVisitState() const {
         protocol.replace(QLatin1Char('"'), QStringLiteral("\"\""));
         out << '"' << protocol << "\"," << key.mid(split + 1) << ','
             << visitSonication_.value(key, 1) << ',' << (editedVisits_.contains(key) ? 1 : 0)
-            << ',' << (rankingOffVisits_.contains(key) ? 0 : 1) << '\n';
+            << ',' << (rankingOffVisits_.contains(key) ? 0 : 1);
+        // Quoted: an MRI path can hold a comma and the fiducial list does.
+        const VisitBinding binding = visitBinding_.value(key);
+        const auto quoted = [](QString text) {
+            text.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+            return QStringLiteral("\"%1\"").arg(text);
+        };
+        out << ',' << quoted(binding.mriPath) << ',' << quoted(binding.fingerprint) << ','
+            << quoted(binding.fiducials) << ',' << binding.lockH << ',' << binding.lockV << '\n';
     }
 }
 
 // The operator has changed this visit's rows, so the schedule no longer describes it and must
+// The scan this visit was accepted against, kept so reopening it does not send
+// the operator back to a file chooser.
+void WorkflowWindow::bindCurrentVisitToMri() {
+    if (!mriLoaded_) return;
+    const QString key = visitKey(currentProtocolName(), currentVisitNumber());
+    VisitBinding binding;
+    binding.mriPath = mriPath_;
+    binding.fingerprint = mriFingerprint_;
+    binding.fiducials = fiducialsAsText();
+    if (leftHorizontalPositionSlider_ != nullptr) {
+        binding.lockH = leftHorizontalPositionSlider_->value();
+        binding.lockV = leftVerticalPositionSlider_->value();
+    }
+    visitBinding_.insert(key, binding);
+    saveVisitState();
+}
+
+// Brings back the scan a visit was accepted against. Never swaps one that is
+// already open: a visit switch is navigation, and loadMri() would invalidate
+// registration, coupling and correction behind the operator's back.
+//
+// Returns true when the bound scan is loaded.
+bool WorkflowWindow::resolveVisitMri() {
+    if (deliveryRunning()) return false;
+    const QString key = visitKey(currentProtocolName(), currentVisitNumber());
+    if (!visitBinding_.contains(key)) return false;  // a new visit; nothing to resolve
+    const VisitBinding binding = visitBinding_.value(key);
+    if (binding.mriPath.isEmpty()) return false;
+    const QString name = QFileInfo(binding.mriPath).fileName();
+
+    if (mriLoaded_) {
+        if (beam::mri::fingerprintsMatch(mriFingerprint_.toStdString(),
+                                         binding.fingerprint.toStdString()))
+            return true;  // already the right one
+        // A different scan is open. Say so and leave it: replacing it would
+        // throw away whatever has been accepted against it.
+        showMessage(QStringLiteral("This visit was planned on %1, which is not the scan now "
+                                   "loaded. Load it from Imaging to work on this visit.")
+                        .arg(name),
+                    true);
+        return false;
+    }
+
+    if (!QFileInfo::exists(binding.mriPath)) {
+        showMessage(QStringLiteral("This visit was planned on %1, which is not where it was. "
+                                   "Load the scan to carry on.")
+                        .arg(name),
+                    true);
+        return false;
+    }
+
+    loadMri(binding.mriPath);
+    if (!mriLoaded_) return false;  // loadMri has already said why
+
+    if (!beam::mri::fingerprintsMatch(mriFingerprint_.toStdString(),
+                                      binding.fingerprint.toStdString())) {
+        // Same name, different image: the case where treating the wrong
+        // anatomy is possible, so it is never accepted quietly.
+        showMessage(QStringLiteral("%1 is not the scan this visit was planned on -- same name, "
+                                   "different image data. Check it before accepting.")
+                        .arg(name),
+                    true);
+        return false;
+    }
+
+    showMessage(QStringLiteral("Loaded the scan this visit was planned on (%1). Review it and "
+                               "accept imaging.")
+                    .arg(name),
+                false);
+    return true;
+}
+
 void WorkflowWindow::markVisitEdited(const QString& protocol, int visit) {
     editedVisits_.insert(visitKey(protocol, visit));
     saveVisitState();
@@ -208,7 +293,30 @@ void WorkflowWindow::loadVisitState() {
             ++at;
         }
         if (!closed || at >= line.size() || line.at(at) != QLatin1Char(',')) continue;
-        const QStringList fields = line.mid(at + 1).split(QLatin1Char(','));
+        // Split on commas that are not inside quotes: the MRI path and the
+        // fiducial list both contain them.
+        QStringList fields;
+        {
+            QString field;
+            bool inQuotes = false;
+            for (int i = at + 1; i < line.size(); ++i) {
+                const QChar c = line.at(i);
+                if (c == QLatin1Char('"')) {
+                    if (inQuotes && i + 1 < line.size() && line.at(i + 1) == QLatin1Char('"')) {
+                        field += QLatin1Char('"');
+                        ++i;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (c == QLatin1Char(',') && !inQuotes) {
+                    fields.append(field);
+                    field.clear();
+                } else {
+                    field += c;
+                }
+            }
+            fields.append(field);
+        }
         if (fields.size() < 2) continue;
         bool visitOk = false;
         bool positionOk = false;
@@ -220,6 +328,16 @@ void WorkflowWindow::loadVisitState() {
         if (fields.value(2).trimmed() == QLatin1String("1")) editedVisits_.insert(key);
         // Absent means on, so a file written before this column keeps BeamV0's always-on
         if (fields.value(3).trimmed() == QLatin1String("0")) rankingOffVisits_.insert(key);
+        // Absent in a file written before the binding existed, which simply
+        // means that visit has no scan recorded against it.
+        VisitBinding binding;
+        binding.mriPath = fields.value(4);
+        binding.fingerprint = fields.value(5);
+        binding.fiducials = fields.value(6);
+        binding.lockH = fields.value(7).trimmed().toInt();
+        binding.lockV = fields.value(8).trimmed().toInt();
+        if (!binding.mriPath.isEmpty() || !binding.fingerprint.isEmpty())
+            visitBinding_.insert(key, binding);
     }
 }
 

@@ -8,6 +8,7 @@ add_library(mri
     src/slice.cpp
     src/affine_volume.cpp
     src/fiducial_detect.cpp
+    src/fingerprint.cpp
 )
 target_include_directories(mri PUBLIC include)
 target_link_libraries(mri PUBLIC Eigen3::Eigen)

@@ -329,6 +329,9 @@ private:
     void loadVisitState();
     void saveVisitState() const;
     void markVisitEdited(const QString& protocol, int visit);
+    // Records the accepted scan against the open visit, and the reverse.
+    void bindCurrentVisitToMri();
+    bool resolveVisitMri();
     // One scheduled sonication, as the row a visit holds: the target's own parameters, with the
     beam::gui::TreatmentLogRow rowForTarget(const std::string& target,
                                             std::optional<double> durationSeconds) const;
@@ -517,6 +520,16 @@ private:
     QHash<QString, int> visitSonication_;
     // Visits whose row list the operator has changed by hand.
     QSet<QString> editedVisits_;
+    // The scan a visit was planned on, so reopening it does not start from a
+    // file chooser. Recorded when Imaging is accepted, not when it is loaded.
+    struct VisitBinding {
+        QString mriPath;
+        QString fingerprint;
+        QString fiducials;
+        int lockH = 0;
+        int lockV = 0;
+    };
+    QHash<QString, VisitBinding> visitBinding_;
     QCheckBox* autoRankCheckBox_ = nullptr;
     QLabel* planBlocksLabel_ = nullptr;
     // Visits the operator has turned ranking off for.

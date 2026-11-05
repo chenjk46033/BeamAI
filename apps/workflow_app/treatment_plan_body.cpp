@@ -512,6 +512,9 @@ void WorkflowWindow::wireTreatmentPlanBody() {
             }
             selectVisit(chosen);
             loadTreatmentProtocol(currentProtocolName());
+            // Reopening a visit brings back the scan it was planned on, rather
+            // than sending the operator to a file chooser for a known scan.
+            resolveVisitMri();
         }, Qt::QueuedConnection);
     });
     connect(protocolView_, &QTableView::doubleClicked, this, [this](const QModelIndex& where) {

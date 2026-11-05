@@ -1,5 +1,7 @@
 #include "workflow_internal.hpp"
 
+#include "mri/fingerprint.hpp"
+
 namespace beam::app {
 
 void WorkflowWindow::fillSimulatedCouplingWaveforms() {
@@ -331,17 +333,11 @@ void WorkflowWindow::applyCorrectionResult(const std::vector<std::string>& reply
     refresh();
 }
 
-// Extent and sampling of the loaded scan.
+// Geometry plus a digest of the voxels. Geometry alone cannot tell two
+// patients apart when they were scanned on one machine with one protocol.
 QString WorkflowWindow::mriGeometryFingerprint() const {
-    if (!mriLoaded_ || mriAxes_.dimLR.size() < 2) return QString();
-    const auto span = [](const Eigen::VectorXd& axis) {
-        return QStringLiteral("%1:%2..%3")
-            .arg(axis.size())
-            .arg(axis(0), 0, 'f', 3)
-            .arg(axis(axis.size() - 1), 0, 'f', 3);
-    };
-    return QStringLiteral("%1;%2;%3")
-        .arg(span(mriAxes_.dimLR), span(mriAxes_.dimAP), span(mriAxes_.dimIS));
+    if (!mriLoaded_) return QString();
+    return QString::fromStdString(beam::mri::volumeFingerprint(mriVolume_, mriAxes_));
 }
 
 }  // namespace beam::app

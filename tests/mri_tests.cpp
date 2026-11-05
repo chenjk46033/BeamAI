@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 
+#include "mri/fingerprint.hpp"
+
 #include "mri/affine_volume.hpp"
 #include "mri/dicom_coords.hpp"
 #include "mri/dicom_series_geometry.hpp"
@@ -527,4 +529,81 @@ TEST(ApplyAffine3D, TranslationShiftsTheOutputAxes) {
         constantVolume(3, 1.0), axis012(), axis012(), axis012(), translate);
     EXPECT_NEAR(r.xMm(0), -0.5 + 10.0, 1e-9);  // same grid, shifted by +10
     EXPECT_NEAR(r.yMm(0), -0.5, 1e-9);         // y untouched
+}
+
+// --- volumeFingerprint -------------------------------------------------
+//
+// The visit binding rests on this: it has to say "the same scan" when the file
+// is reread and "a different scan" when it is anyone else's.
+
+namespace {
+
+beam::mri::RasAxisVectors axesFor(int nx, int ny, int nz, double originLr = -10.0) {
+    beam::mri::RasAxisVectors axes;
+    axes.dimLR = Eigen::VectorXd::LinSpaced(nx, originLr, originLr + nx - 1);
+    axes.dimAP = Eigen::VectorXd::LinSpaced(ny, -20.0, -20.0 + ny - 1);
+    axes.dimIS = Eigen::VectorXd::LinSpaced(nz, -30.0, -30.0 + nz - 1);
+    return axes;
+}
+
+// A deterministic phantom; `seed` changes the voxels without touching geometry.
+beam::mri::Volume3D volumeFor(int nx, int ny, int nz, int seed) {
+    beam::mri::Volume3D volume;
+    volume.nx = nx;
+    volume.ny = ny;
+    volume.nz = nz;
+    volume.kSlices.assign(static_cast<std::size_t>(nz), Eigen::MatrixXd::Zero(nx, ny));
+    for (int k = 0; k < nz; ++k)
+        for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i)
+                volume.kSlices[static_cast<std::size_t>(k)](i, j) =
+                    std::sin(0.1 * (i + 2 * j + 3 * k + 7 * seed)) * 100.0;
+    return volume;
+}
+
+}  // namespace
+
+TEST(VolumeFingerprint, TheSameVolumeFingerprintsTheSame) {
+    const beam::mri::Volume3D volume = volumeFor(16, 15, 14, 1);
+    const beam::mri::RasAxisVectors axes = axesFor(16, 15, 14);
+    EXPECT_EQ(beam::mri::volumeFingerprint(volume, axes),
+              beam::mri::volumeFingerprint(volume, axes));
+    EXPECT_FALSE(beam::mri::volumeFingerprint(volume, axes).empty());
+}
+
+// The reason this exists. Two patients on one scanner with one protocol share
+// their geometry exactly, so geometry alone would call them the same scan.
+TEST(VolumeFingerprint, SameGeometryDifferentVoxelsDiffer) {
+    const beam::mri::RasAxisVectors axes = axesFor(16, 15, 14);
+    const beam::mri::Volume3D first = volumeFor(16, 15, 14, 1);
+    const beam::mri::Volume3D second = volumeFor(16, 15, 14, 2);
+    EXPECT_EQ(beam::mri::geometryFingerprint(axes), beam::mri::geometryFingerprint(axes));
+    EXPECT_NE(beam::mri::volumeFingerprint(first, axes),
+              beam::mri::volumeFingerprint(second, axes));
+}
+
+TEST(VolumeFingerprint, SameVoxelsDifferentGeometryDiffer) {
+    const beam::mri::Volume3D volume = volumeFor(16, 15, 14, 1);
+    EXPECT_NE(beam::mri::volumeFingerprint(volume, axesFor(16, 15, 14, -10.0)),
+              beam::mri::volumeFingerprint(volume, axesFor(16, 15, 14, -9.0)));
+}
+
+TEST(VolumeFingerprint, AnEmptyVolumeHasNoFingerprint) {
+    EXPECT_TRUE(beam::mri::volumeFingerprint(beam::mri::Volume3D{}, axesFor(16, 15, 14)).empty());
+    EXPECT_TRUE(beam::mri::geometryFingerprint(beam::mri::RasAxisVectors{}).empty());
+}
+
+// An unrecorded scan must not be taken as matching anything.
+TEST(VolumeFingerprint, EmptyNeverMatches) {
+    const std::string real = beam::mri::volumeFingerprint(volumeFor(8, 8, 8, 1), axesFor(8, 8, 8));
+    EXPECT_TRUE(beam::mri::fingerprintsMatch(real, real));
+    EXPECT_FALSE(beam::mri::fingerprintsMatch(real, ""));
+    EXPECT_FALSE(beam::mri::fingerprintsMatch("", ""));
+}
+
+// A volume big enough to be strided rather than read whole.
+TEST(VolumeFingerprint, StridedSamplingStillSeparatesVolumes) {
+    const beam::mri::RasAxisVectors axes = axesFor(64, 64, 40);
+    EXPECT_NE(beam::mri::volumeFingerprint(volumeFor(64, 64, 40, 1), axes),
+              beam::mri::volumeFingerprint(volumeFor(64, 64, 40, 2), axes));
 }
