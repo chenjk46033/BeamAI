@@ -1,4 +1,5 @@
 #include "workflow_internal.hpp"
+#include <QWindow>
 
 namespace beam::app {
 
@@ -6,6 +7,25 @@ void WorkflowWindow::resizeEvent(QResizeEvent* event) {
     QMainWindow::resizeEvent(event);
     // Let Qt finish the new layout first.
     QTimer::singleShot(0, this, [this] { mriHeightSyncPasses_ = 0; syncMriViewerHeights(); });
+}
+
+// The window's maximum height is taken from the screen it is on, so moving it
+// to another display leaves a cap from the old one -- which is what pinned it
+// to the laptop's height on a 4K monitor. Qt only has a window handle once the
+// window is shown, so the connection is made here rather than in the ctor.
+void WorkflowWindow::showEvent(QShowEvent* event) {
+    QMainWindow::showEvent(event);
+    if (screenChangeWired_ || windowHandle() == nullptr) return;
+    screenChangeWired_ = true;
+    connect(windowHandle(), &QWindow::screenChanged, this, [this](QScreen*) {
+        // Re-cap first, then let the viewers take the height that frees up.
+        setMaximumHeight(QWIDGETSIZE_MAX);
+        capWindowToScreen();
+        maxStackHeight_ = 0;
+        lastMriSyncWindowSize_ = QSize();
+        mriHeightSyncPasses_ = 0;
+        QTimer::singleShot(0, this, [this] { syncMriViewerHeights(); });
+    });
 }
 
 // Tagging the slider with its axis rather than keeping a list lets any slider carry the

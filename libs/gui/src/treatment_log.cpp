@@ -473,6 +473,7 @@ void TreatmentLog::load(const std::string& path) {
         row.fiducialsMm = text("Fiducials");
         row.lockHorizontal = static_cast<int>(number("LockH", 0));
         row.lockVertical = static_cast<int>(number("LockV", 0));
+        row.sourceProtocol = text("SourceProtocol");
         const std::string fromPlan = text("FromPlan");
         row.fromPlan = fromPlan.empty() || fromPlan == "1" || fromPlan == "true";
         // The first row that names anybody names the file. Rows written before
@@ -523,7 +524,7 @@ void TreatmentLog::save(const std::string& path) const {
             "Transducer1SerialNumber,Transducer2SerialNumber,SoftwareVersion,Region,"
             "HardwareSerialNumber,AttenuationVal,DC,SonicationStartDTM,SonicationEndDTM,Sham,"
             "Protocol,FromPlan,StatusCode,DeviceModel,CalDuty,CalPressure,MRIFile,"
-            "MRIFingerprint,Fiducials,LockH,LockV\n";
+            "MRIFingerprint,Fiducials,LockH,LockV,SourceProtocol\n";
     for (const TreatmentLogRow& row : rows_) {
         file << row.sequence << ',' << quote(row.target) << ','
              << (row.endTimeSeconds - row.startTimeSeconds) << ',' << row.amplitude << ','
@@ -559,7 +560,7 @@ void TreatmentLog::save(const std::string& path) const {
              << quote(row.deviceModel) << ',' << quote(row.calDuty) << ','
              << quote(row.calPressure) << ',' << quote(row.mriFile) << ','
              << quote(row.mriFingerprint) << ',' << quote(row.fiducialsMm) << ','
-             << row.lockHorizontal << ',' << row.lockVertical << '\n';
+             << row.lockHorizontal << ',' << row.lockVertical << ',' << quote(row.sourceProtocol) << '\n';
     }
     if (!file) throw std::runtime_error("failed while writing " + path);
 }

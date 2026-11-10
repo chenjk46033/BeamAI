@@ -89,6 +89,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
@@ -467,6 +468,7 @@ private:
     int gridTargetId_ = -1;
     int nextTargetId_ = 0;
     QSize lastMriSyncWindowSize_;
+    bool screenChangeWired_ = false;
     // The stack height this window can afford, learned before any page has forced the window
     int maxStackHeight_ = 0;
     QSpacerItem* placeholderTailSpacer_ = nullptr;

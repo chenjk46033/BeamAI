@@ -27,6 +27,9 @@ struct TreatmentLogRow {
     // protocol's row number: a visit may skip, repeat or re-order.
     int sequence = 1;
     std::string protocol;
+    // Which protocol "Add Protocol to Plan" copied the row from. Empty for a
+    // row added by hand. Provenance only -- nothing is keyed on it.
+    std::string sourceProtocol;
     // The target actually sonicated.
     std::string target;
     // Where it fired, in RAS millimetres.

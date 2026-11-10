@@ -8,6 +8,11 @@ void WorkflowWindow::recordSonicationStart(const beam::gui_qt::StimParamRow& row
     beam::gui::TreatmentLogRow entry;
     entry.visit = currentVisitNumber();
     entry.protocol = currentProtocolName().toStdString();
+    // Carried from the planned row this replaces, so delivering does not lose
+    // which protocol the sonication came from.
+    for (const beam::gui::TreatmentLogRow& planned :
+         treatmentLog_.rowsFor(entry.protocol, entry.visit))
+        if (planned.sequence == currentSonication_) entry.sourceProtocol = planned.sourceProtocol;
     const QListWidgetItem* item = targetListWidget_ ? targetListWidget_->currentItem() : nullptr;
     entry.target = item != nullptr ? targetListName(item).toStdString() : std::string();
     entry.xMm = row.x;

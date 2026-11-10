@@ -998,3 +998,42 @@ TEST(TreatmentLog, MriProvenanceSurvivesAReload) {
     EXPECT_EQ(back.lockVertical, 2);
     std::remove(path.c_str());
 }
+
+// "Add Protocol to Plan" copies another protocol's rows into the open visit.
+// The row joins that visit's plan, and separately remembers where it came
+// from -- the two were conflated, so every row was labelled with whatever the
+// combo happened to show.
+TEST(TreatmentLog, SourceProtocolSurvivesAWriteAndRead) {
+    beam::gui::TreatmentLog log;
+    beam::gui::TreatmentLogRow row;
+    row.visit = 1;
+    row.sequence = 1;
+    row.protocol = "Default";       // the visit being planned
+    row.sourceProtocol = "PTSD";    // where the row came from
+    row.target = "SCC1";
+    log.record(std::move(row));
+
+    const std::string path = scratch("treatment_log_source_protocol.csv");
+    log.save(path);
+
+    beam::gui::TreatmentLog read;
+    read.load(path);
+    ASSERT_EQ(read.rows().size(), 1u);
+    EXPECT_EQ(read.rows().front().protocol, "Default");
+    EXPECT_EQ(read.rows().front().sourceProtocol, "PTSD");
+    // Addressed by the visit it joined, not by where it came from.
+    EXPECT_EQ(read.rowsFor("Default", 1).size(), 1u);
+    EXPECT_TRUE(read.rowsFor("PTSD", 1).empty());
+}
+
+// A row added by hand has no source protocol, and must not inherit one.
+TEST(TreatmentLog, AHandAddedRowHasNoSourceProtocol) {
+    beam::gui::TreatmentLog log;
+    beam::gui::TreatmentLogRow row;
+    row.visit = 1;
+    row.sequence = 1;
+    row.protocol = "Default";
+    row.target = "SCC1";
+    log.record(std::move(row));
+    EXPECT_TRUE(log.rows().front().sourceProtocol.empty());
+}
