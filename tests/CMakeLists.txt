@@ -17,6 +17,7 @@ add_executable(unit_tests
     infra_dicom_tests.cpp
     registration_tests.cpp
     serialcom_tests.cpp
+    hardware_link_tests.cpp
     sham_tests.cpp
     safety_tests.cpp
     gui_tests.cpp
