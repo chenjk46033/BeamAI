@@ -85,7 +85,7 @@ if(Qt6_FOUND AND TARGET gui_qt)
 
     # New workflow-first application. Its layout is maintained in Qt Designer
     # XML; this remains separate from beam_app while BeamV0 behavior is audited.
-    add_executable(workflow_app
+    add_executable(beam
         workflow_app/main.cpp
         workflow_app/mri_view.cpp
         workflow_app/mri_view.hpp
@@ -131,18 +131,18 @@ if(Qt6_FOUND AND TARGET gui_qt)
         # reference images -- BeamV0.mlapp's own SonicationTab/ExampleTargets.
         ../designer/resources/example_targets.qrc
     )
-    target_include_directories(workflow_app PRIVATE workflow_app)
+    target_include_directories(beam PRIVATE workflow_app)
     # gui_qt + Charts: the Coupling page draws updateAttenuationPlots.m's two RF
     # plots and setAvgTransmissionDataBars.m's bar pair, both already ported there.
-    target_link_libraries(workflow_app PRIVATE gui gui_qt gui_qt_models gui_qt_views mri correction
+    target_link_libraries(beam PRIVATE gui gui_qt gui_qt_models gui_qt_views mri correction
                                                 stimulation sham safety serialcom infra_dicom
                                                 Qt6::Widgets Qt6::Charts)
     if(WIN32)
-        target_link_libraries(workflow_app PRIVATE winmm)
+        target_link_libraries(beam PRIVATE winmm)
     endif()
-    set_target_properties(workflow_app PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
+    set_target_properties(beam PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
         AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../designer")
-    beam_deploy_qt_platform(workflow_app)
+    beam_deploy_qt_platform(beam)
 else()
     message(STATUS "Qt6 not found -- skipping beam_app.")
 endif()

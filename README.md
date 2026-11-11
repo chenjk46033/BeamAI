@@ -2,7 +2,7 @@
 
 C++/Qt port of the MATLAB **BeamV0** focused-ultrasound treatment application.
 
-The application is `workflow_app`: one window that walks a session through its
+The application is `beam`: one window that walks a session through its
 stages — Case Setup, System Check, Imaging, Registration, Coupling, Correction,
 Treatment plan, Safety Review, Treatment, Report. BeamV0 does the same work from
 a single Sonicate tab; the stages here are the same logic re-homed, with firing
@@ -16,7 +16,7 @@ Prerequisites: Visual Studio 2022 (x64), CMake 3.21+, and vcpkg at
 while because Qt is built from the manifest.
 
 **Close any running copy of the app before building.** The linker cannot
-overwrite `workflow_app.exe` while it is open, and the build fails with
+overwrite `beam.exe` while it is open, and the build fails with
 `LNK1168: cannot open ... for writing`.
 
 Configure once:
@@ -28,15 +28,15 @@ cmake --preset ai
 Build and run Release:
 
 ```powershell
-cmake --build build-ai --config Release --target workflow_app
-.\build-ai\apps\Release\workflow_app.exe
+cmake --build build-ai --config Release --target beam
+.\build-ai\apps\Release\beam.exe
 ```
 
 Build and run Debug:
 
 ```powershell
-cmake --build build-ai --config Debug --target workflow_app
-.\build-ai\apps\Debug\workflow_app.exe
+cmake --build build-ai --config Debug --target beam
+.\build-ai\apps\Debug\beam.exe
 ```
 
 Tests — build the `unit_tests` target and run the executable directly
@@ -51,8 +51,8 @@ Same commands in bash (Git Bash), with `--parallel` so `/MP` actually uses the
 machine's cores:
 
 ```bash
-cmake --build build-ai --config Release --parallel --target workflow_app unit_tests
-./build-ai/apps/Release/workflow_app.exe
+cmake --build build-ai --config Release --parallel --target beam unit_tests
+./build-ai/apps/Release/beam.exe
 ./build-ai/tests/Release/unit_tests.exe
 ./build-ai/tests/Release/unit_tests.exe --gtest_filter='TreatmentLog*'
 ```
@@ -168,5 +168,5 @@ Per-phase reasons for everything deferred or excluded are in
 ## The other app
 
 `beam_app` is the earlier single-window port and still builds from this tree
-(`--target beam_app`, `--designer-startup` for its startup screen). `workflow_app`
+(`--target beam_app`, `--designer-startup` for its startup screen). `beam`
 is the one under active development.
